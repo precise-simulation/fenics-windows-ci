@@ -122,7 +122,6 @@ def main() -> int:
         needs = (
             force_all
             or upstream[name] != chan[name]
-            or upstream[name] != rec_ver
             or dirty  # downstream of a rebuilt stage always rebuilds
         )
         if needs and upstream[name] != rec_ver:

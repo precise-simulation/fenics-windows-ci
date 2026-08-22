@@ -70,6 +70,11 @@ and the fastest transport locally; remove for real multi-node jobs):
 set I_MPI_FABRICS=shm
 ```
 
+Note this does **not** suppress the firewall prompt — that is triggered by
+`mpiexec`'s launcher socket (bound to all interfaces), which `I_MPI_FABRICS`
+does not control. Clicking **Allow** once per binary is the only way to stop
+the prompts, and it needs no admin rights.
+
 ## Manual trigger
 
 Actions → *stack* → **Run workflow**

@@ -12,10 +12,37 @@ affected stages **in dependency order** — petsc, then petsc4py, then dolfinx,
 each consuming the previous stage's fresh output — and uploads new `.conda`
 files to the channel.
 
-Install the whole stack:
+## Installation
+
+Packages are published for **Windows 64-bit (`win-64`)** and built against
+**CPython 3.12** — `petsc4py` pins `python 3.12.*`, so the solver resolves
+only with Python 3.12. Other Python versions (3.10, 3.11, 3.13+) are not
+available from this channel.
+
+Prerequisites: any 64-bit Windows conda distribution (Miniforge, Miniconda,
+Anaconda).
+
+Install the whole stack (petsc, petsc4py, fenics-libdolfinx, fenics-dolfinx
+plus Intel MPI, OpenBLAS, HDF5, basix/ffcx/ufl):
 
 ```
 conda create -n fenics -c precise-simulation -c conda-forge python=3.12 fenics-dolfinx
+conda activate fenics
+```
+
+Keep `python=3.12` exactly as shown — it is the only supported version, not
+an example.
+
+Verify:
+
+```
+python -c "import dolfinx, petsc4py; print(dolfinx.__version__, petsc4py.__version__)"
+```
+
+A quick end-to-end check (serial + two MPI ranks):
+
+```
+mpiexec -n 2 python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_WORLD, 8, 8); print('rank', MPI.COMM_WORLD.rank, 'ok')"
 ```
 
 ## Manual trigger

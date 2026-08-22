@@ -58,7 +58,16 @@ foreach ($s in $stages) {
         --variant-config $s.variants `
         --output-dir $output `
         @($channels | ForEach-Object { "-c"; $_ })
-    if ($LASTEXITCODE -ne 0) { throw "rattler-build failed for $($s.name)" }
+    if ($LASTEXITCODE -ne 0) {
+        # surface the deepest configure/make log we can find
+        $clog = Get-ChildItem "$output/bld" -Recurse -Filter "configure.log" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($clog) {
+            Write-Host "===== tail of $($clog.FullName) ====="
+            Get-Content $clog.FullName -Tail 60 | Write-Host
+        }
+        throw "rattler-build failed for $($s.name)"
+    }
 
     Add-NoarchStub $output
 }

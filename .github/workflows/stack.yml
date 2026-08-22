@@ -56,6 +56,17 @@ jobs:
         shell: pwsh
         run: scripts/build-stack.ps1 -PlanFile plan.json
 
+      - name: Collect build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            output/bld/**/work/arch-*/lib/petsc/conf/*.log
+            output/bld/**/work/build/CMakeFiles/CMakeConfigureLog.yaml
+            output/bld/**/*.log
+          if-no-files-found: ignore
+
       - name: Upload to precise-simulation
         if: ${{ inputs.upload != false }}
         shell: pwsh

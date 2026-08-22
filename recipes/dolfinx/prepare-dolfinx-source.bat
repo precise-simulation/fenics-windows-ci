@@ -20,7 +20,7 @@ if not defined SOURCE_ARCHIVE (
   exit /b 1
 )
 
-tar.exe -xzf "%SOURCE_ARCHIVE%" --strip-components=1 ^
+%SystemRoot%\\System32\\tar.exe -xzf "%SOURCE_ARCHIVE%" --strip-components=1 ^
   --exclude="*/cpp/test/vcpkg.json" ^
   --exclude="*/python/COPYING" ^
   --exclude="*/python/COPYING.LESSER" ^

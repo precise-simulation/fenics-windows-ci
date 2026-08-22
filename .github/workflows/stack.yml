@@ -29,15 +29,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install build tooling (rattler-build, anaconda-client)
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force tools | Out-Null
-          $tools = (Resolve-Path tools).Path
-          $ver = "0.74.0"
-          $url = "https://github.com/conda/rattler-build/releases/download/v$ver/rattler-build-$ver-x86_64-pc-windows-msvc.exe"
-          Invoke-WebRequest -Uri $url -OutFile "$tools\rattler-build.exe"
-          pip install --quiet anaconda-client
-          Add-Content $env:GITHUB_PATH $tools
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: ci
+          create-args: >-
+            -c conda-forge
+            rattler-build 0.74.*
+            anaconda-client
+          init-shell: powershell
+          cache-environment: true
+          cache-environment-key: ci-${{ hashFiles('.github/workflows/stack.yml') }}
 
       - name: Decide what to rebuild
         shell: pwsh

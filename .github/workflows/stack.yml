@@ -36,7 +36,6 @@ jobs:
             -c conda-forge
             rattler-build=0.74.*
             anaconda-client
-          init-shell: powershell
           cache-environment: true
           cache-environment-key: ci-${{ hashFiles('.github/workflows/stack.yml') }}
 

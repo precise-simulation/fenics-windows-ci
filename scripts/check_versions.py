@@ -98,9 +98,7 @@ def bump_build_number(name: str) -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    args = ap.parse_args()
-    force_all = force_all or os.environ.get("FORCE_ALL", "").lower() in ("true", "1")
+    force_all = os.environ.get("FORCE_ALL", "").lower() in ("true", "1")
 
     chan = channel_versions()
     upstream = {name: upstream_version(name) for name in ORDER}

@@ -34,7 +34,7 @@ jobs:
           environment-name: ci
           create-args: >-
             -c conda-forge
-            rattler-build 0.74.*
+            rattler-build=0.74.*
             anaconda-client
           init-shell: powershell
           cache-environment: true

@@ -1,0 +1,16 @@
+mpi:
+  - mpich
+  - openmpi
+  - impi  # [win]
+
+is_abi3:
+  - false  # [win]
+
+scalar:
+  - real
+  - complex
+
+device:
+  - host
+  - cuda12  # [linux and not ppc64le]
+  - cuda13  # [linux and not ppc64le]

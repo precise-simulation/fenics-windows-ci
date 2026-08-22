@@ -1,0 +1,51 @@
+setlocal EnableDelayedExpansion
+@echo on
+
+call "%RECIPE_DIR%\prepare-dolfinx-source.bat"
+if errorlevel 1 exit 1
+
+set "CXXFLAGS=%CXXFLAGS% -DH5_BUILT_AS_DYNAMIC_LIB"
+set "PETSC_DIR=%LIBRARY_PREFIX%"
+set "PKG_CONFIG_PATH=%LIBRARY_PREFIX%\lib\pkgconfig;%PKG_CONFIG_PATH%"
+set "PATH=%LIBRARY_PREFIX%\bin;%PATH%"
+
+cmake ^
+  -G Ninja ^
+  %CMAKE_ARGS% ^
+  -D CMAKE_TOOLCHAIN_FILE=%RECIPE_DIR%\impi-toolchain.cmake ^
+  -D HDF5_FIND_DEBUG=ON ^
+  -D HDF5_NO_FIND_PACKAGE_CONFIG_FILE=ON ^
+  -D HDF5_ROOT=%LIBRARY_PREFIX% ^
+  -D DOLFINX_BASIX_PYTHON=OFF ^
+  -D DOLFINX_UFCX_PYTHON=OFF ^
+  -D DOLFINX_ENABLE_SCOTCH=ON ^
+  -D DOLFINX_ENABLE_ADIOS2=OFF ^
+  -D DOLFINX_ENABLE_KAHIP=OFF ^
+  -D DOLFINX_ENABLE_PETSC=ON ^
+  -D DOLFINX_ENABLE_SLEPC=OFF ^
+  -D DOLFINX_ENABLE_PARMETIS=OFF ^
+  -D DOLFINX_ENABLE_SUPERLU_DIST=OFF ^
+  -B build ^
+  cpp
+if errorlevel 1 (
+  dir build
+  dir build\CMakeFiles
+  type build\CMakeFiles\CMakeConfigureLog.yaml
+  exit 1
+)
+
+cmake --build build --parallel "%CPU_COUNT%" --verbose
+if errorlevel 1 (
+  dir build
+  dir build\CMakeFiles
+  type build\CMakeFiles\CMakeError.log
+  exit 1
+)
+
+cmake --install build
+if errorlevel 1 exit 1
+
+:: pkgconfig gets mixed-up path separators, which rattler-build doesn't tolerate
+:: it's unused so drop it
+type %LIBRARY_PREFIX%\lib\pkgconfig\dolfinx.pc
+del %LIBRARY_PREFIX%\lib\pkgconfig\dolfinx.pc

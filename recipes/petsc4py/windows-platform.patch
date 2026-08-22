@@ -1,0 +1,12 @@
+diff --git a/setup.py b/setup.py
+index 5a897e7..714395c 100644
+--- a/setup.py
++++ b/setup.py
+@@ -92,6 +92,7 @@ MPI
+ """.strip().split('\n')
+ 
+ platforms = """
++Windows
+ POSIX
+ Linux
+ macOS

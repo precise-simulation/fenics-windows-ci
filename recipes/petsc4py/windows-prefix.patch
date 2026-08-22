@@ -1,0 +1,18 @@
+--- a/conf/confpetsc.py
++++ b/conf/confpetsc.py
+@@ -287,9 +287,13 @@ class PetscConfig:
+         with open(variables) as f:
+             contents = f.read()
+         with open(petscvariables) as f:
+             contents += f.read()
+         #
+-        confstr = 'PETSC_DIR  = %s\n' % PETSC_DIR
++        confstr = 'PREFIX     = %s\n' % os.path.dirname(PETSC_DIR)
++        confstr += 'PETSC_DIR  = %s\n' % PETSC_DIR
+         confstr += 'PETSC_ARCH = %s\n' % PETSC_ARCH
+         confstr += contents
+-        return makefile(StringIO(confstr))
++        config = makefile(StringIO(confstr))
++        if sys.platform == 'win32':
++            config['PETSC_LIB_BASIC'] = config['PETSC_LIB_BASIC'].replace('-lpetsc', '-llibpetsc -limpi')
++        return config

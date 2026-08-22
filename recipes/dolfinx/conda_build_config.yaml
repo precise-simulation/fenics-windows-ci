@@ -1,0 +1,13 @@
+nanobind_abi:
+  - 19
+nanobind:
+  - "2.12"
+
+mpi:
+  - mpich  # [not win]
+  - openmpi  # [not win]
+  - impi  # [win]
+
+scalar:
+  - real
+  - complex  # [not win]

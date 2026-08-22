@@ -1,0 +1,163 @@
+context:
+  name: petsc4py
+  version: "3.25.4"
+  build: 0
+  version_xy: ${{ (version | split('.'))[:2] | join('.') }}
+  python_min: ${{ python_min | default("3.10") }}
+  abi3_tag: cp${{ python_min | split(".") | join("") }}
+  build_abi3: ${{ is_abi3 and match(python, ">=" + python_min) }}
+
+package:
+  name: petsc4py
+  version: ${{ version }}
+
+source:
+  url: https://pypi.org/packages/source/${{ name[0] }}/${{ name }}/${{ name }}-${{ version }}.tar.gz
+  sha256: 731e49951218bd49db2964876fa6c6bef6038c085a58b4c38a946660a33c82aa
+  patches:
+    - windows-prefix.patch  # [win]
+    - windows-platform.patch  # [win]
+
+build:
+  number: ${{ build }}
+  skip: >-
+    ${{
+      (win and (is_abi3 or not match(python, "3.12.*") or mpi != "impi"
+                or scalar != "real" or device != "host"))
+      or (is_abi3 and not match(python, python_min + ".*"))
+    }}
+  python:
+    version_independent: ${{ build_abi3 }}
+  script:
+    file: ${{ "build_win.bat" if win else "build.sh" }}
+    env:
+      PETSC_DIR: ${{ "$LIBRARY_PREFIX" if win else "$PREFIX" }}
+      PETSC4PY_BUILD_PYSABI: ${{ "" if win else abi3_tag }}
+
+requirements:
+  build:
+    - ${{ compiler('c') }}
+    - ${{ stdlib("c") }}
+    - if: not win
+      then:
+        - ${{ compiler('fortran') }}
+    - if: build_platform != target_platform
+      then:
+        - python
+        - cython
+        - cross-python_${{ target_platform }}
+        - numpy
+        - if: mpi == 'openmpi'
+          then:
+            - ${{ mpi }}
+  host:
+    - python
+    - if: build_abi3
+      then: python-abi3
+    - cython
+    - pip
+    - setuptools
+    - numpy
+    - if: win
+      then:
+        - impi-devel
+        - petsc ==${{ version }} ${{ scalar }}_*
+    - if: not win
+      then:
+        - ${{ mpi }}
+        - if: device == 'host'
+          then:
+            - petsc ${{ version_xy }}.* ${{ scalar }}_*
+          else:
+            - petsc ${{ version_xy }}.* ${{ device }}_${{ scalar }}_*
+  run:
+    - if: win
+      then:
+        - python 3.12.* *_cpython
+        - impi_rt
+    - if: not win
+      then:
+        - python
+  run_constraints:
+    - mpi4py >=3.0.1
+
+tests:
+  - if: device == 'host'
+    then:
+      - if: not win
+        then:
+          - python:
+              pip_check: true
+              imports:
+                - petsc4py
+                - petsc4py.PETSc
+
+          - script:
+              file: run_test
+            files:
+              source:
+                - test/test_mat_schur.py
+
+      - if: win
+        then:
+          - script:
+              file: run_test.bat
+            files:
+              recipe:
+                - tests/test_windows_ksp.py
+            requirements:
+              run:
+                - pip
+                - python 3.12.* *_cpython
+                - ${{ compiler('c') }}
+
+      - if: is_abi3
+        then:
+          - script:
+              # verify abi3 against 3.11 instead of 3.10
+              # PyObject_GetBuffer for 3.10 is abi-compatible with 3.11,
+              # but not part of the 3.10 stable ABI
+              - abi3audit $PREFIX/lib/python3.13/site-packages/petsc4py/lib/*.so -s -v --assume-minimum-abi3 3.11
+            requirements:
+              run:
+                - python 3.13.*
+                - abi3audit
+
+          # for abi3, run tests against more Pythons
+          - script:
+              file: run_test
+            files:
+              source:
+                - test/test_mat_schur.py
+            requirements:
+              run:
+                - python ${{ python_min }}.*
+
+          - script:
+              file: run_test
+            files:
+              source:
+                - test/test_mat_schur.py
+            requirements:
+              run:
+                - python 3.13.*
+    else:
+      # cuda builds are ~untestable
+      # because petsc 3.25 links libnvidia-ml, a driver library
+      - python:
+          pip_check: true
+
+
+about:
+  summary: Python bindings for PETSc
+  license: BSD-2-Clause
+  license_file: LICENSE.rst
+  homepage: https://petsc.org/release/petsc4py/
+
+extra:
+  recipe-maintainers:
+    - dalcinl
+    - minrk
+    - davidbrochart
+    - SylvainCorlay
+    - stefanozampini

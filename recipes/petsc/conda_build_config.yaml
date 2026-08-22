@@ -1,0 +1,13 @@
+mpi:
+  - mpich  # [not win]
+  - openmpi  # [not win]
+  - impi  # [win]
+
+scalar:
+  - real
+  - complex  # [not win]
+
+# hdf5-feedstock pins impi_devel 2021.17 on win; align so the whole MPI chain
+# (petsc + hdf5 + ptscotch) solves against one impi_rt.
+impi_devel:
+  - "2021.17.0"  # [win]

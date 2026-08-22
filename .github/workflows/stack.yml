@@ -76,8 +76,12 @@ jobs:
         if: ${{ inputs.upload != false }}
         shell: pwsh
         run: |
+          if (-not (Test-Path "output/win-64")) {
+            Write-Host "Nothing to upload - no stages were rebuilt."
+          } else {
           Get-ChildItem output/win-64 -Filter *.conda | ForEach-Object {
             Write-Host "== uploading $($_.Name) =="
             anaconda upload --force --user precise-simulation $_.FullName
             if ($LASTEXITCODE -ne 0) { throw "upload failed: $($_.Name)" }
+          }
           }

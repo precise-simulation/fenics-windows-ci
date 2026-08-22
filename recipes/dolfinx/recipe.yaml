@@ -252,7 +252,8 @@ outputs:
             - python/test/
         requirements:
           run:
-            - python ${{ "3.12.*" if win else ("3.13.*" if build_abi3 else "") }}
+            # abi3: exercise the package on a newer interpreter than it was built against
+            - python ${{ "3.13.*" if (win or build_abi3) else "" }}
             - pip
             - pytest >=6
             - if: win

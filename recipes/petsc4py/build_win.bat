@@ -3,7 +3,6 @@ setlocal EnableExtensions
 
 set "PETSC_DIR=%PREFIX%\Library"
 set "PATH=%PREFIX%\Library\bin;%PATH%"
-set "PETSC4PY_BUILD_PYSABI="
 set "CL=/Zc:preprocessor"
 
 "%PYTHON%" conf/cythonize.py

@@ -1,9 +1,9 @@
 context:
   name: petsc4py
   version: "3.25.4"
-  build: 0
+  build: 2
   version_xy: ${{ (version | split('.'))[:2] | join('.') }}
-  python_min: ${{ python_min | default("3.10") }}
+  python_min: ${{ python_min | default("3.12") }}
   abi3_tag: cp${{ python_min | split(".") | join("") }}
   build_abi3: ${{ is_abi3 and match(python, ">=" + python_min) }}
 
@@ -22,7 +22,7 @@ build:
   number: ${{ build }}
   skip: >-
     ${{
-      (win and (is_abi3 or not match(python, "3.12.*") or mpi != "impi"
+      (win and (not match(python, "3.12.*") or mpi != "impi"
                 or scalar != "real" or device != "host"))
       or (is_abi3 and not match(python, python_min + ".*"))
     }}
@@ -32,7 +32,7 @@ build:
     file: ${{ "build_win.bat" if win else "build.sh" }}
     env:
       PETSC_DIR: ${{ "$LIBRARY_PREFIX" if win else "$PREFIX" }}
-      PETSC4PY_BUILD_PYSABI: ${{ "" if win else abi3_tag }}
+      PETSC4PY_BUILD_PYSABI: ${{ abi3_tag }}
 
 requirements:
   build:
@@ -73,7 +73,7 @@ requirements:
   run:
     - if: win
       then:
-        - python 3.12.* *_cpython
+        - python
         - impi_rt
     - if: not win
       then:
@@ -108,10 +108,12 @@ tests:
             requirements:
               run:
                 - pip
-                - python 3.12.* *_cpython
+                # abi3: exercise the package on a newer interpreter than it was built against
+                - python 3.13.*
                 - ${{ compiler('c') }}
 
-      - if: is_abi3
+      # unix-only: .so paths + run_test.sh (rattler invokes .sh on win)
+      - if: is_abi3 and not win
         then:
           - script:
               # verify abi3 against 3.11 instead of 3.10

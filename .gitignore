@@ -4,3 +4,4 @@ plan.stderr
 tools/
 __pycache__/
 
+output-smoke/

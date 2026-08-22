@@ -14,10 +14,9 @@ files to the channel.
 
 ## Installation
 
-Packages are published for **Windows 64-bit (`win-64`)** and built against
-**CPython 3.12** — `petsc4py` pins `python 3.12.*`, so the solver resolves
-only with Python 3.12. Other Python versions (3.10, 3.11, 3.13+) are not
-available from this channel.
+Packages are published for **Windows 64-bit (`win-64`)** as stable-ABI (abi3,
+`cp312`) builds — one binary serves **CPython 3.12, 3.13 and 3.14**. Python
+3.11 and older are not supported (nanobind's stable ABI requires ≥ 3.12).
 
 Prerequisites: any 64-bit Windows conda distribution (Miniforge, Miniconda,
 Anaconda).
@@ -26,12 +25,11 @@ Install the whole stack (petsc, petsc4py, fenics-libdolfinx, fenics-dolfinx
 plus Intel MPI, OpenBLAS, HDF5, basix/ffcx/ufl):
 
 ```
-conda create -n fenics -c precise-simulation -c conda-forge python=3.12 fenics-dolfinx
+conda create -n fenics -c precise-simulation -c conda-forge "python=3.12|3.13|3.14" fenics-dolfinx
 conda activate fenics
 ```
 
-Keep `python=3.12` exactly as shown — it is the only supported version, not
-an example.
+Pick any of the three Python versions; 3.12 is the safest default.
 
 Verify:
 
@@ -90,5 +88,8 @@ Actions → *stack* → **Run workflow**
   packages, no system Cygwin involved.
 - First-ever two-rank MPI run on a machine can hit an FFCx JIT cache race;
   run one serial solve first if you see a crash in rank 1.
+- Two-rank MPI runs can also exit non-zero *after* completing successfully
+  (heap-corruption report at interpreter teardown). The work itself is fine —
+  check rank output, not just the exit code. Affects all stack versions.
 - This channel is interim: packages retire as the corresponding
   conda-forge feedstock PRs land.

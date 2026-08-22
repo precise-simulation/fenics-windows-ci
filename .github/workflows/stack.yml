@@ -74,6 +74,6 @@ jobs:
         run: |
           Get-ChildItem output/win-64 -Filter *.conda | ForEach-Object {
             Write-Host "== uploading $($_.Name) =="
-            anaconda upload --user precise-simulation $_.FullName
+            anaconda upload --force --user precise-simulation $_.FullName
             if ($LASTEXITCODE -ne 0) { throw "upload failed: $($_.Name)" }
           }

@@ -25,11 +25,12 @@ Install the whole stack (petsc, petsc4py, fenics-libdolfinx, fenics-dolfinx
 plus Intel MPI, OpenBLAS, HDF5, basix/ffcx/ufl):
 
 ```
-conda create -n fenics -c precise-simulation -c conda-forge "python=3.12|3.13|3.14" fenics-dolfinx
+conda create -n fenics -c precise-simulation -c conda-forge python=3.13 fenics-dolfinx
 conda activate fenics
 ```
 
-Pick any of the three Python versions; 3.12 is the safest default.
+Any of `python=3.12`, `python=3.13` or `python=3.14` works; omitting the pin
+lets the solver pick the newest supported interpreter.
 
 Verify:
 

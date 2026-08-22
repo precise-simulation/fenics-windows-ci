@@ -26,10 +26,10 @@ jobs:
       ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
       FORCE_ALL: ${{ inputs.force_all }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build tooling (rattler-build, anaconda-client)
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@v3
         with:
           environment-name: ci
           create-args: >-

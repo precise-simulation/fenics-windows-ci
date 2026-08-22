@@ -11,6 +11,19 @@ $root = $PSScriptRoot | Split-Path
 $output = Join-Path $root "output"
 Remove-Item $output -Recurse -Force -ErrorAction SilentlyContinue
 
+# Locate the micromamba ci env wherever setup-micromamba put it
+$rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs" -Recurse -Filter rattler-build.exe `
+    -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+if (-not $rattler) { throw "rattler-build.exe not found under $env:MAMBA_ROOT_PREFIX/envs" }
+$envBin = Split-Path $rattler
+$envPrefix = Split-Path $envBin
+Write-Host "ci env prefix: $envPrefix"
+$env:PATH = "$envPrefix;$envBin;$envPrefix/Library/bin;$envPrefix/Scripts;$env:PATH"
+if ($env:GITHUB_PATH) {
+    Add-Content $env:GITHUB_PATH $envPrefix
+    Add-Content $env:GITHUB_PATH "$envPrefix/Scripts"
+}
+
 # rattler-build's output dir doubles as a channel for downstream stages;
 # it only writes win-64/, so give solvers an empty noarch too.
 function Add-NoarchStub {

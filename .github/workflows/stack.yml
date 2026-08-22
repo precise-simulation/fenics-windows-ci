@@ -39,6 +39,13 @@ jobs:
           cache-environment: true
           cache-environment-key: ci-${{ hashFiles('.github/workflows/stack.yml') }}
 
+      - name: Put ci env on PATH
+        shell: pwsh
+        run: |
+          "$env:MAMBA_ROOT_PREFIX/envs/ci" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/ci/Library/bin" >> $env:GITHUB_PATH
+          "$env:MAMMA_ROOT_PREFIX/envs/ci/Scripts" >> $env:GITHUB_PATH
+
       - name: Decide what to rebuild
         shell: pwsh
         run: |

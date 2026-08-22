@@ -26,7 +26,11 @@ ORDER = ["petsc", "petsc4py", "dolfinx"]
 
 
 def http_json(url: str):
-    req = urllib.request.Request(url, headers={"User-Agent": "fenics-windows-ci"})
+    headers = {"User-Agent": "fenics-windows-ci"}
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token and "api.github.com" in url:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r)
 

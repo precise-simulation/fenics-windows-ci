@@ -25,6 +25,7 @@ jobs:
     env:
       ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
       FORCE_ALL: ${{ inputs.force_all }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
 

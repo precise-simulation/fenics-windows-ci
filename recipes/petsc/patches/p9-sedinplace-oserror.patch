@@ -1,13 +1,18 @@
 diff --git a/config/BuildSystem/config/programs.py b/config/BuildSystem/config/programs.py
-index b706ab6..e375a02 100644
+index b706ab6..2d59a32 100644
 --- a/config/BuildSystem/config/programs.py
 +++ b/config/BuildSystem/config/programs.py
-@@ -92,6 +92,8 @@ AC_OUTPUT
+@@ -92,7 +92,12 @@ AC_OUTPUT
          break
        except RuntimeError:
          self.logPrint('Rejected SEDINPLACE cmd: '+sedcmd)
+-    os.unlink(sed1)
 +      except OSError as e:
 +        self.logPrint('Rejected SEDINPLACE cmd (OSError): '+str(e))
-     os.unlink(sed1)
++    try:
++      os.unlink(sed1)
++    except OSError:
++      pass
      if not status:
          self.logPrint('No suitable SEDINPLACE found')
+         self.addMakeMacro('SEDINPLACE','SEDINPLACE_NOT_FOUND')

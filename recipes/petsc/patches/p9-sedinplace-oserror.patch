@@ -1,8 +1,16 @@
 diff --git a/config/BuildSystem/config/programs.py b/config/BuildSystem/config/programs.py
-index b706ab6..2d59a32 100644
+index b706ab6..b526ab2 100644
 --- a/config/BuildSystem/config/programs.py
 +++ b/config/BuildSystem/config/programs.py
-@@ -92,7 +92,12 @@ AC_OUTPUT
+@@ -83,6 +83,7 @@ AC_OUTPUT
+     f = open(sed1, 'w')
+     f.write('sed\n')
+     f.close()
++    status = 0
+     for sedcmd in [self.sed+' -i',self.sed+' -i ""','perl -pi -e']:
+       try:
+         (out,err,status) = Configure.executeShellCommand('%s s/sed/sd/g "%s"'%(sedcmd,sed1), log = self.log)
+@@ -92,7 +93,12 @@ AC_OUTPUT
          break
        except RuntimeError:
          self.logPrint('Rejected SEDINPLACE cmd: '+sedcmd)

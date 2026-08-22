@@ -45,6 +45,31 @@ A quick end-to-end check (serial + two MPI ranks):
 mpiexec -n 2 python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_WORLD, 8, 8); print('rank', MPI.COMM_WORLD.rank, 'ok')"
 ```
 
+### Windows Firewall prompt
+
+The first `mpiexec` run can trigger a Windows Firewall prompt for
+`mpiexec.exe` / `hydra_pmi_proxy.exe`. **Click Allow** — while the prompt is
+unanswered, Windows silently drops the launcher's connections and ranks die
+at startup, which looks like a crashed job. Dismissing the prompt is worse:
+Windows then writes a permanent *Block* rule and every later run fails until
+that rule is deleted.
+
+To pre-approve and never see the prompt (admin, once per env — rules are
+keyed to the full exe path, so repeat per conda env):
+
+```bat
+netsh advfirewall firewall add rule name="Intel MPI mpiexec"   dir=in action=allow program="%CONDA_PREFIX%\Library\bin\mpiexec.exe"          remoteip=127.0.0.1,localsubnet profile=any
+netsh advfirewall firewall add rule name="Intel MPI hydra pmi" dir=in action=allow program="%CONDA_PREFIX%\Library\bin\hydra_pmi_proxy.exe"    remoteip=127.0.0.1,localsubnet profile=any
+netsh advfirewall firewall add rule name="Intel MPI hydra bst" dir=in action=allow program="%CONDA_PREFIX%\Library\bin\hydra_bstrap_proxy.exe" remoteip=127.0.0.1,localsubnet profile=any
+```
+
+Single-machine runs can additionally pin MPI to shared memory (no NIC access,
+and the fastest transport locally; remove for real multi-node jobs):
+
+```bat
+set I_MPI_FABRICS=shm
+```
+
 ## Manual trigger
 
 Actions → *stack* → **Run workflow**

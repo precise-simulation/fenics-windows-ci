@@ -49,10 +49,12 @@ def upstream_version(name: str) -> str:
 
 
 def channel_versions() -> dict[str, str | None]:
+    # anaconda.org package names differ from our stage names for dolfinx
+    channel_pkg = {"petsc": "petsc", "petsc4py": "petsc4py", "dolfinx": "fenics-dolfinx"}
     out = {}
     for name in ORDER:
         try:
-            data = http_json(f"https://api.anaconda.org/package/{CHANNEL_USER}/{name}")
+            data = http_json(f"https://api.anaconda.org/package/{CHANNEL_USER}/{channel_pkg[name]}")
             out[name] = max(data["versions"], key=lambda v: [int(p) for p in re.findall(r"\d+", v)[:3]])
         except Exception:
             out[name] = None
@@ -110,7 +112,7 @@ def main() -> int:
     for name in ORDER:
         rec_ver, _ = read_recipe(name)
         needs = (
-            args.force_all
+            force_all
             or upstream[name] != chan[name]
             or upstream[name] != rec_ver
             or dirty  # downstream of a rebuilt stage always rebuilds

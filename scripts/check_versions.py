@@ -48,6 +48,14 @@ def upstream_version(name: str) -> str:
     return tag.lstrip("v")
 
 
+def vkey(v: str):
+    """Sort key that understands 0.11.0 < 0.11.0.post0."""
+    key = []
+    for tok in re.findall(r"\d+|[a-z]+", v):
+        key.append((1, int(tok), "") if tok.isdigit() else (0, 0, tok))
+    return key
+
+
 def channel_versions() -> dict[str, str | None]:
     # anaconda.org package names differ from our stage names for dolfinx
     channel_pkg = {"petsc": "petsc", "petsc4py": "petsc4py", "dolfinx": "fenics-dolfinx"}
@@ -55,7 +63,7 @@ def channel_versions() -> dict[str, str | None]:
     for name in ORDER:
         try:
             data = http_json(f"https://api.anaconda.org/package/{CHANNEL_USER}/{channel_pkg[name]}")
-            out[name] = max(data["versions"], key=lambda v: [int(p) for p in re.findall(r"\d+", v)[:3]])
+            out[name] = max(data["versions"], key=vkey)
         except Exception:
             out[name] = None
     return out

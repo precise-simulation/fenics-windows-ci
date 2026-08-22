@@ -36,9 +36,9 @@ function Add-NoarchStub {
 $plan = (Get-Content $PlanFile | ConvertFrom-Json)
 
 $stages = @(
-    @{ name = "petsc";     recipe = "$root/recipes/petsc/recipe.yaml" },
-    @{ name = "petsc4py";  recipe = "$root/recipes/petsc4py/recipe.yaml" },
-    @{ name = "dolfinx";   recipe = "$root/recipes/dolfinx/recipe.yaml" }
+    @{ name = "petsc";     recipe = "$root/recipes/petsc/recipe.yaml";     variants = "$root/recipes/petsc/variants-win64.yaml" },
+    @{ name = "petsc4py";  recipe = "$root/recipes/petsc4py/recipe.yaml";  variants = "$root/recipes/petsc4py/variants-win64.yaml" },
+    @{ name = "dolfinx";   recipe = "$root/recipes/dolfinx/recipe.yaml";   variants = "$root/recipes/dolfinx/variants-win64.yaml" }
 )
 
 foreach ($s in $stages) {
@@ -55,6 +55,7 @@ foreach ($s in $stages) {
 
     & rattler-build build `
         --recipe $s.recipe `
+        --variant-config $s.variants `
         --output-dir $output `
         @($channels | ForEach-Object { "-c"; $_ })
     if ($LASTEXITCODE -ne 0) { throw "rattler-build failed for $($s.name)" }

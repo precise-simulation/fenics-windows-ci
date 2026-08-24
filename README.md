@@ -57,6 +57,13 @@ shared-memory transport between processes on one machine is selected
 automatically anyway. If an older guide told you to set it, clear it with
 `set I_MPI_FABRICS=`.
 
+A FEniCS test script can be found in `scripts\test-poisson.py`, run:
+
+```python
+python test-poisson.py  # serial
+mpiexec -n 2 python test-poisson.py  # 2 processes
+```
+
 ### Silencing activation output
 
 Activating an environment prints a page of Visual Studio toolchain probing

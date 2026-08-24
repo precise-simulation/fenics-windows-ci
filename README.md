@@ -52,6 +52,21 @@ set I_MPI_FABRICS=shm
 mpiexec -localonly -n 2 python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_WORLD, 8, 8); print('rank', MPI.COMM_WORLD.rank, 'ok')"
 ```
 
+### Silencing activation output
+
+Activating an environment prints a page of Visual Studio toolchain probing
+(`vs2022_compiler_vars.bat` echoes its SDK/compiler detection and the vcvars
+banner). This is harmless but noisy. To suppress it:
+
+```bat
+powershell -ExecutionPolicy Bypass -File scripts\quiet-vs-activation.ps1 -Env fenics-windows
+```
+
+The script patches one package-owned file inside the environment, so rerun it
+after any `conda update`, reinstall, or recreation of the environment. It is
+idempotent and only affects console output during activation — compiler setup
+is unchanged.
+
 ### Windows Firewall and MPI
 
 Serial DOLFINx use does not start `mpiexec` and needs no firewall exception.

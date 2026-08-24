@@ -54,7 +54,9 @@ requirements:
     - python
     - if: build_abi3
       then: python-abi3
-    - cython
+    # ponytail: cython 3.3 (2026-08-22) breaks petsc4py 3.25.4 cythonize
+    # ("Invalid index type 'int'", PC.pyx); unpin when petsc4py fixes it
+    - cython <3.3
     - pip
     - setuptools
     - numpy

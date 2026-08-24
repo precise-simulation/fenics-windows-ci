@@ -1,9 +1,7 @@
-# Build (and optionally upload) the win-64 fenics stack in dependency order.
-# Assumes: rattler-build + anaconda-client on PATH, plan.json in CWD,
-#          ANACONDA_API_TOKEN in the environment when -Upload is set.
+# Build the win-64 fenics stack in dependency order.
+# Assumes: rattler-build on PATH and plan.json in CWD.
 param(
-    [string]$PlanFile = "plan.json",
-    [switch]$Upload
+    [string]$PlanFile = "plan.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,14 +68,6 @@ foreach ($s in $stages) {
     }
 
     Add-NoarchStub $output
-}
-
-if ($Upload) {
-    foreach ($f in (Get-ChildItem "$output/win-64" -Filter *.conda)) {
-        Write-Host "== uploading $($f.Name) =="
-        & anaconda upload --user precise-simulation $f.FullName
-        if ($LASTEXITCODE -ne 0) { throw "upload failed for $($f.Name)" }
-    }
 }
 
 Write-Host "== stack build complete =="

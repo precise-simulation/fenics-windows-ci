@@ -28,11 +28,9 @@ if errorlevel 1 (
 cmake --build build-test --verbose
 if errorlevel 1 exit 1
 
-:: FIXME: proceed past ctest errors in case there are more
-
 cd build-test
 ctest -V --output-on-failure -R unittests
-:: if errorlevel 1 exit 1
+if errorlevel 1 exit /b 1
 cd ..
 
 cmake %CMAKE_ARGS% ^

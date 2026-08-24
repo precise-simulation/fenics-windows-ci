@@ -33,47 +33,49 @@ conda install -c precise-simulation -c conda-forge "libblas=*=*openblas" fenics-
 Any of `python=3.12`, `python=3.13` or `python=3.14` works; omitting the pin
 lets the solver pick the newest supported interpreter.
 
-Verify:
+Verify imports:
 
 ```bat
 python -c "import dolfinx, petsc4py; print(dolfinx.__version__, petsc4py.__version__)"
 ```
 
-A quick end-to-end check (serial + two MPI ranks):
+A serial end-to-end check (no MPI launcher or firewall prompt):
 
 ```bat
-mpiexec -n 2 python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_WORLD, 8, 8); print('rank', MPI.COMM_WORLD.rank, 'ok')"
+python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_SELF, 8, 8); print('serial ok')"
 ```
 
-### Windows Firewall prompt
+Optional two-rank check:
 
-The first `mpiexec` run can trigger a Windows Firewall prompt for
-`mpiexec.exe` / `hydra_pmi_proxy.exe`. **Click Allow** — while the prompt is
-unanswered, Windows silently drops the launcher's connections and ranks die
-at startup, which looks like a crashed job. Dismissing the prompt is worse:
-Windows then writes a permanent *Block* rule and every later run fails until
-that rule is deleted.
+```bat
+set I_MPI_FABRICS=shm
+mpiexec -localonly -n 2 python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_WORLD, 8, 8); print('rank', MPI.COMM_WORLD.rank, 'ok')"
+```
 
-To pre-approve and never see the prompt (admin, once per env — rules are
-keyed to the full exe path, so repeat per conda env):
+### Windows Firewall and MPI
+
+Serial DOLFINx use does not start `mpiexec` and needs no firewall exception.
+
+Multi-process runs use Intel MPI's Hydra launcher and can trigger a Windows
+Firewall prompt for `mpiexec.exe` or a Hydra proxy. `-localonly` keeps process
+launching on the local machine and `I_MPI_FABRICS=shm` uses shared-memory data
+transport, but neither setting guarantees that the launcher will avoid the
+firewall prompt.
+
+A standard non-administrator user cannot create a permanent Windows Firewall
+allow rule. If such a user receives the prompt, Windows can create block rules
+regardless of the selected response. Users who do not need multi-process MPI
+can use DOLFINx serially without administrator access or firewall prompts.
+
+For multi-process MPI, an administrator or IT deployment can pre-create the
+rules below. Run these commands from an elevated prompt. Rules are keyed to
+the full executable path, so repeat them for each conda environment:
 
 ```bat
 netsh advfirewall firewall add rule name="Intel MPI mpiexec"   dir=in action=allow program="%CONDA_PREFIX%\Library\bin\mpiexec.exe"          remoteip=127.0.0.1,localsubnet profile=any
 netsh advfirewall firewall add rule name="Intel MPI hydra pmi" dir=in action=allow program="%CONDA_PREFIX%\Library\bin\hydra_pmi_proxy.exe"    remoteip=127.0.0.1,localsubnet profile=any
 netsh advfirewall firewall add rule name="Intel MPI hydra bst" dir=in action=allow program="%CONDA_PREFIX%\Library\bin\hydra_bstrap_proxy.exe" remoteip=127.0.0.1,localsubnet profile=any
 ```
-
-Single-machine runs can additionally pin MPI to shared memory (no NIC access,
-and the fastest transport locally; remove for real multi-node jobs):
-
-```bat
-set I_MPI_FABRICS=shm
-```
-
-Note this does **not** suppress the firewall prompt — that is triggered by
-`mpiexec`'s launcher socket (bound to all interfaces), which `I_MPI_FABRICS`
-does not control. Clicking **Allow** once per binary is the only way to stop
-the prompts, and it needs no admin rights.
 
 ## Manual trigger
 

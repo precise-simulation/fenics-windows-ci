@@ -17,10 +17,16 @@ python tests\test_windows_petsc.py
 if errorlevel 1 exit 1
 
 set "PETSC_TEST_OUTPUT=%TEMP%\dolfinx-stage9-petsc-%RANDOM%.txt"
-mpiexec.exe -localonly -n 2 -env PATH "%MPI_TEST_PATH%" -env PYTHONPATH "%MPI_PYTHONPATH%" "%PYTHON%" tests\test_windows_petsc.py > "%PETSC_TEST_OUTPUT%" 2>&1
-if errorlevel 1 exit 1
-findstr /i /c:"STAGE 9 PETSC PASS" "%PETSC_TEST_OUTPUT%" >nul
-if errorlevel 1 exit 1
+for /L %%N in (1,1,10) do (
+  echo == MPI stability attempt %%N/10 ==
+  mpiexec.exe -localonly -n 2 -env PATH "%MPI_TEST_PATH%" -env PYTHONPATH "%MPI_PYTHONPATH%" "%PYTHON%" tests\test_windows_petsc.py > "%PETSC_TEST_OUTPUT%" 2>&1
+  if errorlevel 1 (
+    type "%PETSC_TEST_OUTPUT%"
+    exit /b 1
+  )
+  findstr /i /c:"STAGE 9 PETSC PASS" "%PETSC_TEST_OUTPUT%" >nul
+  if errorlevel 1 exit /b 1
+)
 
 :: exercise a demo
 cd python/demo

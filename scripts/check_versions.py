@@ -18,6 +18,7 @@ import os
 import pathlib
 import re
 import sys
+import urllib.error
 import urllib.request
 
 CHANNEL_USER = "precise-simulation"
@@ -67,9 +68,13 @@ def channel_versions() -> dict[str, str | None]:
     for name in ORDER:
         try:
             data = http_json(f"https://api.anaconda.org/package/{CHANNEL_USER}/{channel_pkg[name]}")
-            out[name] = max(data["versions"], key=vkey)
-        except Exception:
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
             out[name] = None
+        else:
+            versions = data["versions"]
+            out[name] = max(versions, key=vkey) if versions else None
     return out
 
 

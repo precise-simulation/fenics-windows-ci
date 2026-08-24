@@ -23,9 +23,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 360
     env:
-      ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
       FORCE_ALL: ${{ inputs.force_all }}
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
 
@@ -52,6 +50,8 @@ jobs:
 
       - name: Decide what to rebuild
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python scripts/check_versions.py
           Get-Content plan.json
@@ -73,15 +73,17 @@ jobs:
         continue-on-error: true
 
       - name: Upload to precise-simulation
-        if: ${{ inputs.upload != false }}
+        if: ${{ github.event_name == 'schedule' || inputs.upload }}
         shell: pwsh
+        env:
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
         run: |
           if (-not (Test-Path "output/win-64")) {
             Write-Host "Nothing to upload - no stages were rebuilt."
           } else {
-          Get-ChildItem output/win-64 -Filter *.conda | ForEach-Object {
-            Write-Host "== uploading $($_.Name) =="
-            anaconda upload --force --user precise-simulation $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "upload failed: $($_.Name)" }
-          }
+            Get-ChildItem output/win-64 -Filter *.conda | ForEach-Object {
+              Write-Host "== uploading $($_.Name) =="
+              anaconda upload --force --user precise-simulation $_.FullName
+              if ($LASTEXITCODE -ne 0) { throw "upload failed: $($_.Name)" }
+            }
           }

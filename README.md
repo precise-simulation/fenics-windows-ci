@@ -24,9 +24,10 @@ Anaconda).
 Install the whole stack (petsc, petsc4py, fenics-libdolfinx, fenics-dolfinx
 plus Intel MPI, OpenBLAS, HDF5, basix/ffcx/ufl):
 
-```
-conda create -n fenics -c precise-simulation -c conda-forge python=3.13 fenics-dolfinx
-conda activate fenics
+```bat
+conda create -n fenics-windows python=3.12
+conda activate fenics-windows
+conda install -c precise-simulation -c conda-forge "libblas=*=*openblas" fenics-dolfinx
 ```
 
 Any of `python=3.12`, `python=3.13` or `python=3.14` works; omitting the pin
@@ -34,13 +35,13 @@ lets the solver pick the newest supported interpreter.
 
 Verify:
 
-```
+```bat
 python -c "import dolfinx, petsc4py; print(dolfinx.__version__, petsc4py.__version__)"
 ```
 
 A quick end-to-end check (serial + two MPI ranks):
 
-```
+```bat
 mpiexec -n 2 python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_WORLD, 8, 8); print('rank', MPI.COMM_WORLD.rank, 'ok')"
 ```
 

@@ -28,6 +28,21 @@ for /L %%N in (1,1,10) do (
   if errorlevel 1 exit /b 1
 )
 
+:: two-rank dolfinx mesh partitioning x10: PT-Scotch heap corruption guard.
+:: int64 PT-SCOTCH crashed ~90%% of these; require clean exit AND rank output.
+set "DOLFINX_REPRO=from mpi4py import MPI; import dolfinx.mesh as m; d=m.create_unit_square(MPI.COMM_WORLD,8,8); print('ok', d.topology.index_map(2).size_local)"
+set "DOLFINX_TEST_OUTPUT=%TEMP%\dolfinx-stage9-repro-%RANDOM%.txt"
+for /L %%N in (1,1,10) do (
+  echo == dolfinx partitioning stability attempt %%N/10 ==
+  mpiexec.exe -localonly -n 2 -env PATH "%MPI_TEST_PATH%" -env PYTHONPATH "%MPI_PYTHONPATH%" "%PYTHON%" -c "%DOLFINX_REPRO%" > "%DOLFINX_TEST_OUTPUT%" 2>&1
+  if errorlevel 1 (
+    type "%DOLFINX_TEST_OUTPUT%"
+    exit /b 1
+  )
+  findstr /c:"ok" "%DOLFINX_TEST_OUTPUT%" >nul
+  if errorlevel 1 exit /b 1
+)
+
 :: exercise a demo
 cd python/demo
 :: pytest --mpiexec=mpiexec -vs -k demo_poisson test.py

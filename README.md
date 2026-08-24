@@ -92,8 +92,24 @@ Actions → *stack* → **Run workflow**
   packages, no system Cygwin involved.
 - First-ever two-rank MPI run on a machine can hit an FFCx JIT cache race;
   run one serial solve first if you see a crash in rank 1.
-- Two-rank MPI runs can also exit non-zero *after* completing successfully
-  (heap-corruption report at interpreter teardown). The work itself is fine —
-  check rank output, not just the exit code. Affects all stack versions.
+- **PT-SCOTCH integer width**: the win-64 conda-forge PT-Scotch **int64**
+  build corrupts the process heap on any distributed-graph partition call
+  (deferred `c0000374`/DOUBLE_FREE — crashes at teardown or later, ~always
+  with repeated calls). The stack therefore pins `libscotch`/`libptscotch`
+  to the **int32** builds, which are clean. Minimal repro:
+  `python -c "from mpi4py import MPI; from dolfinx.cpp.graph import partitioner_scotch;
+  from dolfinx.graph import adjacencylist; import numpy as np;
+  g = adjacencylist(np.array([1,2,0,2,0,1], dtype=np.int64),
+  np.array([0,2,4,6], dtype=np.int32))._cpp_object;
+  partitioner_scotch()(MPI.COMM_SELF, 2, g, False)"` (crashes with int64
+  builds even on one rank).
+- Do **not** pass identical cell arrays on every MPI rank to
+  `mesh.create_mesh` — that duplicates the global mesh and trips an
+  unrelated redistribution edge case (heap corruption / wrong results).
+  Provide cells on rank 0 (or distribute them) instead.
+- Parallel solves with `pc_type=lu` need a parallel factorization package
+  (MUMPS/superlu_dist), which this stack does not ship. Use iterative
+  solvers on multiple ranks (`ksp_type=cg`, `pc_type=gamg` works well);
+  direct LU remains fine in serial.
 - This channel is interim: packages retire as the corresponding
   conda-forge feedstock PRs land.

@@ -17,9 +17,11 @@ libboost_devel:
 liblzma_devel:
 - '5'
 libptscotch:
-- 7.0.11
+# ponytail: win-64 int64 PT-Scotch corrupts the heap on any dgraph partition
+# (c0000374, deferred detection); int32 build is clean - see README
+- 7.0.11=int32*
 libscotch:
-- 7.0.11
+- 7.0.11=int32*
 mpi:
 - impi
 mpich:

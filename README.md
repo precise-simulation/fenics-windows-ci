@@ -78,9 +78,8 @@ Serial DOLFINx use does not start `mpiexec` and needs no firewall exception.
 
 Multi-process runs use Intel MPI's Hydra launcher and can trigger a Windows
 Firewall prompt for `mpiexec.exe` or a Hydra proxy. `-localonly` keeps process
-launching on the local machine and `I_MPI_FABRICS=shm` uses shared-memory data
-transport, but neither setting guarantees that the launcher will avoid the
-firewall prompt.
+launching on the local machine, but neither setting guarantees that the
+launcher will avoid the firewall prompt.
 
 A standard non-administrator user cannot create a permanent Windows Firewall
 allow rule. If such a user receives the prompt, Windows can create block rules

@@ -2,7 +2,7 @@
 # in a conda env. Package-owned file -> any env update/recreate restores the noise;
 # just rerun this script. Idempotent.
 #
-# Usage:  powershell -File quiet-vs-activation.ps1 -Env featool2
+# Usage:  powershell -File quiet-vs-activation.ps1 -Env fenics-windows
 param([string]$EnvName = "fenics-windows")
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +35,10 @@ foreach ($r in $repl) { $t = $t.Replace($r[0], $r[1]) }
 # retry-without-args call (only exact standalone line)
 $t = $t -replace '(?m)^(\s*CALL "VC\\Auxiliary\\Build\\vcvars%VCVARSBAT%\.bat")\s*$','$1 >nul'
 
-Set-Content $f $t -Encoding ASCII
+# conda hard-links env files to the pkgs cache: editing in place would corrupt
+# the cache (conda SafetyError on next install). Break the link via temp+move.
+$tmp = "$f.quiet-tmp"
+Set-Content $tmp $t -Encoding ASCII
+Move-Item $tmp $f -Force
 Write-Output "patched: $f"
 

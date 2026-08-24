@@ -48,9 +48,14 @@ python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_squar
 Optional two-rank check:
 
 ```bat
-set I_MPI_FABRICS=shm
 mpiexec -localonly -n 2 python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_WORLD, 8, 8); print('rank', MPI.COMM_WORLD.rank, 'ok')"
 ```
+
+Do not set `I_MPI_FABRICS=shm`: Intel MPI 2021.17 removed the plain `shm`
+keyword (it warns "fabric ... has been removed ... use ofi or shm:ofi"), and
+shared-memory transport between processes on one machine is selected
+automatically anyway. If an older guide told you to set it, clear it with
+`set I_MPI_FABRICS=`.
 
 ### Silencing activation output
 

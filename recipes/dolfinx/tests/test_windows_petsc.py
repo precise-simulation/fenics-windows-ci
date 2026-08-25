@@ -79,6 +79,8 @@ def main():
             "ksp_type": "preonly",
             "pc_type": "lu",
             "pc_factor_mat_solver_type": "mumps",
+            # ICNTL(7)=5 forces the METIS fill-reducing ordering
+            "mat_mumps_icntl_7": 5,
             "ksp_error_if_not_converged": True,
         },
     )
@@ -90,6 +92,8 @@ def main():
 
     if domain.comm.rank == 0:
         print("STAGE 9 MUMPS PASS")
+        # reached only if the ICNTL(7)=5 METIS-ordered factorization succeeded
+        print("STAGE 9 METIS PASS")
 
 
 if __name__ == "__main__":

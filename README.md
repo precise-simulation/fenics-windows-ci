@@ -134,10 +134,14 @@ Actions → *stack* → **Run workflow**
   unrelated redistribution edge case (heap corruption / wrong results).
   Provide cells on rank 0 (or distribute them) instead.
 - Parallel `pc_type=lu` works via MUMPS, built from source and statically
-  linked into libpetsc.dll (build 4+). conda-forge has no usable win-64
+  linked into libpetsc.dll (build 5+). conda-forge has no usable win-64
   mumps/scalapack packages, so petsc vendors both (flang toolchain).
-  Serial LU unchanged; `ksp_type=cg, pc_type=gamg` also remains available.
-  direct LU remains fine in serial.
+  MUMPS includes both sequential orderings: PORD (built in-tree) and METIS,
+  which comes from the conda-forge `metis` win-64 package that libpetsc.dll
+  loads at runtime. Pass `-mat_mumps_icntl_7 5` to force METIS ordering.
+  ParMETIS remains unavailable, and DOLFINx mesh partitioning is unaffected
+  (it keeps using PT-Scotch). Serial LU unchanged; `ksp_type=cg, pc_type=gamg`
+  also remains available. direct LU remains fine in serial.
 - This channel is interim: packages retire as the corresponding
   conda-forge feedstock PRs land.
 

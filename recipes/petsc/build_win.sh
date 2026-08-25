@@ -25,7 +25,10 @@ for path in \
   "$mpi_include/mpi.h" \
   "$mpi_lib/impi.lib" \
   "$mpi_exec" \
-  "$libprefix/bin/openblas.dll"; do
+  "$libprefix/bin/openblas.dll" \
+  "$libprefix/include/metis.h" \
+  "$libprefix/lib/metis.lib" \
+  "$libprefix/bin/metis.dll"; do
   test -f "$path" || { echo "Missing Windows PETSc input: $path" >&2; exit 1; }
 done
 
@@ -158,8 +161,8 @@ cmake -S "$scalapack_dir" -B "$scalapack_dir/build" -G Ninja \
   -DLAPACK_LIBRARIES="$source_dir/openblas.lib"
 cmake --build "$scalapack_dir/build" --target scalapack scalapack-F
 
-# MUMPS: PORD ordering only for now (-Dmetis/-Dscotch can be added later);
-# examples disabled; Windows mangling override removed so CDEFS=-DAdd_ wins
+# MUMPS: PORD + METIS orderings (METIS from the conda host env); examples
+# disabled; Windows mangling override removed so CDEFS=-DAdd_ wins
 sed -i '/^\tcd examples; \$(MAKE) \(s\|d\|c\|z\|all\)$/d;' "$mumps_dir/Makefile"
 sed -i 's/defined(UPPER) || defined(MUMPS_WIN32)/defined(UPPER)/g' \
   "$mumps_dir/src/mumps_c.c" "$mumps_dir/src/mumps_common.h"
@@ -181,11 +184,13 @@ RANLIB  = /bin/true
 LPORDDIR = \$(topdir)/PORD/lib/
 IPORD    = -I\$(topdir)/PORD/include/
 LPORD    = -L\$(LPORDDIR) -lpord\$(PLAT)
-ORDERINGSF  = -Dpord
+IMETIS   = -I"$libprefix/include"
+LMETIS   = "$libprefix/lib/metis.lib"
+ORDERINGSF  = -Dmetis -Dpord
 ORDERINGSC  = \$(ORDERINGSF)
-LORDERINGS = \$(LPORD)
+LORDERINGS = \$(LMETIS) \$(LPORD)
 IORDERINGSF =
-IORDERINGSC = \$(IPORD)
+IORDERINGSC = \$(IMETIS) \$(IPORD)
 LAPACK = "$source_dir/openblas.lib"
 SCALAP = "$scalapack_dir/build/lib/scalapack.lib" "$scalapack_dir/build/lib/scalapack-F.lib"
 INCPAR  = -I"$mpi_include"
@@ -363,9 +368,12 @@ python ./configure \
   --with-mumps=1 \
   --with-mumps-include="$libprefix/include" \
   --with-mumps-lib="$libprefix/lib/dmumps.lib $libprefix/lib/mumps_common.lib \
-$libprefix/lib/pord.lib $libprefix/lib/scalapack.lib \
+$libprefix/lib/pord.lib $libprefix/lib/metis.lib $libprefix/lib/scalapack.lib \
 $libprefix/lib/scalapack-F.lib $iomp5 $libprefix/lib/flang_rt.runtime.dynamic.lib \
 $source_dir/openblas.lib" \
+  --with-metis=1 \
+  --with-metis-include="$libprefix/include" \
+  --with-metis-lib="$libprefix/lib/metis.lib" \
   --with-scalapack=1 \
   --with-scalapack-include="$libprefix/include" \
   --with-scalapack-lib="$libprefix/lib/scalapack.lib $libprefix/lib/scalapack-F.lib \
@@ -515,4 +523,10 @@ test -f "$libprefix/include/dmumps_c.h"
 for m in dmumps mumps_common pord scalapack scalapack-F; do
   test -f "$libprefix/lib/$m.lib" || { echo "missing $m.lib" >&2; exit 1; }
 done
+# METIS stays a runtime-dependency-owned file (not copied into the package),
+# so these host-prefix checks must run here, not in the package test
+grep -q '^#define PETSC_HAVE_METIS 1' "$libprefix/include/petscconf.h" \
+  || { echo "petscconf.h lacks PETSC_HAVE_METIS 1" >&2; exit 1; }
+grep -q '^#define IDXTYPEWIDTH 32' "$libprefix/include/metis.h" \
+  || { echo "metis.h does not select 32-bit indices" >&2; exit 1; }
 echo "Windows PETSc package layout and metadata checks passed"

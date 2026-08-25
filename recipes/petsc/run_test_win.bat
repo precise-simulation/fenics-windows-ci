@@ -34,6 +34,20 @@ if errorlevel 1 (
   echo PETSc was built without MUMPS
   exit /b 1
 )
+findstr /i /c:"#define PETSC_HAVE_METIS 1" "%PREFIX%\Library\include\petscconf.h" >nul
+if errorlevel 1 (
+  echo PETSc was built without METIS
+  exit /b 1
+)
+if not exist "%PREFIX%\Library\include\metis.h" (
+  echo Missing METIS header from runtime dependency
+  exit /b 1
+)
+findstr /i /c:"#define IDXTYPEWIDTH 32" "%PREFIX%\Library\include\metis.h" >nul
+if errorlevel 1 (
+  echo METIS does not select 32-bit indices
+  exit /b 1
+)
 for %%m in (dmumps mumps_common pord scalapack scalapack-F) do (
   if not exist "%PREFIX%\Library\lib\%%m.lib" (
     echo Missing static solver library: %%m.lib
@@ -73,6 +87,11 @@ findstr /i /c:"impi.dll" "%TEST_BUILD%\libpetsc.dependents.txt" >nul
 if errorlevel 1 exit /b 1
 findstr /i /c:"openblas.dll" "%TEST_BUILD%\libpetsc.dependents.txt" >nul
 if errorlevel 1 exit /b 1
+findstr /i /c:"metis.dll" "%TEST_BUILD%\libpetsc.dependents.txt" >nul
+if errorlevel 1 (
+  echo libpetsc.dll does not depend on metis.dll
+  exit /b 1
+)
 findstr /i /c:"cygwin1.dll" "%TEST_BUILD%\libpetsc.dependents.txt" >nul
 if not errorlevel 1 exit /b 1
 

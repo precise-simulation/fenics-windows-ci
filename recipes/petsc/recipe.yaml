@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: petsc
   version: "3.25.4"
-  build: 3
+  build: 4
   # these variables should all be overridden in variant files
   # but default values are sometimes needed for conda-smithy rerender
   mpi: ${{ mpi | default('mpich') }}
@@ -45,6 +45,21 @@ source:
         - patches/p7-win32fe-gnu-flags.patch
         - patches/p8-install-unlock.patch
         - patches/p9-sedinplace-oserror.patch
+  # win64 only: ScaLAPACK + MUMPS built statically and linked into
+  # libpetsc.dll (see build_win.sh "mumps stage"); there are no usable
+  # conda-forge win-64 packages for either (mumps last built 2018, mingw;
+  # scalapack has no win-64 builds at all)
+  - if: win
+    then:
+      url: https://github.com/Reference-ScaLAPACK/scalapack/archive/refs/tags/v2.2.0.zip
+      sha256: 7652f8857bc9e9529fc635860bc0a7c0a787b35627d773b4eb96573773537a35
+      file_name: scalapack-2.2.0-src.zip
+      folder: scalapack-2.2.0
+  - if: win
+    then:
+      url: https://mumps-solver.org/MUMPS_5.7.3.tar.gz
+      sha256: 84a47f7c4231b9efdf4d4f631a2cae2bdd9adeaabc088261d15af040143ed112
+      folder: mumps-5.7.3
 
 build:
   number: ${{ build }}
@@ -75,6 +90,13 @@ requirements:
         - m2-coreutils
         - m2-findutils
         - m2-grep
+        # ScaLAPACK/MUMPS win64 toolchain (flang targets the MSVC ABI;
+        # flang-rt_win-64 provides flang_rt.runtime.*.lib without which
+        # nothing Fortran can be linked)
+        - flang
+        - flang-rt_win-64
+        - cmake
+        - ninja
     - if: not win
       then:
         - ${{ compiler('cxx') }}
@@ -99,6 +121,8 @@ requirements:
       then:
         - impi-devel
         - libopenblas * pthreads_*
+        # import lib for omp_* symbols pulled in by static MUMPS
+        - llvm-openmp
     - if: not win
       then:
         - libblas
@@ -149,6 +173,8 @@ requirements:
       then:
         - impi_rt
         - libopenblas * pthreads_*
+        # libpetsc.dll binds omp_* (MUMPS) to the LLVM/Intel OpenMP runtime
+        - llvm-openmp
     - if: with_cuda
       then:
         - ${{ pin_compatible('cuda-version', lower_bound='x', upper_bound='x') }}

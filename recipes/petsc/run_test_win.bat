@@ -29,6 +29,18 @@ if not exist "%PREFIX%\Library\bin\libpetsc.dll" (
   exit /b 1
 )
 
+findstr /i /c:"#define PETSC_HAVE_MUMPS 1" "%PREFIX%\Library\include\petscconf.h" >nul
+if errorlevel 1 (
+  echo PETSc was built without MUMPS
+  exit /b 1
+)
+for %%m in (dmumps mumps_common pord scalapack scalapack-F) do (
+  if not exist "%PREFIX%\Library\lib\%%m.lib" (
+    echo Missing static solver library: %%m.lib
+    exit /b 1
+  )
+)
+
 pkg-config --validate PETSc
 if errorlevel 1 exit /b 1
 pkg-config --cflags PETSc >nul

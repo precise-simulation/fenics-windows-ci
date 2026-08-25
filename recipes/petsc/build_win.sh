@@ -45,6 +45,221 @@ print("\n".join(syms))
 PY
 lib /nologo /def:openblas.def /machine:x64 /out:openblas.lib
 
+# --- win64 extras: ScaLAPACK + MUMPS (static, linked into libpetsc.dll) ---
+# Toolchain notes (see repo README "MUMPS" section / spike evidence):
+#   * flang needs flang-rt_win-64 or nothing Fortran links
+#   * flang defaults to the static CRT; -fms-runtime-lib=dll keeps it /MD
+#   * this CMake defaults empty-config Ninja builds to Debug (/MDd) which
+#     breaks CRT consistency -> force Release everywhere, including inside
+#     ScaLAPACK's nested BLACS/INSTALL configure (env vars propagate there,
+#     -D flags do not)
+#   * MSYS2_ARG_CONV_EXCL=* is set by build.bat: /nologo and /out: survive
+export I_MPI_ROOT="$libprefix"
+scalapack_dir="$source_dir/scalapack-2.2.0"
+mumps_dir="$source_dir/mumps-5.7.3"
+stage_inc="$source_dir/mumps-stage/include"
+mkdir -p "$stage_inc"
+
+if [ ! -d "$scalapack_dir" ] || [ ! -d "$mumps_dir" ]; then
+  echo "win64 extra sources missing (scalapack/mumps)" >&2; exit 1
+fi
+
+flangrt=$(ls "$BUILD_PREFIX"/Library/lib/clang/*/lib/x86_64-pc-windows-msvc/flang_rt.runtime.dynamic.lib 2>/dev/null | head -n1)
+iomp5="$libprefix/lib/libiomp5md.lib"
+for f in "$flangrt" "$iomp5"; do
+  test -f "$f" || { echo "missing $f" >&2; exit 1; }
+done
+
+export FFLAGS="-fms-runtime-lib=dll"
+export CFLAGS="/MD"
+export CMAKE_BUILD_TYPE=Release
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+export CMAKE_GENERATOR=Ninja
+
+# ScaLAPACK: bypass FindMPI on WIN32 (conda impi layout breaks its wrapper
+# detection, and its Fortran try-compiles never wire impi.lib in). Static
+# scalapack only needs MPI headers at compile time.
+python - "$scalapack_dir/CMakeLists.txt" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1]); t = p.read_text()
+old = "#set(MPI_COMPILER ${MPI_BASE_DIR}/bin/mpicc)\n\nfind_package(MPI)"
+new = """#set(MPI_COMPILER ${MPI_BASE_DIR}/bin/mpicc)
+
+if(WIN32)
+   message(STATUS "WIN32 MPI bypass: using I_MPI_ROOT=$ENV{I_MPI_ROOT}")
+   set(MPI_FOUND TRUE)
+   set(MPI_INCLUDE_PATH "$ENV{I_MPI_ROOT}/include")
+   include_directories(${MPI_INCLUDE_PATH})
+else()
+find_package(MPI)"""
+assert old in t, "scalapack CMakeLists anchor not found"
+t = t.replace(old, new, 1)
+anchor = 'message(FATAL_ERROR "--> MPI Library NOT FOUND -- please set MPI_BASE_DIR accordingly --")\nendif()'
+assert anchor in t, "scalapack endif anchor not found"
+t = t.replace(anchor, anchor + "\nendif()", 1)
+p.write_text(t)
+PY
+
+cmake -S "$scalapack_dir" -B "$scalapack_dir/build" -G Ninja \
+  -DCMAKE_C_COMPILER=cl \
+  -DCMAKE_Fortran_COMPILER=flang \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DBUILD_TESTING=OFF \
+  -DCMAKE_INSTALL_PREFIX="$source_dir/scalapack-install" \
+  -DMPIEXEC_EXECUTABLE="$mpi_exec" \
+  -DBLAS_LIBRARIES="$source_dir/openblas.lib" \
+  -DLAPACK_LIBRARIES="$source_dir/openblas.lib"
+cmake --build "$scalapack_dir/build" --target scalapack scalapack-F
+
+# MUMPS: PORD ordering only for now (-Dmetis/-Dscotch can be added later);
+# examples disabled; Windows mangling override removed so CDEFS=-DAdd_ wins
+sed -i '/^\tcd examples; \$(MAKE) \(s\|d\|c\|z\|all\)$/d;' "$mumps_dir/Makefile"
+sed -i 's/defined(UPPER) || defined(MUMPS_WIN32)/defined(UPPER)/g' \
+  "$mumps_dir/src/mumps_c.c" "$mumps_dir/src/mumps_common.h"
+
+cat > "$mumps_dir/Makefile.inc" <<EOF
+PLAT    =
+LIBEXT  = .lib
+LIBEXT_SHARED = .so
+SONAME  =
+FPIC_OPT =
+OUTC    = -o
+OUTF    = -o
+RM      = rm -f
+CC      = clang
+FC      = flang
+FL      = flang
+AR      = lib /nologo /out:
+RANLIB  = llvm-ranlib
+LPORDDIR = \$(topdir)/PORD/lib/
+IPORD    = -I\$(topdir)/PORD/include/
+LPORD    = -L\$(LPORDDIR) -lpord\$(PLAT)
+ORDERINGSF  = -Dpord
+ORDERINGSC  = \$(ORDERINGSF)
+LORDERINGS = \$(LPORD)
+IORDERINGSF =
+IORDERINGSC = \$(IPORD)
+LAPACK = "$source_dir/openblas.lib"
+SCALAP = "$scalapack_dir/build/lib/scalapack.lib" "$scalapack_dir/build/lib/scalapack-F.lib"
+INCPAR  = -I"$mpi_include"
+LIBPAR  = \$(SCALAP) "$mpi_lib/impi.lib" "$iomp5"
+INCSEQ  =
+LIBSEQ  =
+LIBBLAS = \$(LAPACK)
+LIBOTHERS =
+CDEFS   = -DAdd_
+OPTF    = -O2 -fms-runtime-lib=dll -fopenmp -I\$(topdir)
+OPTC    = -O2 -D_MT -D_DLL -I.
+OPTL    = -O2 -fms-runtime-lib=dll -fopenmp
+INCS    = \$(INCPAR)
+LIBS    = \$(LIBPAR)
+LIBSEQNEEDED =
+EOF
+
+mkdir -p "$mumps_dir/include"
+cp "$mumps_dir/src/mumps_int_def32_h.in" "$mumps_dir/include/mumps_int_def.h"
+make -C "$mumps_dir" -j"$cpu_count" d
+
+# minimal omp_lib module shim (conda flang ships no omp_lib.mod); compiled
+# once here and folded into mumps_common
+cat > "$mumps_dir/omp_lib_shim.f90" <<'EOF'
+module omp_lib_kinds
+  use iso_c_binding, only: c_intptr_t, c_int
+  implicit none
+  integer(kind=c_int), parameter :: omp_lock_kind = c_intptr_t
+  integer(kind=c_int), parameter :: omp_nest_lock_kind = c_intptr_t
+end module omp_lib_kinds
+module omp_lib
+  use iso_c_binding, only: c_int
+  use omp_lib_kinds
+  implicit none
+  interface
+    subroutine omp_init_lock(s) bind(c, name="omp_init_lock")
+      import :: omp_lock_kind
+      integer(omp_lock_kind) :: s
+    end subroutine omp_init_lock
+    subroutine omp_destroy_lock(s) bind(c, name="omp_destroy_lock")
+      import :: omp_lock_kind
+      integer(omp_lock_kind) :: s
+    end subroutine omp_destroy_lock
+    subroutine omp_set_lock(s) bind(c, name="omp_set_lock")
+      import :: omp_lock_kind
+      integer(omp_lock_kind) :: s
+    end subroutine omp_set_lock
+    subroutine omp_unset_lock(s) bind(c, name="omp_unset_lock")
+      import :: omp_lock_kind
+      integer(omp_lock_kind) :: s
+    end subroutine omp_unset_lock
+    function omp_test_lock(s) bind(c, name="omp_test_lock")
+      import :: omp_lock_kind, c_int
+      logical(c_int) :: omp_test_lock
+      integer(omp_lock_kind) :: s
+    end function omp_test_lock
+    function omp_get_thread_num() bind(c, name="omp_get_thread_num")
+      import :: c_int
+      integer(c_int) :: omp_get_thread_num
+    end function omp_get_thread_num
+    function omp_get_num_threads() bind(c, name="omp_get_num_threads")
+      import :: c_int
+      integer(c_int) :: omp_get_num_threads
+    end function omp_get_num_threads
+    function omp_get_max_threads() bind(c, name="omp_get_max_threads")
+      import :: c_int
+      integer(c_int) :: omp_get_max_threads
+    end function omp_get_max_threads
+    subroutine omp_set_num_threads(n) bind(c, name="omp_set_num_threads")
+      import :: c_int
+      integer(c_int), value :: n
+    end subroutine omp_set_num_threads
+    function omp_get_dynamic() bind(c, name="omp_get_dynamic")
+      import :: c_int
+      logical(c_int) :: omp_get_dynamic
+    end function omp_get_dynamic
+    subroutine omp_set_dynamic(d) bind(c, name="omp_set_dynamic")
+      import :: c_int
+      logical(c_int), value :: d
+    end subroutine omp_set_dynamic
+    function omp_get_nested() bind(c, name="omp_get_nested")
+      import :: c_int
+      logical(c_int) :: omp_get_nested
+    end function omp_get_nested
+    subroutine omp_set_nested(n) bind(c, name="omp_set_nested")
+      import :: c_int
+      logical(c_int), value :: n
+    end subroutine omp_set_nested
+    function omp_get_wtime() bind(c, name="omp_get_wtime")
+      import :: c_int
+      double precision :: omp_get_wtime
+    end function omp_get_wtime
+  end interface
+end module omp_lib
+EOF
+flang -c -O2 -fopenmp -fms-runtime-lib=dll "$mumps_dir/omp_lib_shim.f90" \
+  || exit 1
+mv omp_lib_shim.o omp_lib.mod "$mumps_dir/"
+
+# append the shim object to the fresh mumps_common archive
+cp "$mumps_dir/lib/libmumps_common.lib" "$mumps_dir/lib/mc_tmp.lib"
+lib /nologo /out:"$mumps_dir/lib/mc_merged.lib" \
+  "$mumps_dir/lib/mc_tmp.lib" "$mumps_dir/omp_lib_shim.o"
+mv -f "$mumps_dir/lib/mc_merged.lib" "$mumps_dir/lib/libmumps_common.lib"
+
+# install into prefix so PETSc metadata references ${PREFIX}-relative paths;
+# unprefixed names because -l<name> lookups expect no "lib" prefix on Windows
+mkdir -p "$libprefix/include" "$libprefix/lib"
+cp "$mumps_dir/include/dmumps_c.h" "$mumps_dir/include/mumps_compat.h" \
+   "$mumps_dir/include/mumps_c_types.h" "$mumps_dir/include/mumps_int_def.h" \
+   "$stage_inc/"
+cp "$mumps_dir/lib/libdmumps.lib"        "$libprefix/lib/dmumps.lib"
+cp "$mumps_dir/lib/libmumps_common.lib"  "$libprefix/lib/mumps_common.lib"
+cp "$mumps_dir/lib/libpord.lib"          "$libprefix/lib/pord.lib"
+cp "$scalapack_dir/build/lib/scalapack.lib"   "$libprefix/lib/"
+cp "$scalapack_dir/build/lib/scalapack-F.lib" "$libprefix/lib/"
+# static flang runtime must ship inside prefix so petsc metadata stays
+# ${PREFIX}-relative and consumers can relink
+cp "$flangrt" "$libprefix/lib/"
+
 # --- configure via the win32fe wrappers ---
 python ./configure \
   --with-cc="$PETSC_DIR/lib/petsc/bin/win32fe/win32fe.exe cl" \
@@ -61,6 +276,11 @@ python ./configure \
   --with-mpi-lib="$mpi_lib/impi.lib" \
   --with-mpiexec="$mpi_exec -localonly" \
   --with-blaslapack-lib="$source_dir/openblas.lib" \
+  --with-mumps=1 \
+  --with-mumps-include="$stage_inc" \
+  --with-mumps-lib="$libprefix/lib/dmumps.lib $libprefix/lib/mumps_common.lib \
+$libprefix/lib/pord.lib $libprefix/lib/scalapack.lib \
+$libprefix/lib/scalapack-F.lib $iomp5 $libprefix/lib/flang_rt.runtime.dynamic.lib" \
   --with-cuda=0 \
   --with-hdf5=0 \
   --with-fftw=0 \
@@ -201,4 +421,8 @@ test -f "$libprefix/include/petsc.h"
 test -f "$libprefix/lib/libpetsc.lib"
 test -f "$libprefix/bin/libpetsc.dll"
 test -f "$libprefix/lib/pkgconfig/PETSc.pc"
+test -f "$libprefix/include/dmumps_c.h"
+for m in dmumps mumps_common pord scalapack scalapack-F; do
+  test -f "$libprefix/lib/$m.lib" || { echo "missing $m.lib" >&2; exit 1; }
+done
 echo "Windows PETSc package layout and metadata checks passed"

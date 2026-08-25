@@ -63,6 +63,27 @@ def main():
     if domain.comm.rank == 0:
         print("STAGE 9 PETSC PASS")
 
+    # direct solver path: static MUMPS linked into libpetsc.dll (win64);
+    # exercises parallel LU factorization end to end
+    problem_lu = LinearProblem(
+        a,
+        L,
+        bcs=[bc],
+        petsc_options_prefix="stage9_mumps_",
+        petsc_options={
+            "ksp_type": "preonly",
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
+            "ksp_error_if_not_converged": True,
+        },
+    )
+    solution_lu = problem_lu.solve()
+    error_lu = np.max(np.abs(solution_lu.x.array - expected.x.array))
+    assert domain.comm.allreduce(error_lu, op=MPI.MAX) < 1e-10
+
+    if domain.comm.rank == 0:
+        print("STAGE 9 MUMPS PASS")
+
 
 if __name__ == "__main__":
     main()

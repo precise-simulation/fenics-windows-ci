@@ -25,6 +25,7 @@ for /L %%N in (1,1,10) do (
     exit /b 1
   )
   findstr /i /c:"STAGE 9 PETSC PASS" "%PETSC_TEST_OUTPUT%" >nul
+  findstr /i /c:"STAGE 9 MUMPS PASS" "%PETSC_TEST_OUTPUT%" >nul
   if errorlevel 1 exit /b 1
 )
 

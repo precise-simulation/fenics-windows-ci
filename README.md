@@ -133,9 +133,11 @@ Actions → *stack* → **Run workflow**
   `mesh.create_mesh` — that duplicates the global mesh and trips an
   unrelated redistribution edge case (heap corruption / wrong results).
   Provide cells on rank 0 (or distribute them) instead.
-- Parallel solves with `pc_type=lu` need a parallel factorization package
-  (MUMPS/superlu_dist), which this stack does not ship. Use iterative
-  solvers on multiple ranks (`ksp_type=cg`, `pc_type=gamg` works well);
+- Parallel `pc_type=lu` works via MUMPS, built from source and statically
+  linked into libpetsc.dll (build 4+). conda-forge has no usable win-64
+  mumps/scalapack packages, so petsc vendors both (flang toolchain).
+  Serial LU unchanged; `ksp_type=cg, pc_type=gamg` also remains available.
   direct LU remains fine in serial.
 - This channel is interim: packages retire as the corresponding
   conda-forge feedstock PRs land.
+

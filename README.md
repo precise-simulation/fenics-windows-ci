@@ -116,8 +116,11 @@ Actions → *stack* → **Run workflow**
 - Runs on `windows-2022` (VS2022 preinstalled); recipes are self-contained:
   MSVC is driven through PETSc's `win32fe`, bash/make come from `m2-*`
   packages, no system Cygwin involved.
-- First-ever two-rank MPI run on a machine can hit an FFCx JIT cache race;
-  run one serial solve first if you see a crash in rank 1.
+- FFCx JIT is MPI-safe in this stack: dolfinx compiles forms on rank 0 and
+  broadcasts to other ranks (`dolfinx/jit.py` `mpi_jit_decorator`), with an
+  exclusive-create + ready-marker protocol underneath. Cold-cache two-rank
+  first runs validated 2026-08-25 (5/5, cache wiped each run). A serial
+  warm-up solve is optional — useful for deterministic timing only.
 - **PT-SCOTCH integer width**: the win-64 conda-forge PT-Scotch **int64**
   build corrupts the process heap on any distributed-graph partition call
   (deferred `c0000374`/DOUBLE_FREE — crashes at teardown or later, ~always

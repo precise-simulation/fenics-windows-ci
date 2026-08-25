@@ -5,7 +5,7 @@ so residual error == solver precision). Pressure pinned at origin.
 
 Usage: python test-stokes-mumps.py [n]   (default n=64, ~37k dofs)
 Runs serially or under mpiexec; exit 0 iff every solver passes.
-Run once serially before multi-rank (FFCx JIT cache warm-up).
+JIT is MPI-safe; a serial warm-up run only makes first-run timing deterministic.
 """
 import sys
 

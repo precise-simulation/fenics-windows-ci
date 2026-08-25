@@ -9,7 +9,8 @@ rem (see apply-caster-petsc-fix.py)
 %PYTHON% "%RECIPE_DIR%\apply-caster-petsc-fix.py" "%SRC_DIR%"
 if errorlevel 1 exit 1
 
-set "CXXFLAGS=%CXXFLAGS% -DH5_BUILT_AS_DYNAMIC_LIB"
+set "CXXFLAGS=%CXXFLAGS% -DH5_BUILT_AS_DYNAMIC_LIB /wd4267"
+set "CMAKE_BUILD_PARALLEL_LEVEL=%CPU_COUNT%"
 set "PETSC_DIR=%LIBRARY_PREFIX%"
 set "PKG_CONFIG_PATH=%LIBRARY_PREFIX%\lib\pkgconfig;%PKG_CONFIG_PATH%"
 set "PATH=%LIBRARY_PREFIX%\bin;%PATH%"

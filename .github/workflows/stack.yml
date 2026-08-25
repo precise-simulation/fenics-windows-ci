@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 360
     env:
       FORCE_ALL: ${{ inputs.force_all }}
@@ -46,7 +46,7 @@ jobs:
         run: |
           "$env:MAMBA_ROOT_PREFIX/envs/ci" >> $env:GITHUB_PATH
           "$env:MAMBA_ROOT_PREFIX/envs/ci/Library/bin" >> $env:GITHUB_PATH
-          "$env:MAMMA_ROOT_PREFIX/envs/ci/Scripts" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/ci/Scripts" >> $env:GITHUB_PATH
 
       - name: Decide what to rebuild
         shell: pwsh
@@ -62,13 +62,12 @@ jobs:
 
       - name: Collect build logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-logs
           path: |
             output/bld/**/work/arch-*/lib/petsc/conf/*.log
             output/bld/**/work/build/CMakeFiles/CMakeConfigureLog.yaml
-            output/bld/**/*.log
           if-no-files-found: ignore
         continue-on-error: true
 

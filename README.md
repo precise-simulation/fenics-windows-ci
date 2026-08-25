@@ -113,7 +113,7 @@ Actions → *stack* → **Run workflow**
 
 ## Notes
 
-- Runs on `windows-latest` (VS2022 preinstalled); recipes are self-contained:
+- Runs on `windows-2022` (VS2022 preinstalled); recipes are self-contained:
   MSVC is driven through PETSc's `win32fe`, bash/make come from `m2-*`
   packages, no system Cygwin involved.
 - First-ever two-rank MPI run on a machine can hit an FFCx JIT cache race;

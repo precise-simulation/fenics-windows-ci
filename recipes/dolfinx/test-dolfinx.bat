@@ -2,6 +2,7 @@ setlocal EnableDelayedExpansion
 @echo on
 
 set "CFLAGS=!CFLAGS! /wd4305"
+set "OMP_NUM_THREADS=1"
 set "PETSC_DIR=%PREFIX%\Library"
 set "PATH=%PREFIX%\bin;%PREFIX%\Library\bin;%PATH%"
 set "MPI_TEST_PATH=%PREFIX%\bin;%PREFIX%\Scripts;%PREFIX%\Library\bin;%SystemRoot%\system32;%SystemRoot%"

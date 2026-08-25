@@ -7,7 +7,9 @@ param(
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot | Split-Path
 $output = Join-Path $root "output"
+$logOutput = Join-Path $root "build-logs"
 Remove-Item $output -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $logOutput -Recurse -Force -ErrorAction SilentlyContinue
 
 # Locate the micromamba ci env wherever setup-micromamba put it
 $rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs" -Recurse -Filter rattler-build.exe `
@@ -60,9 +62,16 @@ foreach ($s in $stages) {
         # surface the deepest configure/make log we can find
         $clog = Get-ChildItem "$output/bld" -Recurse -Filter "configure.log" -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $cmakeLog = Get-ChildItem "$output/bld" -Recurse -Filter "CMakeConfigureLog.yaml" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        New-Item -ItemType Directory -Force $logOutput | Out-Null
         if ($clog) {
             Write-Host "===== tail of $($clog.FullName) ====="
             Get-Content $clog.FullName -Tail 60 | Write-Host
+            Copy-Item $clog.FullName (Join-Path $logOutput "$($s.name)-configure.log")
+        }
+        if ($cmakeLog) {
+            Copy-Item $cmakeLog.FullName (Join-Path $logOutput "$($s.name)-CMakeConfigureLog.yaml")
         }
         throw "rattler-build failed for $($s.name)"
     }

@@ -114,7 +114,7 @@ for f in "$flangrt" "$iomp5"; do
 done
 
 export FFLAGS="-fms-runtime-lib=dll"
-export CFLAGS="/MD"
+export CFLAGS="-MD"
 export CMAKE_BUILD_TYPE=Release
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
 export CMAKE_GENERATOR=Ninja
@@ -365,7 +365,8 @@ $libprefix/lib/scalapack-F.lib $iomp5 $libprefix/lib/flang_rt.runtime.dynamic.li
 $source_dir/openblas.lib" \
   --with-scalapack=1 \
   --with-scalapack-include="$libprefix/include" \
-  --with-scalapack-lib="$libprefix/lib/scalapack.lib $libprefix/lib/scalapack-F.lib" \
+  --with-scalapack-lib="$libprefix/lib/scalapack.lib $libprefix/lib/scalapack-F.lib \
+$libprefix/lib/flang_rt.runtime.dynamic.lib" \
   --with-cuda=0 \
   --with-hdf5=0 \
   --with-fftw=0 \

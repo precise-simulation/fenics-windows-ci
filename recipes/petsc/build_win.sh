@@ -307,25 +307,36 @@ cp "$scalapack_dir/build/lib/scalapack-F.lib" "$libprefix/lib/"
 cp "$flangrt" "$libprefix/lib/"
 
 # PETSc's framework refuses any FC-needing external package while
-# --with-fc=0. ScaLAPACK/MUMPS arrive as prebuilt static archives (nothing
-# Fortran is compiled by PETSc itself, and enabling FC would make it parse
-# ifort-built mpi.mod files flang cannot read), so exempt them from that
-# single check.
-python - "$source_dir/config/BuildSystem/config/framework.py" <<'PY'
+# --with-fc=0, twice: once in framework.py's serialEvaluation and again in
+# package.py's consistencyChecks. ScaLAPACK/MUMPS arrive as prebuilt static
+# archives (nothing Fortran is compiled by PETSc itself, their function
+# checks only use Fortran-mangled names from C, and enabling FC would make
+# PETSc parse ifort-built mpi.mod files flang cannot read) - exempt both
+# packages from those checks.
+python - "$source_dir/config/BuildSystem/config/framework.py" \
+         "$source_dir/config/BuildSystem/config/package.py" <<'PY'
 from pathlib import Path
 import sys
 
-p = Path(sys.argv[1])
-t = p.read_text()
-old = ("and (self.argDB['with-fc'] == '0'): raise RuntimeError("
-       "'Package '+child.package+' requested requires Fortran but compiler "
-       "turned off.')")
-new = ("and (self.argDB['with-fc'] == '0') and child.package not in "
-       "('scalapack', 'mumps'): raise RuntimeError("
-       "'Package '+child.package+' requested requires Fortran but compiler "
-       "turned off.')")
-assert old in t, "framework.py FC-check anchor not found"
-p.write_text(t.replace(old, new, 1))
+edits = [
+    ("framework.py",
+     "and (self.argDB['with-fc'] == '0'): raise RuntimeError("
+     "'Package '+child.package+' requested requires Fortran but compiler "
+     "turned off.')",
+     "and (self.argDB['with-fc'] == '0') and child.package not in "
+     "('scalapack', 'mumps'): raise RuntimeError("
+     "'Package '+child.package+' requested requires Fortran but compiler "
+     "turned off.')"),
+    ("package.py",
+     "if 'FC'  in self.buildLanguages and not hasattr(self.compilers, 'FC'):",
+     "if 'FC'  in self.buildLanguages and not hasattr(self.compilers, 'FC') "
+     "and self.package not in ('scalapack', 'mumps'):"),
+]
+for arg, old, new in zip(sys.argv[1:], [e[1] for e in edits], [e[2] for e in edits]):
+    p = Path(arg)
+    t = p.read_text()
+    assert old in t, f"anchor not found in {p.name}"
+    p.write_text(t.replace(old, new, 1))
 PY
 
 # --- configure via the win32fe wrappers ---

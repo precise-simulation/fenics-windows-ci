@@ -455,7 +455,8 @@ for line in path.read_text(encoding="utf-8").splitlines():
             base = field.replace("\\", "/").split("/")[-1].strip('"').lower()
             return base not in ("impi.lib", "openblas.lib")
         line = " ".join(field for field in line.split() if keep(field))
-    lines.append(line)
+    # The leak scrubber emits ${PREFIX}/Library; PETSc.pc defines ${prefix}.
+    lines.append(line.replace("${PREFIX}/Library", "${prefix}"))
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 

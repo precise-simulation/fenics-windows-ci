@@ -39,6 +39,7 @@ def main():
     # use a zero coefficient so the RHS form keeps its test space.
     zero = fem.Function(V)
     L = ufl.inner(zero, v) * ufl.dx
+    print("STAGE 9 CG: build", flush=True)
     problem = LinearProblem(
         a,
         L,
@@ -49,10 +50,13 @@ def main():
             "pc_type": "jacobi",
             "ksp_rtol": 1e-12,
             "ksp_atol": 1e-14,
+            "ksp_max_it": 100,
             "ksp_error_if_not_converged": True,
         },
     )
+    print("STAGE 9 CG: solve", flush=True)
     solution = problem.solve()
+    print("STAGE 9 CG: solved", flush=True)
     assert problem.solver.getConvergedReason() > 0
 
     expected = fem.Function(V)
@@ -65,6 +69,7 @@ def main():
 
     # direct solver path: static MUMPS linked into libpetsc.dll (win64);
     # exercises parallel LU factorization end to end
+    print("STAGE 9 MUMPS: build", flush=True)
     problem_lu = LinearProblem(
         a,
         L,
@@ -77,7 +82,9 @@ def main():
             "ksp_error_if_not_converged": True,
         },
     )
+    print("STAGE 9 MUMPS: solve", flush=True)
     solution_lu = problem_lu.solve()
+    print("STAGE 9 MUMPS: solved", flush=True)
     error_lu = np.max(np.abs(solution_lu.x.array - expected.x.array))
     assert domain.comm.allreduce(error_lu, op=MPI.MAX) < 1e-10
 

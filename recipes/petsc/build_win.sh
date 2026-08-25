@@ -111,10 +111,7 @@ if [ ! -d "$scalapack_dir" ] || [ ! -d "$mumps_dir" ]; then
 fi
 
 flangrt=$(ls "$BUILD_PREFIX"/Library/lib/clang/*/lib/x86_64-pc-windows-msvc/flang_rt.runtime.dynamic.lib 2>/dev/null | head -n1)
-iomp5="$libprefix/lib/libiomp5md.lib"
-for f in "$flangrt" "$iomp5"; do
-  test -f "$f" || { echo "missing $f" >&2; exit 1; }
-done
+test -f "$flangrt" || { echo "missing flang_rt.runtime.dynamic.lib" >&2; exit 1; }
 
 export FFLAGS="-fms-runtime-lib=dll"
 export CFLAGS="-MD"
@@ -167,6 +164,27 @@ sed -i '/^\tcd examples; \$(MAKE) \(s\|d\|c\|z\|all\)$/d;' "$mumps_dir/Makefile"
 sed -i 's/defined(UPPER) || defined(MUMPS_WIN32)/defined(UPPER)/g' \
   "$mumps_dir/src/mumps_c.c" "$mumps_dir/src/mumps_common.h"
 
+# MUMPS 5.7.3 has four unconditional `USE OMP_LIB` statements whose OpenMP
+# operations are sentinel-protected; without OpenMP code generation Flang
+# must see them as comments too. Line-anchored so guarded `!$ USE OMP_LIB`
+# lines never match; exact-count assert = source-version drift gate.
+python - "$mumps_dir/src" <<'PY'
+import pathlib, re, sys
+
+expected = {"dfac_b.F": 2, "dfac_par_m.F": 1, "dsol_omp_m.F": 1}
+pat = re.compile(r"^ {6}USE OMP_LIB", re.M)
+total = 0
+for name in sorted(expected):
+    p = pathlib.Path(sys.argv[1]) / name
+    t = p.read_text()
+    n = len(pat.findall(t))
+    assert n == expected[name], f"{name}: expected {expected[name]} 'USE OMP_LIB', found {n}"
+    p.write_text(pat.sub("!$    USE OMP_LIB", t))
+    total += n
+assert total == 4, total
+print(f"conditionalized {total} unconditional USE OMP_LIB imports")
+PY
+
 cat > "$mumps_dir/Makefile.inc" <<EOF
 PLAT    =
 LIBEXT  = .lib
@@ -194,15 +212,15 @@ IORDERINGSC = \$(IMETIS) \$(IPORD)
 LAPACK = "$source_dir/openblas.lib"
 SCALAP = "$scalapack_dir/build/lib/scalapack.lib" "$scalapack_dir/build/lib/scalapack-F.lib"
 INCPAR  = -I"$mpi_include"
-LIBPAR  = \$(SCALAP) "$mpi_lib/impi.lib" "$iomp5"
+LIBPAR  = \$(SCALAP) "$mpi_lib/impi.lib"
 INCSEQ  =
 LIBSEQ  =
 LIBBLAS = \$(LAPACK)
 LIBOTHERS =
 CDEFS   = -DAdd_
-OPTF    = -O2 -fms-runtime-lib=dll -fopenmp -I\$(topdir)
+OPTF    = -O2 -fms-runtime-lib=dll -I\$(topdir)
 OPTC    = -O2 -D_MT -D_DLL -I.
-OPTL    = -O2 -fms-runtime-lib=dll -fopenmp
+OPTL    = -O2 -fms-runtime-lib=dll
 INCS    = \$(INCPAR)
 LIBS    = \$(LIBPAR)
 LIBSEQNEEDED =
@@ -211,90 +229,7 @@ EOF
 mkdir -p "$mumps_dir/include"
 cp "$mumps_dir/src/mumps_int_def32_h.in" "$mumps_dir/include/mumps_int_def.h"
 
-# minimal omp_lib module shim, built BEFORE mumps: conda-forge flang ships
-# no omp_lib.mod, and -fopenmp activates `USE OMP_LIB` sentinels in MUMPS.
-# Compiled inside $mumps_dir so the .mod files sit on the -I$(topdir) path.
-cat > "$mumps_dir/omp_lib_shim.f90" <<'EOF'
-module omp_lib_kinds
-  use iso_c_binding, only: c_intptr_t, c_int
-  implicit none
-  integer(kind=c_int), parameter :: omp_lock_kind = c_intptr_t
-  integer(kind=c_int), parameter :: omp_nest_lock_kind = c_intptr_t
-end module omp_lib_kinds
-module omp_lib
-  use iso_c_binding, only: c_int
-  use omp_lib_kinds
-  implicit none
-  interface
-    subroutine omp_init_lock(s) bind(c, name="omp_init_lock")
-      import :: omp_lock_kind
-      integer(omp_lock_kind) :: s
-    end subroutine omp_init_lock
-    subroutine omp_destroy_lock(s) bind(c, name="omp_destroy_lock")
-      import :: omp_lock_kind
-      integer(omp_lock_kind) :: s
-    end subroutine omp_destroy_lock
-    subroutine omp_set_lock(s) bind(c, name="omp_set_lock")
-      import :: omp_lock_kind
-      integer(omp_lock_kind) :: s
-    end subroutine omp_set_lock
-    subroutine omp_unset_lock(s) bind(c, name="omp_unset_lock")
-      import :: omp_lock_kind
-      integer(omp_lock_kind) :: s
-    end subroutine omp_unset_lock
-    function omp_test_lock(s) bind(c, name="omp_test_lock")
-      import :: omp_lock_kind, c_int
-      logical(c_int) :: omp_test_lock
-      integer(omp_lock_kind) :: s
-    end function omp_test_lock
-    function omp_get_thread_num() bind(c, name="omp_get_thread_num")
-      import :: c_int
-      integer(c_int) :: omp_get_thread_num
-    end function omp_get_thread_num
-    function omp_get_num_threads() bind(c, name="omp_get_num_threads")
-      import :: c_int
-      integer(c_int) :: omp_get_num_threads
-    end function omp_get_num_threads
-    function omp_get_max_threads() bind(c, name="omp_get_max_threads")
-      import :: c_int
-      integer(c_int) :: omp_get_max_threads
-    end function omp_get_max_threads
-    subroutine omp_set_num_threads(n) bind(c, name="omp_set_num_threads")
-      import :: c_int
-      integer(c_int), value :: n
-    end subroutine omp_set_num_threads
-    function omp_get_dynamic() bind(c, name="omp_get_dynamic")
-      import :: c_int
-      logical(c_int) :: omp_get_dynamic
-    end function omp_get_dynamic
-    subroutine omp_set_dynamic(d) bind(c, name="omp_set_dynamic")
-      import :: c_int
-      logical(c_int), value :: d
-    end subroutine omp_set_dynamic
-    function omp_get_nested() bind(c, name="omp_get_nested")
-      import :: c_int
-      logical(c_int) :: omp_get_nested
-    end function omp_get_nested
-    subroutine omp_set_nested(n) bind(c, name="omp_set_nested")
-      import :: c_int
-      logical(c_int), value :: n
-    end subroutine omp_set_nested
-    function omp_get_wtime() bind(c, name="omp_get_wtime")
-      import :: c_int
-      double precision :: omp_get_wtime
-    end function omp_get_wtime
-  end interface
-end module omp_lib
-EOF
-(cd "$mumps_dir" && flang -c -O2 -fopenmp -fms-runtime-lib=dll omp_lib_shim.f90) || exit 1
-
 make -C "$mumps_dir" -j"$cpu_count" d
-
-# append the shim object to the fresh mumps_common archive
-cp "$mumps_dir/lib/libmumps_common.lib" "$mumps_dir/lib/mc_tmp.lib"
-lib /nologo /out:"$mumps_dir/lib/mc_merged.lib" \
-  "$mumps_dir/lib/mc_tmp.lib" "$mumps_dir/omp_lib_shim.o"
-mv -f "$mumps_dir/lib/mc_merged.lib" "$mumps_dir/lib/libmumps_common.lib"
 
 # install into prefix so PETSc metadata references ${PREFIX}-relative paths;
 # unprefixed names because -l<name> lookups expect no "lib" prefix on Windows
@@ -369,7 +304,7 @@ python ./configure \
   --with-mumps-include="$libprefix/include" \
   --with-mumps-lib="$libprefix/lib/dmumps.lib $libprefix/lib/mumps_common.lib \
 $libprefix/lib/pord.lib $libprefix/lib/metis.lib $libprefix/lib/scalapack.lib \
-$libprefix/lib/scalapack-F.lib $iomp5 $libprefix/lib/flang_rt.runtime.dynamic.lib \
+$libprefix/lib/scalapack-F.lib $libprefix/lib/flang_rt.runtime.dynamic.lib \
 $source_dir/openblas.lib" \
   --with-metis=1 \
   --with-metis-include="$libprefix/include" \

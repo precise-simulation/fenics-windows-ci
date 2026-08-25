@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: petsc
   version: "3.25.4"
-  build: 5
+  build: 6
   # these variables should all be overridden in variant files
   # but default values are sometimes needed for conda-smithy rerender
   mpi: ${{ mpi | default('mpich') }}
@@ -106,8 +106,6 @@ requirements:
       then:
         - impi-devel
         - libopenblas * pthreads_*
-        # import lib for omp_* symbols pulled in by static MUMPS
-        - llvm-openmp
         # sequential METIS ordering for MUMPS/PETSc (metis.h, metis.lib, metis.dll)
         - metis 5.2.*
     - if: not win
@@ -160,8 +158,6 @@ requirements:
       then:
         - impi_rt
         - libopenblas * pthreads_*
-        # libpetsc.dll binds omp_* (MUMPS) to the LLVM/Intel OpenMP runtime
-        - llvm-openmp
         # libpetsc.dll loads metis.dll at runtime
         - metis 5.2.*
     - if: with_cuda
@@ -234,8 +230,6 @@ tests:
             - pkg-config
             - impi-devel
             - libopenblas * pthreads_*
-            # Libs.private references libiomp5md.lib (static MUMPS)
-            - llvm-openmp
             - ${{ compiler('c') }}
         script:
           file: run_test_win.bat

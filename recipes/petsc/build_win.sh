@@ -328,6 +328,9 @@ python ./configure \
 $libprefix/lib/pord.lib $libprefix/lib/scalapack.lib \
 $libprefix/lib/scalapack-F.lib $iomp5 $libprefix/lib/flang_rt.runtime.dynamic.lib \
 $source_dir/openblas.lib" \
+  --with-scalapack=1 \
+  --with-scalapack-include="$libprefix/include" \
+  --with-scalapack-lib="$libprefix/lib/scalapack.lib $libprefix/lib/scalapack-F.lib" \
   --with-cuda=0 \
   --with-hdf5=0 \
   --with-fftw=0 \

@@ -46,6 +46,49 @@ PY
 lib /nologo /def:openblas.def /machine:x64 /out:openblas.lib
 
 # --- win64 extras: ScaLAPACK + MUMPS (static, linked into libpetsc.dll) ---
+# Sources are fetched here rather than as extra recipe sources: rattler
+# extracts every source into the same work dir and the MUMPS tarball's
+# root-level files (LICENSE, ...) collide with PETSc's. Pinned sha256s,
+# stdlib-only python.
+scalapack_url="https://github.com/Reference-ScaLAPACK/scalapack/archive/refs/tags/v2.2.0.zip"
+scalapack_sha="7652f8857bc9e9529fc635860bc0a7c0a787b35627d773b4eb96573773537a35"
+mumps_url="https://mumps-solver.org/MUMPS_5.7.3.tar.gz"
+mumps_sha="84a47f7c4231b9efdf4d4f631a2cae2bdd9adeaabc088261d15af040143ed112"
+
+python - "$source_dir" "$scalapack_url" "$scalapack_sha" "$mumps_url" "$mumps_sha" <<'PY'
+import hashlib, pathlib, sys, tarfile, urllib.request, zipfile
+
+work = pathlib.Path(sys.argv[1])
+
+def fetch(url, sha, name):
+    dest = work / name
+    if dest.exists():
+        return
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    h = hashlib.sha256()
+    with urllib.request.urlopen(url) as r, open(tmp, "wb") as f:
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk:
+                break
+            f.write(chunk)
+            h.update(chunk)
+    if h.hexdigest() != sha:
+        tmp.unlink(missing_ok=True)
+        raise SystemExit(f"sha256 mismatch for {url}")
+    tmp.rename(dest)
+
+fetch(sys.argv[2], sys.argv[3], "scalapack-2.2.0-src.zip")
+fetch(sys.argv[4], sys.argv[5], "MUMPS_5.7.3.tar.gz")
+
+if not (work / "scalapack-2.2.0").is_dir():
+    with zipfile.ZipFile(work / "scalapack-2.2.0-src.zip") as z:
+        z.extractall(work)
+if not (work / "MUMPS_5.7.3").is_dir():
+    with tarfile.open(work / "MUMPS_5.7.3.tar.gz") as t:
+        t.extractall(work)
+PY
+
 # Toolchain notes (see repo README "MUMPS" section / spike evidence):
 #   * flang needs flang-rt_win-64 or nothing Fortran links
 #   * flang defaults to the static CRT; -fms-runtime-lib=dll keeps it /MD
@@ -55,13 +98,13 @@ lib /nologo /def:openblas.def /machine:x64 /out:openblas.lib
 #     -D flags do not)
 #   * MSYS2_ARG_CONV_EXCL=* is set by build.bat: /nologo and /out: survive
 export I_MPI_ROOT="$libprefix"
-# rattler-build 0.74 has no `folder:` for url sources; both archives carry
-# their upstream top-level dir, which is what the paths below expect
+# archives carry their upstream top-level dirs, which is what the paths
+# below expect
 scalapack_dir="$source_dir/scalapack-2.2.0"
 mumps_dir="$source_dir/MUMPS_5.7.3"
 
 if [ ! -d "$scalapack_dir" ] || [ ! -d "$mumps_dir" ]; then
-  echo "win64 extra sources missing (scalapack/mumps)" >&2; exit 1
+  echo "win64 extra sources missing after fetch (scalapack/mumps)" >&2; exit 1
 fi
 
 flangrt=$(ls "$BUILD_PREFIX"/Library/lib/clang/*/lib/x86_64-pc-windows-msvc/flang_rt.runtime.dynamic.lib 2>/dev/null | head -n1)

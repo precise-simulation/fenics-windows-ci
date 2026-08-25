@@ -335,8 +335,10 @@ edits = [
 for arg, old, new in zip(sys.argv[1:], [e[1] for e in edits], [e[2] for e in edits]):
     p = Path(arg)
     t = p.read_text()
-    assert old in t, f"anchor not found in {p.name}"
-    p.write_text(t.replace(old, new, 1))
+    n = t.count(old)
+    assert n >= 1, f"anchor not found in {p.name}"
+    # package.py has TWO copies of the FC gate (external + download paths)
+    p.write_text(t.replace(old, new))
 PY
 
 # --- configure via the win32fe wrappers ---

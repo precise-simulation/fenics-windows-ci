@@ -28,23 +28,23 @@ package:
   version: ${{ version }}
 
 source:
-  url: https://pypi.org/packages/source/${{ name[0] }}/${{ name }}/${{ name }}-${{ version }}.tar.gz
-  sha256: 12c990fb39a5764ac8311211d09c01ed80fb983136c75bf7b558312b2509dbbd
-  patches:
-    - ignore-not-invalid.patch
-    - no-cppflags-in-pkgconfig-cflags.patch
-    - target-cudadir.patch
-    - if: win
-      then:
-        - patches/p1-win32-python.patch
-        - patches/p2-function-name-cxx.patch
-        - patches/p3-nargs-pathsep.patch
-        - patches/p4-check-exe-ext.patch
-        - patches/p5-symlink-fallback.patch
-        - patches/p6-win32fe-exe-regex.patch
-        - patches/p7-win32fe-gnu-flags.patch
-        - patches/p8-install-unlock.patch
-        - patches/p9-sedinplace-oserror.patch
+  - url: https://pypi.org/packages/source/${{ name[0] }}/${{ name }}/${{ name }}-${{ version }}.tar.gz
+    sha256: 12c990fb39a5764ac8311211d09c01ed80fb983136c75bf7b558312b2509dbbd
+    patches:
+      - ignore-not-invalid.patch
+      - no-cppflags-in-pkgconfig-cflags.patch
+      - target-cudadir.patch
+      - if: win
+        then:
+          - patches/p1-win32-python.patch
+          - patches/p2-function-name-cxx.patch
+          - patches/p3-nargs-pathsep.patch
+          - patches/p4-check-exe-ext.patch
+          - patches/p5-symlink-fallback.patch
+          - patches/p6-win32fe-exe-regex.patch
+          - patches/p7-win32fe-gnu-flags.patch
+          - patches/p8-install-unlock.patch
+          - patches/p9-sedinplace-oserror.patch
   # win64 only: ScaLAPACK + MUMPS built statically and linked into
   # libpetsc.dll (see build_win.sh "mumps stage"); there are no usable
   # conda-forge win-64 packages for either (mumps last built 2018, mingw;

@@ -21,8 +21,6 @@ for k in range(nr - 1):
         a1, a2, b1, b2 = a0 + i, a0 + (i + 1) % nt, b0 + i, b0 + (i + 1) % nt
         cells += [(a1, a2, b2), (a1, b2, b1)]
 
-# ponytail: multi-rank runs of this stack crash nondeterministically in mesh
-# partitioning (heap corruption); run serial until precise-simulation fixes it
 # ponytail: pass cells on rank 0 only - identical input on every rank would
 # duplicate the global mesh (and trips a dolfinx redistribution edge case)
 cells = np.array(cells, dtype=np.int64) if MPI.COMM_WORLD.rank == 0 else np.empty((0, 3), dtype=np.int64)
@@ -39,8 +37,8 @@ bc = fem.dirichletbc(0.0, fem.locate_dofs_topological(
     V, domain.topology.dim - 1, mesh.exterior_facet_indices(domain.topology)), V)
 
 u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
-# ponytail: direct LU has no parallel factorizer in this stack (no MUMPS);
-# use iterative GAMG on >1 rank
+# Use scalable GAMG on multiple ranks; the dedicated MUMPS test covers
+# parallel direct LU.
 ksp = {"ksp_type": "preonly", "pc_type": "lu"} if MPI.COMM_WORLD.size == 1 \
     else {"ksp_type": "cg", "pc_type": "gamg", "ksp_rtol": 1e-10}
 problem = LinearProblem(ufl.dot(ufl.grad(u), ufl.grad(v)) * ufl.dx,

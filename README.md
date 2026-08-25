@@ -137,7 +137,7 @@ Actions → *stack* → **Run workflow**
   unrelated redistribution edge case (heap corruption / wrong results).
   Provide cells on rank 0 (or distribute them) instead.
 - Parallel `pc_type=lu` works via MUMPS, built from source and statically
-  linked into libpetsc.dll (build 6+). conda-forge has no usable win-64
+  linked into libpetsc.dll (build 7+). conda-forge has no usable win-64
   mumps/scalapack packages, so petsc vendors both (flang toolchain). The
   Windows MUMPS build is MPI-only: OpenMP code generation is disabled and
   libpetsc.dll carries no OpenMP runtime dependency, so no `OMP_NUM_THREADS`

@@ -230,6 +230,8 @@ tests:
             - pkg-config
             - impi-devel
             - libopenblas * pthreads_*
+            # Libs.private references libiomp5md.lib (static MUMPS)
+            - llvm-openmp
             - ${{ compiler('c') }}
         script:
           file: run_test_win.bat

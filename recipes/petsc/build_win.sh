@@ -306,6 +306,28 @@ cp "$scalapack_dir/build/lib/scalapack-F.lib" "$libprefix/lib/"
 # ${PREFIX}-relative and consumers can relink
 cp "$flangrt" "$libprefix/lib/"
 
+# PETSc's framework refuses any FC-needing external package while
+# --with-fc=0. ScaLAPACK/MUMPS arrive as prebuilt static archives (nothing
+# Fortran is compiled by PETSc itself, and enabling FC would make it parse
+# ifort-built mpi.mod files flang cannot read), so exempt them from that
+# single check.
+python - "$source_dir/config/BuildSystem/config/framework.py" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+t = p.read_text()
+old = ("and (self.argDB['with-fc'] == '0'): raise RuntimeError("
+       "'Package '+child.package+' requested requires Fortran but compiler "
+       "turned off.')")
+new = ("and (self.argDB['with-fc'] == '0') and child.package not in "
+       "('scalapack', 'mumps'): raise RuntimeError("
+       "'Package '+child.package+' requested requires Fortran but compiler "
+       "turned off.')")
+assert old in t, "framework.py FC-check anchor not found"
+p.write_text(t.replace(old, new, 1))
+PY
+
 # --- configure via the win32fe wrappers ---
 python ./configure \
   --with-cc="$PETSC_DIR/lib/petsc/bin/win32fe/win32fe.exe cl" \

@@ -54,12 +54,10 @@ source:
       url: https://github.com/Reference-ScaLAPACK/scalapack/archive/refs/tags/v2.2.0.zip
       sha256: 7652f8857bc9e9529fc635860bc0a7c0a787b35627d773b4eb96573773537a35
       file_name: scalapack-2.2.0-src.zip
-      folder: scalapack-2.2.0
   - if: win
     then:
       url: https://mumps-solver.org/MUMPS_5.7.3.tar.gz
       sha256: 84a47f7c4231b9efdf4d4f631a2cae2bdd9adeaabc088261d15af040143ed112
-      folder: mumps-5.7.3
 
 build:
   number: ${{ build }}

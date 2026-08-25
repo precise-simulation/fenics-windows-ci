@@ -55,10 +55,10 @@ lib /nologo /def:openblas.def /machine:x64 /out:openblas.lib
 #     -D flags do not)
 #   * MSYS2_ARG_CONV_EXCL=* is set by build.bat: /nologo and /out: survive
 export I_MPI_ROOT="$libprefix"
+# rattler-build 0.74 has no `folder:` for url sources; both archives carry
+# their upstream top-level dir, which is what the paths below expect
 scalapack_dir="$source_dir/scalapack-2.2.0"
-mumps_dir="$source_dir/mumps-5.7.3"
-stage_inc="$source_dir/mumps-stage/include"
-mkdir -p "$stage_inc"
+mumps_dir="$source_dir/MUMPS_5.7.3"
 
 if [ ! -d "$scalapack_dir" ] || [ ! -d "$mumps_dir" ]; then
   echo "win64 extra sources missing (scalapack/mumps)" >&2; exit 1
@@ -131,7 +131,7 @@ CC      = clang
 FC      = flang
 FL      = flang
 AR      = lib /nologo /out:
-RANLIB  = llvm-ranlib
+RANLIB  = /bin/true
 LPORDDIR = \$(topdir)/PORD/lib/
 IPORD    = -I\$(topdir)/PORD/include/
 LPORD    = -L\$(LPORDDIR) -lpord\$(PLAT)
@@ -250,7 +250,7 @@ mv -f "$mumps_dir/lib/mc_merged.lib" "$mumps_dir/lib/libmumps_common.lib"
 mkdir -p "$libprefix/include" "$libprefix/lib"
 cp "$mumps_dir/include/dmumps_c.h" "$mumps_dir/include/mumps_compat.h" \
    "$mumps_dir/include/mumps_c_types.h" "$mumps_dir/include/mumps_int_def.h" \
-   "$stage_inc/"
+   "$libprefix/include/"
 cp "$mumps_dir/lib/libdmumps.lib"        "$libprefix/lib/dmumps.lib"
 cp "$mumps_dir/lib/libmumps_common.lib"  "$libprefix/lib/mumps_common.lib"
 cp "$mumps_dir/lib/libpord.lib"          "$libprefix/lib/pord.lib"
@@ -277,10 +277,11 @@ python ./configure \
   --with-mpiexec="$mpi_exec -localonly" \
   --with-blaslapack-lib="$source_dir/openblas.lib" \
   --with-mumps=1 \
-  --with-mumps-include="$stage_inc" \
+  --with-mumps-include="$libprefix/include" \
   --with-mumps-lib="$libprefix/lib/dmumps.lib $libprefix/lib/mumps_common.lib \
 $libprefix/lib/pord.lib $libprefix/lib/scalapack.lib \
-$libprefix/lib/scalapack-F.lib $iomp5 $libprefix/lib/flang_rt.runtime.dynamic.lib" \
+$libprefix/lib/scalapack-F.lib $iomp5 $libprefix/lib/flang_rt.runtime.dynamic.lib \
+$source_dir/openblas.lib" \
   --with-cuda=0 \
   --with-hdf5=0 \
   --with-fftw=0 \

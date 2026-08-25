@@ -118,6 +118,8 @@ export CFLAGS="/MD"
 export CMAKE_BUILD_TYPE=Release
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
 export CMAKE_GENERATOR=Ninja
+# VS activation exports CMAKE_GENERATOR_PLATFORM=x64; Ninja rejects it
+unset CMAKE_GENERATOR_PLATFORM
 
 # ScaLAPACK: bypass FindMPI on WIN32 (conda impi layout breaks its wrapper
 # detection, and its Fortran try-compiles never wire impi.lib in). Static

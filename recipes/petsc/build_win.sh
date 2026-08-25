@@ -309,12 +309,12 @@ cp "$flangrt" "$libprefix/lib/"
 # PETSc's framework refuses any FC-needing external package while
 # --with-fc=0, twice: once in framework.py's serialEvaluation and again in
 # package.py's consistencyChecks. ScaLAPACK/MUMPS arrive as prebuilt static
-# archives (nothing Fortran is compiled by PETSc itself, their function
-# checks only use Fortran-mangled names from C, and enabling FC would make
-# PETSc parse ifort-built mpi.mod files flang cannot read) - exempt both
-# packages from those checks.
+# archives, and enabling FC would make PETSc parse ifort-built mpi.mod files
+# flang cannot read. Exempt both packages, and pin ScaLAPACK's probe to the
+# verified Flang underscore symbol because PETSc cannot infer mangling without FC.
 python - "$source_dir/config/BuildSystem/config/framework.py" \
-         "$source_dir/config/BuildSystem/config/package.py" <<'PY'
+         "$source_dir/config/BuildSystem/config/package.py" \
+         "$source_dir/config/BuildSystem/config/packages/ScaLAPACK.py" <<'PY'
 from pathlib import Path
 import sys
 
@@ -331,6 +331,9 @@ edits = [
      "if 'FC'  in self.buildLanguages and not hasattr(self.compilers, 'FC'):",
      "if 'FC'  in self.buildLanguages and not hasattr(self.compilers, 'FC') "
      "and self.package not in ('scalapack', 'mumps'):"),
+    ("ScaLAPACK.py",
+     "self.functions        = ['pssytrd']\n    self.functionsFortran = 1",
+     "self.functions        = ['pssytrd_']\n    self.functionsFortran = 0"),
 ]
 for arg, old, new in zip(sys.argv[1:], [e[1] for e in edits], [e[2] for e in edits]):
     p = Path(arg)

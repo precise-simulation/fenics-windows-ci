@@ -205,10 +205,10 @@ EOF
 
 mkdir -p "$mumps_dir/include"
 cp "$mumps_dir/src/mumps_int_def32_h.in" "$mumps_dir/include/mumps_int_def.h"
-make -C "$mumps_dir" -j"$cpu_count" d
 
-# minimal omp_lib module shim (conda flang ships no omp_lib.mod); compiled
-# once here and folded into mumps_common
+# minimal omp_lib module shim, built BEFORE mumps: conda-forge flang ships
+# no omp_lib.mod, and -fopenmp activates `USE OMP_LIB` sentinels in MUMPS.
+# Compiled inside $mumps_dir so the .mod files sit on the -I$(topdir) path.
 cat > "$mumps_dir/omp_lib_shim.f90" <<'EOF'
 module omp_lib_kinds
   use iso_c_binding, only: c_intptr_t, c_int
@@ -281,9 +281,9 @@ module omp_lib
   end interface
 end module omp_lib
 EOF
-flang -c -O2 -fopenmp -fms-runtime-lib=dll "$mumps_dir/omp_lib_shim.f90" \
-  || exit 1
-mv omp_lib_shim.o omp_lib.mod "$mumps_dir/"
+(cd "$mumps_dir" && flang -c -O2 -fopenmp -fms-runtime-lib=dll omp_lib_shim.f90) || exit 1
+
+make -C "$mumps_dir" -j"$cpu_count" d
 
 # append the shim object to the fresh mumps_common archive
 cp "$mumps_dir/lib/libmumps_common.lib" "$mumps_dir/lib/mc_tmp.lib"

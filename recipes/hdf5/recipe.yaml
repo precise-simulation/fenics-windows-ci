@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: hdf5
   version: "1.14.6"
-  build: 8
+  build: 9
   mpi: impi
 
 package:
@@ -28,7 +28,6 @@ requirements:
     - ${{ compiler("c") }}
     - ${{ stdlib("c") }}
     - ${{ compiler("cxx") }}
-    - ${{ compiler("fortran") }}
     - cmake
     - ninja
   host:

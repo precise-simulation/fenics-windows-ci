@@ -54,16 +54,23 @@ foreach ($s in $stages) {
     if (Test-Path "$output/win-64/repodata.json") { $channels += "file:///$($output -replace '\\','/')" }
     $channels += "precise-simulation", "conda-forge"
 
+    # Scope diagnostic-log discovery to files written by this stage. Without
+    # this timestamp gate, a later failure can pick up and relabel a stale
+    # configure log left by an earlier stage in output/bld.
+    $stageStarted = Get-Date
+
     & rattler-build build `
         --recipe $s.recipe `
         --variant-config $s.variants `
         --output-dir $output `
         @($channels | ForEach-Object { "-c"; $_ })
     if ($LASTEXITCODE -ne 0) {
-        # surface the deepest configure/make log we can find
+        # surface the deepest configure/make log written by this stage
         $clog = Get-ChildItem "$output/bld" -Recurse -Filter "configure.log" -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $stageStarted } |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
         $cmakeLog = Get-ChildItem "$output/bld" -Recurse -Filter "CMakeConfigureLog.yaml" -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $stageStarted } |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
         New-Item -ItemType Directory -Force $logOutput | Out-Null
         if ($clog) {

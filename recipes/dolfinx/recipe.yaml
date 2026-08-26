@@ -94,16 +94,21 @@ outputs:
         - if: not win
           then:
             - ${{ pin_compatible("parmetis", upper_bound="x.x") }}
-        # needs boost metadata just to CMake-load fenix-libdolfinx
-        - libboost-devel
+        - if: not win
+          then:
+            # needs boost metadata just to CMake-load fenix-libdolfinx
+            # (Windows: boost is private since apply-boost-private-fix.py)
+            - libboost-devel
       # Scotch is statically linked into dolfinx.dll; win-64 scotch packages
       # carry no DLLs, so their headers/CMake files are build-only there.
+      # Boost is likewise private on Windows (apply-boost-private-fix.py).
       ignore_run_exports:
         from_package:
           - if: win
             then:
               - libscotch
               - libptscotch
+              - libboost-devel
       run_exports:
         weak:
           - ${{ pin_subpackage("fenics-libdolfinx", upper_bound="x.x.x") }}
@@ -145,6 +150,16 @@ outputs:
               then: libopenblas * pthreads_*
             - if: win
               then: petsc ==3.25.4 ${{ scalar }}_*
+            - if: win
+              # unittests compile the installed public headers, which include
+              # boost headers directly; no longer exported since the private-
+              # boost change (apply-boost-private-fix.ps1)
+              then: libboost-devel
+            - if: win
+              # guard: newest gmsh builds pin metis <5.1.1 which conflicts
+              # with petsc's metis 5.2; without this the solver backtracks
+              # to an old petsc whose MUMPS+METIS ordering hangs forever
+              then: metis >=5.2,<5.2.2.0a0
             - pkg-config
             - cmake
             - catch2 3.*
@@ -206,8 +221,10 @@ outputs:
             - petsc4py
             - slepc
             - slepc4py
-        # not actually a dependency of the Python part, but having it here
-        # seems to fix a solver error on libxml2's noicu build
+        # Boost headers: the Python wrapper sources include boost headers
+        # directly, and keeping the package here also avoids a historical
+        # solver error on libxml2's noicu build. Its run export is ignored
+        # on Windows below so no libboost reaches runtime metadata.
         - libboost-devel
       run:
         # code generation only needs c, not cxx
@@ -235,6 +252,11 @@ outputs:
         - fenics-basix ${{ major_minor }}
         - fenics-ffcx ${{ major_minor }}
         - fenics-ufl ${{ ufl_version }}
+      ignore_run_exports:
+        from_package:
+          - if: win
+            then:
+              - libboost-devel
     tests:
       - script:
           # rattler-build bug:
@@ -263,6 +285,8 @@ outputs:
                 # workaround pip check on Windows
                 - colorama
             - python-gmsh
+            - if: win
+              then: metis >=5.2,<5.2.2.0a0
             - if: linux and aarch64
               then:
                 - libgl-devel

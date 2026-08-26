@@ -4,6 +4,9 @@ setlocal EnableDelayedExpansion
 set "PETSC_DIR=%LIBRARY_PREFIX%"
 set "PKG_CONFIG_PATH=%LIBRARY_PREFIX%\lib\pkgconfig;%PKG_CONFIG_PATH%"
 set "PATH=%PREFIX%\bin;%LIBRARY_PREFIX%\bin;%PATH%"
+rem installed public headers include boost headers directly, but Boost is a
+rem private dependency of the exported dolfinx target now
+set "CXXFLAGS=%CXXFLAGS% -I%LIBRARY_PREFIX%\include"
 
 ffcx cpp/test/poisson.py -o cpp/test
 if errorlevel 1 exit 1

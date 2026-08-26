@@ -10,6 +10,10 @@ rem (see apply-caster-petsc-fix.py)
 if errorlevel 1 exit 1
 
 set "CXXFLAGS=%CXXFLAGS% -DH5_BUILT_AS_DYNAMIC_LIB /MP2 /wd4244 /wd4267"
+rem fenics-libdolfinx no longer exports Boost headers, but the wrapper
+rem sources include boost headers directly (geometry.h, FunctionSpace.h),
+rem so point the compiler at the host Boost explicitly.
+set "CXXFLAGS=%CXXFLAGS% -I%LIBRARY_PREFIX%\include"
 set "CMAKE_BUILD_PARALLEL_LEVEL=2"
 set "PETSC_DIR=%LIBRARY_PREFIX%"
 set "PKG_CONFIG_PATH=%LIBRARY_PREFIX%\lib\pkgconfig;%PKG_CONFIG_PATH%"

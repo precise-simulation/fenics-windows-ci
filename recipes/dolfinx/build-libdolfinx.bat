@@ -4,6 +4,11 @@ setlocal EnableDelayedExpansion
 call "%RECIPE_DIR%\prepare-dolfinx-source.bat"
 if errorlevel 1 exit 1
 
+rem Boost is a private dependency of dolfinx on Windows (see
+rem apply-boost-private-fix.ps1); the installed package must not export it.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%RECIPE_DIR%\apply-boost-private-fix.ps1" "%SRC_DIR%"
+if errorlevel 1 exit 1
+
 set "CXXFLAGS=%CXXFLAGS% -DH5_BUILT_AS_DYNAMIC_LIB"
 set "PETSC_DIR=%LIBRARY_PREFIX%"
 set "PKG_CONFIG_PATH=%LIBRARY_PREFIX%\lib\pkgconfig;%PKG_CONFIG_PATH%"

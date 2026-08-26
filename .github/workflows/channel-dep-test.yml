@@ -1,0 +1,111 @@
+name: channel-dep-test
+
+# Weekly dependency smoke test: solves fenics-dolfinx fresh from the public
+# precise-simulation + conda-forge channels and runs the existing test
+# scripts against what today's repodata resolves.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"   # weekly, Mondays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: channel-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+
+      # No environment cache anywhere in this workflow: every run must
+      # perform a fresh dependency solve against current repodata.
+      - name: Install micromamba
+        uses: mamba-org/setup-micromamba@v3
+        with:
+          # direct URL: the action's release resolution breaks under GitHub
+          # API rate limits; this asset is pinned and known-good on win-64
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.8.1-0/micromamba-win-64
+
+      - name: Put micromamba on PATH
+        shell: pwsh
+        run: Split-Path $env:MAMBA_EXE >> $env:GITHUB_PATH
+
+      # Install exactly as documented in fenics-windows-ci/README.md.
+      - name: Solve and install fenics-dolfinx from public channels
+        shell: pwsh
+        run: |
+          micromamba create -y -n channel-test `
+            -c precise-simulation -c conda-forge `
+            "python=${{ matrix.python }}" `
+            "libblas=*=*openblas" `
+            fenics-dolfinx
+
+      - name: Record selected packages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force channel-test-lists | Out-Null
+          micromamba list -n channel-test --explicit > channel-test-lists/explicit.txt
+          micromamba list -n channel-test           > channel-test-lists/list.txt
+          Get-Content channel-test-lists/list.txt
+
+      # Uploaded before the tests run, so the exact selection is retained
+      # even when a later step fails.
+      - name: Upload selected package lists
+        uses: actions/upload-artifact@v7
+        with:
+          name: channel-smoke-py${{ matrix.python }}
+          path: channel-test-lists/
+          if-no-files-found: error
+
+      - name: Put test environment on PATH
+        shell: pwsh
+        run: |
+          "$env:MAMBA_ROOT_PREFIX/envs/channel-test" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/channel-test/Library/bin" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/channel-test/Scripts" >> $env:GITHUB_PATH
+
+      - name: Run tests
+        shell: pwsh
+        env:
+          OPENBLAS_NUM_THREADS: "1"
+        run: |
+          $prefix = "$env:MAMBA_ROOT_PREFIX/envs/channel-test"
+          $python = Join-Path $prefix "python.exe"
+          $mpiexec = Join-Path $prefix "Library/bin/mpiexec.exe"
+          $scripts = Join-Path (Get-Location) "scripts"
+          # mpiexec children need the environment dirs forwarded explicitly;
+          # same pattern as recipes/petsc4py/run_test.bat.
+          $childPath = "$prefix/bin;$prefix/Scripts;$prefix/Library/bin;$env:SystemRoot/System32;$env:SystemRoot"
+          $childPythonPath = "$prefix/Lib/site-packages"
+
+          function Invoke-Mpi([string]$script) {
+            & $mpiexec -localonly -n 2 `
+              -env PATH $childPath `
+              -env PYTHONPATH $childPythonPath `
+              $python $script
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+          Write-Host "== serial poisson =="
+          python (Join-Path $scripts "test-poisson.py")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Write-Host "== two-rank poisson =="
+          Invoke-Mpi (Join-Path $scripts "test-poisson.py")
+
+          Write-Host "== two-rank CG/GAMG + MUMPS/METIS, ten attempts, no retries =="
+          $mumpsMetis = Join-Path $scripts "test-petsc-mumps-metis.py"
+          foreach ($attempt in 1..10) {
+            Write-Host "-- attempt $attempt of 10 --"
+            Invoke-Mpi $mumpsMetis
+          }

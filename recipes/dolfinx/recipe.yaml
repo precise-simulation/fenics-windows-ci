@@ -91,6 +91,7 @@ outputs:
         # these don't have run_exports
         # but are needed at runtime for code generation
         - fenics-ufcx ${{ major_minor }}
+        - hdf5 ${{ hdf5 }}.* mpi_${{ mpi }}_*
         - if: not win
           then:
             - ${{ pin_compatible("parmetis", upper_bound="x.x") }}
@@ -292,7 +293,6 @@ outputs:
                 - libgl-devel
             - if: linux and target_platform != build_platform
               then:
-                # __glibc virtual package seems to resolve wrong on emulated linux
                 - ${{ stdlib("c") }}
             - sympy
             - scipy

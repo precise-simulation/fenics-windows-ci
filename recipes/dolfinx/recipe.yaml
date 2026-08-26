@@ -293,6 +293,7 @@ outputs:
                 - libgl-devel
             - if: linux and target_platform != build_platform
               then:
+                # __glibc virtual package seems to resolve wrong on emulated linux
                 - ${{ stdlib("c") }}
             - sympy
             - scipy

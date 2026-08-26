@@ -1,0 +1,63 @@
+schema_version: 1
+
+context:
+  name: hdf5
+  version: "1.14.6"
+  build: 8
+  mpi: impi
+
+package:
+  name: hdf5
+  version: ${{ version }}
+
+source:
+  url: https://support.hdfgroup.org/releases/hdf5/v1_14/v1_14_6/downloads/hdf5-1.14.6.tar.gz
+  sha256: e4defbac30f50d64e1556374aa49e574417c9e72c6b1de7a4ff88c4b1bea6e9b
+  patches:
+    - patches/0001-skip-testphdf5.patch
+    - patches/0003-testh5diff.sh.in.patch
+
+build:
+  number: ${{ build }}
+  string: mpi_${{ mpi }}_hros3off_${{ build }}
+  script:
+    file: build.bat
+
+requirements:
+  build:
+    - ${{ compiler("c") }}
+    - ${{ stdlib("c") }}
+    - ${{ compiler("cxx") }}
+    - ${{ compiler("fortran") }}
+    - cmake
+    - ninja
+  host:
+    - impi-devel
+    - zlib
+    - libaec
+
+tests:
+  - script:
+      file: run_test.bat
+    files:
+      recipe:
+        - tests/CMakeLists.txt
+        - tests/hdf5-c-smoke.c
+        - tests/hdf5-cxx-smoke.cpp
+        - tests/hdf5-mpi-smoke.c
+    requirements:
+      run:
+        - ${{ compiler("c") }}
+        - ${{ compiler("cxx") }}
+        - cmake
+        - ninja
+        - impi-devel
+
+about:
+  homepage: https://www.hdfgroup.org/solutions/hdf5/
+  license: BSD-3-Clause
+  license_family: BSD
+  license_file: COPYING
+  summary: HDF5 is a data model, library, and file format for storing and managing data
+  repository: https://github.com/HDFGroup/hdf5
+  documentation: https://portal.hdfgroup.org/display/HDF5/HDF5

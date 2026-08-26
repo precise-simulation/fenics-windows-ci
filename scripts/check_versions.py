@@ -5,6 +5,7 @@ Compares upstream releases against the published precise-simulation channel,
 patches recipe version/sha256 when an update is needed, and emits plan.json.
 
 Rebuild rules:
+  - hdf5 rebuilds when upstream hdf5 != channel hdf5 (or --force)
   - petsc rebuilds when upstream petsc != channel petsc (or --force)
   - petsc4py rebuilds when petsc rebuilt or its own version changed
   - dolfinx   rebuilds when either upstream dependency rebuilt/changed
@@ -23,7 +24,7 @@ import urllib.request
 
 CHANNEL_USER = "precise-simulation"
 RECIPES = pathlib.Path(__file__).resolve().parent.parent / "recipes"
-ORDER = ["petsc", "petsc4py", "dolfinx"]
+ORDER = ["hdf5", "petsc", "petsc4py", "dolfinx"]
 
 
 def http_json(url: str):
@@ -46,6 +47,10 @@ def download_sha256(url: str) -> str:
 
 
 def upstream_version(name: str) -> str:
+    if name == "hdf5":
+        data = http_json("https://api.anaconda.org/package/conda-forge/hdf5")
+        versions = data["versions"]
+        return max(versions, key=vkey) if versions else None
     if name in ("petsc", "petsc4py"):
         return http_json(f"https://pypi.org/pypi/{name}/json")["info"]["version"]
     # dolfinx: latest GitHub release tag (vX.Y.Z)
@@ -63,7 +68,12 @@ def vkey(v: str):
 
 def channel_versions() -> dict[str, str | None]:
     # anaconda.org package names differ from our stage names for dolfinx
-    channel_pkg = {"petsc": "petsc", "petsc4py": "petsc4py", "dolfinx": "fenics-dolfinx"}
+    channel_pkg = {
+        "hdf5": "hdf5",
+        "petsc": "petsc",
+        "petsc4py": "petsc4py",
+        "dolfinx": "fenics-dolfinx",
+    }
     out = {}
     for name in ORDER:
         try:
@@ -94,6 +104,12 @@ def patch_recipe(name: str, new_version: str) -> None:
 
     if name == "dolfinx":
         url = f"https://github.com/fenics/dolfinx/archive/refs/tags/v{new_version}.tar.gz"
+    elif name == "hdf5":
+        major_minor = "_".join(new_version.split(".")[:2])
+        url = (
+            f"https://support.hdfgroup.org/releases/hdf5/v{major_minor}/"
+            f"downloads/hdf5-{new_version}.tar.gz"
+        )
     else:
         url = f"https://pypi.org/packages/source/{name[0]}/{name}/{name}-{new_version}.tar.gz"
 

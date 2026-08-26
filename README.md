@@ -1,6 +1,6 @@
 # fenics-windows-ci
 
-Automated win-64 builds of the PETSc → petsc4py → DOLFINx stack, published to
+Automated win-64 builds of the HDF5 → PETSc → petsc4py → DOLFINx stack, published to
 the [precise-simulation](https://anaconda.org/precise-simulation) anaconda
 channel.
 
@@ -8,9 +8,14 @@ channel.
 
 A scheduled daily workflow (plus a manual button) checks upstream releases
 against what is already published. When anything changed it rebuilds the
-affected stages **in dependency order** — petsc, then petsc4py, then dolfinx,
-each consuming the previous stage's fresh output — and uploads new `.conda`
-files to the channel.
+affected stages **in dependency order** — HDF5, petsc, then petsc4py and
+dolfinx, each consuming the previous stage's fresh output where applicable —
+and uploads new `.conda` files to the channel.
+
+The Windows HDF5 package keeps parallel MPI-IO, C/C++/HL support, zlib, and
+SZIP, but disables the ROS3 S3/HTTP virtual file driver. Local HDF5/XDMF files
+and distributed MPI execution remain supported; only ROS3 object-store access
+is removed.
 
 ## Installation
 
@@ -153,4 +158,3 @@ Actions → *stack* → **Run workflow**
   Serial LU unchanged; `ksp_type=cg, pc_type=gamg` also remains available.
 - This channel is interim: packages retire as the corresponding
   conda-forge feedstock PRs land.
-

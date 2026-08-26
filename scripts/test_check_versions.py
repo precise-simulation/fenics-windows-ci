@@ -14,7 +14,7 @@ class ChannelVersionsTest(unittest.TestCase):
         ):
             self.assertEqual(
                 check_versions.channel_versions(),
-                {"petsc": None, "petsc4py": None, "dolfinx": None},
+                {"hdf5": None, "petsc": None, "petsc4py": None, "dolfinx": None},
             )
 
         with patch.object(
@@ -24,6 +24,19 @@ class ChannelVersionsTest(unittest.TestCase):
         ):
             with self.assertRaises(urllib.error.HTTPError):
                 check_versions.channel_versions()
+
+
+class Hdf5UpstreamTest(unittest.TestCase):
+    @patch.object(
+        check_versions,
+        "http_json",
+        return_value={"versions": ["1.14.5", "1.14.6", "1.9.0"]},
+    )
+    def test_latest_hdf5_version(self, http_json):
+        self.assertEqual(check_versions.upstream_version("hdf5"), "1.14.6")
+        http_json.assert_called_once_with(
+            "https://api.anaconda.org/package/conda-forge/hdf5"
+        )
 
 
 if __name__ == "__main__":

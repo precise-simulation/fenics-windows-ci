@@ -36,6 +36,7 @@ function Add-NoarchStub {
 $plan = (Get-Content $PlanFile | ConvertFrom-Json)
 
 $stages = @(
+    @{ name = "hdf5";     recipe = "$root/recipes/hdf5/recipe.yaml";     variants = "$root/recipes/hdf5/variants-win64.yaml" },
     @{ name = "petsc";     recipe = "$root/recipes/petsc/recipe.yaml";     variants = "$root/recipes/petsc/variants-win64.yaml" },
     @{ name = "petsc4py";  recipe = "$root/recipes/petsc4py/recipe.yaml";  variants = "$root/recipes/petsc4py/variants-win64.yaml" },
     @{ name = "dolfinx";   recipe = "$root/recipes/dolfinx/recipe.yaml";   variants = "$root/recipes/dolfinx/variants-win64.yaml" }

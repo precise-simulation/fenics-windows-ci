@@ -5,7 +5,8 @@ Compares upstream releases against the published precise-simulation channel,
 patches recipe version/sha256 when an update is needed, and emits plan.json.
 
 Rebuild rules:
-  - hdf5 rebuilds when upstream hdf5 != channel hdf5 (or --force)
+  - hdf5 rebuilds when the latest compatible 1.14.x release != channel hdf5
+    (or --force); HDF5 2.x requires an explicit stack migration
   - petsc rebuilds when upstream petsc != channel petsc (or --force)
   - petsc4py rebuilds when petsc rebuilt or its own version changed
   - dolfinx   rebuilds when either upstream dependency rebuilt/changed
@@ -25,6 +26,7 @@ import urllib.request
 CHANNEL_USER = "precise-simulation"
 RECIPES = pathlib.Path(__file__).resolve().parent.parent / "recipes"
 ORDER = ["hdf5", "petsc", "petsc4py", "dolfinx"]
+HDF5_SERIES = "1.14."
 
 
 def http_json(url: str):
@@ -49,7 +51,7 @@ def download_sha256(url: str) -> str:
 def upstream_version(name: str) -> str:
     if name == "hdf5":
         data = http_json("https://api.anaconda.org/package/conda-forge/hdf5")
-        versions = data["versions"]
+        versions = [v for v in data["versions"] if v.startswith(HDF5_SERIES)]
         return max(versions, key=vkey) if versions else None
     if name in ("petsc", "petsc4py"):
         return http_json(f"https://pypi.org/pypi/{name}/json")["info"]["version"]
@@ -117,6 +119,8 @@ def patch_recipe(name: str, new_version: str) -> None:
     sha = download_sha256(url) if new_version != old_ver else re.search(
         r"sha256:\s*([0-9a-f]{64})", text).group(1)
 
+    if name == "hdf5":
+        text = re.sub(r"(url:\s*)\S+", rf"\g<1>{url}", text, count=1)
     text = re.sub(r'(version:\s*")([^"]+)(")', rf"\g<1>{new_version}\g<3>", text, count=1)
     text = re.sub(r"(sha256:\s*)([0-9a-f]{64})", rf"\g<1>{sha}", text, count=1)
     path.write_text(text, encoding="utf-8")

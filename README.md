@@ -12,7 +12,8 @@ affected stages **in dependency order** — HDF5, petsc, then petsc4py and
 dolfinx, each consuming the previous stage's fresh output where applicable —
 and uploads new `.conda` files to the channel.
 
-The Windows HDF5 package keeps parallel MPI-IO, C/C++/HL support, zlib, and
+The Windows HDF5 package currently tracks the compatible 1.14 series and keeps
+parallel MPI-IO, C/C++/HL support, zlib, and
 SZIP, but disables the ROS3 S3/HTTP virtual file driver. Local HDF5/XDMF files
 and distributed MPI execution remain supported; only ROS3 object-store access
 is removed.

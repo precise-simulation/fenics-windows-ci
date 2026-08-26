@@ -96,12 +96,14 @@ outputs:
             - ${{ pin_compatible("parmetis", upper_bound="x.x") }}
         # needs boost metadata just to CMake-load fenix-libdolfinx
         - libboost-devel
-        # need these to resolve cmake dependencies of libscotch
-        # (only on windows)
-        - if: win
-          then:
-            - zlib
-            - liblzma-devel
+      # Scotch is statically linked into dolfinx.dll; win-64 scotch packages
+      # carry no DLLs, so their headers/CMake files are build-only there.
+      ignore_run_exports:
+        from_package:
+          - if: win
+            then:
+              - libscotch
+              - libptscotch
       run_exports:
         weak:
           - ${{ pin_subpackage("fenics-libdolfinx", upper_bound="x.x.x") }}

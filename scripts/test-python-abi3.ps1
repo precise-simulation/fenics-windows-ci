@@ -30,7 +30,7 @@ function Invoke-Micromamba {
     param([string[]]$Arguments)
     & micromamba @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "micromamba failed with exit code $LASTEXITCODE: $($Arguments -join ' ')"
+        throw "micromamba failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')"
     }
 }
 

@@ -60,6 +60,15 @@ jobs:
         shell: pwsh
         run: scripts/build-stack.ps1 -PlanFile plan.json
 
+      - name: Test ABI3 on supported Python versions
+        shell: pwsh
+        run: scripts/test-python-abi3.ps1
+
+      - name: Preview ABI3 on Python 3.15
+        shell: pwsh
+        run: scripts/test-python-abi3.ps1 -Preview
+        continue-on-error: true
+
       - name: Collect build logs on failure
         if: failure()
         uses: actions/upload-artifact@v7

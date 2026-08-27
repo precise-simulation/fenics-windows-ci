@@ -111,7 +111,7 @@ tests:
               run:
                 - pip
                 # abi3: exercise the package on a newer interpreter than it was built against
-                - python 3.13.*
+                - python 3.14.*
                 - ${{ compiler('c') }}
 
       # unix-only: .so paths + run_test.sh (rattler invokes .sh on win)

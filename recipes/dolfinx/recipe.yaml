@@ -278,7 +278,7 @@ outputs:
         requirements:
           run:
             # abi3: exercise the package on a newer interpreter than it was built against
-            - python ${{ "3.13.*" if (win or build_abi3) else "" }}
+            - python ${{ "3.14.*" if (win or build_abi3) else "" }}
             - pip
             - pytest >=6
             - if: win

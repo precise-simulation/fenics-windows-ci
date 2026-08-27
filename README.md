@@ -1,34 +1,20 @@
-# fenics-windows-ci
+# FEniCSx for Windows
 
-Automated win-64 builds of the HDF5 → PETSc → petsc4py → DOLFINx stack, published to
-the [precise-simulation](https://anaconda.org/precise-simulation) anaconda
-channel.
+Native 64-bit Windows conda packages for [FEniCSx](https://fenicsproject.org/), including DOLFINx, PETSc, petsc4py, HDF5, and MPI support.
 
-## What it does
+These packages are built primarily for use with [FEATool Multiphysics](https://www.featool.com), providing its native Windows FEniCSx/PETSc backend, but they can also be installed and used directly from Python without WSL, Docker, or a Linux virtual machine.
 
-A scheduled daily workflow (plus a manual button) checks upstream releases
-against what is already published. When anything changed it rebuilds the
-affected stages **in dependency order** — HDF5, petsc, then petsc4py and
-dolfinx, each consuming the previous stage's fresh output where applicable —
-and uploads new `.conda` files to the channel.
-
-The Windows HDF5 package currently tracks the compatible 1.14 series and keeps
-parallel MPI-IO, C/C++/HL support, zlib, and
-SZIP, but disables the ROS3 S3/HTTP virtual file driver. Local HDF5/XDMF files
-and distributed MPI execution remain supported; only ROS3 object-store access
-is removed.
+Packages are published on the [precise-simulation](https://anaconda.org/precise-simulation) Anaconda channel.
 
 ## Installation
 
-Packages are published for **Windows 64-bit (`win-64`)** as stable-ABI (abi3,
-`cp312`) builds — one binary serves **CPython 3.12, 3.13 and 3.14**. Python
-3.11 and older are not supported (nanobind's stable ABI requires ≥ 3.12).
+### Requirements
 
-Prerequisites: any 64-bit Windows conda distribution (Miniforge, Miniconda,
-Anaconda).
+- Windows 10 or Windows 11, 64-bit
+- Miniforge, Miniconda, or Anaconda
+- CPython 3.12, 3.13, or 3.14
 
-Install the whole stack (petsc, petsc4py, fenics-libdolfinx, fenics-dolfinx
-plus Intel MPI, OpenBLAS, HDF5, basix/ffcx/ufl):
+Create a dedicated conda environment and install DOLFINx:
 
 ```bat
 conda create -n fenics-windows python=3.12
@@ -36,126 +22,165 @@ conda activate fenics-windows
 conda install -c precise-simulation -c conda-forge "libblas=*=*openblas" fenics-dolfinx
 ```
 
-Any of `python=3.12`, `python=3.13` or `python=3.14` works; omitting the pin
-lets the solver pick the newest supported interpreter.
+Python 3.12, 3.13, and 3.14 are supported. The packages use Python's stable ABI, so the same DOLFINx binary can serve all supported interpreter versions.
 
-Verify imports:
+The install pulls in the required Windows builds of PETSc, petsc4py, HDF5, Intel MPI, mpi4py, Basix, FFCx, UFL, PT-Scotch, MUMPS, OpenBLAS, and their dependencies.
 
-```bat
-python -c "import dolfinx, petsc4py; print(dolfinx.__version__, petsc4py.__version__)"
-```
+## Verify the installation
 
-A serial end-to-end check (no MPI launcher or firewall prompt):
+Check that DOLFINx and PETSc can be imported:
 
 ```bat
-python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_SELF, 8, 8); print('serial ok')"
+python -c "import dolfinx, petsc4py; print('DOLFINx', dolfinx.__version__); print('petsc4py', petsc4py.__version__)"
 ```
 
-Optional two-rank check:
+Then create a small mesh:
 
 ```bat
-mpiexec -localonly -n 2 python -c "from mpi4py import MPI; import dolfinx.mesh as m; m.create_unit_square(MPI.COMM_WORLD, 8, 8); print('rank', MPI.COMM_WORLD.rank, 'ok')"
+python -c "from mpi4py import MPI; from dolfinx import mesh; mesh.create_unit_square(MPI.COMM_SELF, 8, 8); print('DOLFINx installation OK')"
 ```
 
-Do not set `I_MPI_FABRICS=shm`: Intel MPI 2021.17 removed the plain `shm`
-keyword (it warns "fabric ... has been removed ... use ofi or shm:ofi"), and
-shared-memory transport between processes on one machine is selected
-automatically anyway. If an older guide told you to set it, clear it with
-`set I_MPI_FABRICS=`.
+If both commands complete successfully, the environment is ready for normal serial FEniCSx use.
 
-A FEniCS test script can be found in `scripts\test-poisson.py`, run:
+## Running FEniCSx
+
+A minimal example:
 
 ```python
-python test-poisson.py  # serial
-mpiexec -n 2 python test-poisson.py  # 2 processes
+from mpi4py import MPI
+from dolfinx import mesh
+
+domain = mesh.create_unit_square(MPI.COMM_WORLD, 16, 16)
+
+print(
+    f"Rank {MPI.COMM_WORLD.rank}: "
+    f"{domain.topology.index_map(domain.topology.dim).size_local} cells"
+)
 ```
 
-### Silencing activation output
-
-Activating an environment prints a page of Visual Studio toolchain probing
-(`vs2022_compiler_vars.bat` echoes its SDK/compiler detection and the vcvars
-banner). This is harmless but noisy. To suppress it:
+Save this as `test.py` and run it serially:
 
 ```bat
-powershell -ExecutionPolicy Bypass -File scripts\quiet-vs-activation.ps1 -Env fenics-windows
+python test.py
 ```
 
-The script patches one package-owned file inside the environment, so rerun it
-after any `conda update`, reinstall, or recreation of the environment. It is
-idempotent and only affects console output during activation — compiler setup
-is unchanged.
-
-### Windows Firewall and MPI
-
-Serial DOLFINx use does not start `mpiexec` and needs no firewall exception.
-
-Multi-process runs use Intel MPI's Hydra launcher and can trigger a Windows
-Firewall prompt for `mpiexec.exe` or a Hydra proxy. `-localonly` keeps process
-launching on the local machine, but neither setting guarantees that the
-launcher will avoid the firewall prompt.
-
-A standard non-administrator user cannot create a permanent Windows Firewall
-allow rule. If such a user receives the prompt, Windows can create block rules
-regardless of the selected response. Users who do not need multi-process MPI
-can use DOLFINx serially without administrator access or firewall prompts.
-
-For multi-process MPI, an administrator or IT deployment can pre-create the
-rules below. Run these commands from an elevated prompt. Rules are keyed to
-the full executable path, so repeat them for each conda environment:
+A more complete Poisson example is included in this repository as [`scripts/test-poisson.py`](scripts/test-poisson.py):
 
 ```bat
-netsh advfirewall firewall add rule name="Intel MPI mpiexec"   dir=in action=allow program="%CONDA_PREFIX%\Library\bin\mpiexec.exe"          remoteip=127.0.0.1,localsubnet profile=any
-netsh advfirewall firewall add rule name="Intel MPI hydra pmi" dir=in action=allow program="%CONDA_PREFIX%\Library\bin\hydra_pmi_proxy.exe"    remoteip=127.0.0.1,localsubnet profile=any
-netsh advfirewall firewall add rule name="Intel MPI hydra bst" dir=in action=allow program="%CONDA_PREFIX%\Library\bin\hydra_bstrap_proxy.exe" remoteip=127.0.0.1,localsubnet profile=any
+python scripts\test-poisson.py
 ```
 
-## Manual trigger
+## Parallel execution with MPI
 
-Actions → *stack* → **Run workflow**
+The packages include Intel MPI and support multi-process DOLFINx runs.
 
-- `force_all` — rebuild everything even if versions are unchanged (use after
-  conda-forge dependency drift such as an Intel MPI / OpenBLAS / HDF5 update)
-- `upload` — publish results (default on; turn off for test runs)
+Run the example above with two local MPI ranks:
 
-## Notes
+```bat
+mpiexec -localonly -n 2 python test.py
+```
 
-- Runs on `windows-2022` (VS2022 preinstalled); recipes are self-contained:
-  MSVC is driven through PETSc's `win32fe`, bash/make come from `m2-*`
-  packages, no system Cygwin involved.
-- FFCx JIT is MPI-safe in this stack: dolfinx compiles forms on rank 0 and
-  broadcasts to other ranks (`dolfinx/jit.py` `mpi_jit_decorator`), with an
-  exclusive-create + ready-marker protocol underneath. Cold-cache two-rank
-  first runs validated 2026-08-25 (5/5, cache wiped each run). A serial
-  warm-up solve is optional — useful for deterministic timing only.
-- **PT-SCOTCH integer width**: the win-64 conda-forge PT-Scotch **int64**
-  build corrupts the process heap on any distributed-graph partition call
-  (deferred `c0000374`/DOUBLE_FREE — crashes at teardown or later, ~always
-  with repeated calls). The stack therefore pins `libscotch`/`libptscotch`
-  to the **int32** builds, which are clean. Minimal repro:
-  `python -c "from mpi4py import MPI; from dolfinx.cpp.graph import partitioner_scotch;
-  from dolfinx.graph import adjacencylist; import numpy as np;
-  g = adjacencylist(np.array([1,2,0,2,0,1], dtype=np.int64),
-  np.array([0,2,4,6], dtype=np.int32))._cpp_object;
-  partitioner_scotch()(MPI.COMM_SELF, 2, g, False)"` (crashes with int64
-  builds even on one rank).
-- Do **not** pass identical cell arrays on every MPI rank to
-  `mesh.create_mesh` — that duplicates the global mesh and trips an
-  unrelated redistribution edge case (heap corruption / wrong results).
-  Provide cells on rank 0 (or distribute them) instead.
-- Parallel `pc_type=lu` works via MUMPS, built from source and statically
-  linked into libpetsc.dll (build 7+). conda-forge has no usable win-64
-  mumps/scalapack packages, so petsc vendors both (flang toolchain). The
-  Windows MUMPS build is MPI-only: OpenMP code generation is disabled and
-  libpetsc.dll carries no OpenMP runtime dependency, so no `OMP_NUM_THREADS`
-  setting is needed or used. Flang remains the Fortran compiler and runtime
-  for MUMPS and ScaLAPACK. MUMPS includes both sequential orderings: PORD
-  (built in-tree) and METIS, which comes from the conda-forge `metis` win-64
-  package that libpetsc.dll loads at runtime. Pass `-mat_mumps_icntl_7 5` to
-  force METIS ordering. ParMETIS remains unavailable, and DOLFINx mesh
-  partitioning is unaffected (it keeps using PT-Scotch). MUMPS scales through
-  MPI ranks; set `OPENBLAS_NUM_THREADS=1` when you want a strict
-  rank-per-core execution model. Optional multi-rank execution remains
-  IT/admin-managed under the existing Windows Firewall and MPI guidance.
-  Serial LU unchanged; `ksp_type=cg, pc_type=gamg` also remains available.
-- This channel is interim: packages retire as the corresponding
-  conda-forge feedstock PRs land.
+or run the bundled Poisson example:
+
+```bat
+mpiexec -localonly -n 2 python scripts\test-poisson.py
+```
+
+`-localonly` restricts process launching to the current computer.
+
+### Windows Firewall
+
+Serial DOLFINx use does not start `mpiexec` and normally requires no Windows Firewall changes.
+
+Multi-process runs use Intel MPI's Hydra launcher and may trigger a Windows Firewall prompt for `mpiexec.exe` or one of the Hydra proxy executables. On managed systems, an administrator or IT deployment may need to allow these executables through the firewall.
+
+Users who only need serial FEniCSx can use the packages without configuring MPI launcher firewall rules.
+
+### Intel MPI fabric setting
+
+Do not set:
+
+```text
+I_MPI_FABRICS=shm
+```
+
+Current Intel MPI versions select local shared-memory transport automatically. If an older configuration has this variable set, clear it with:
+
+```bat
+set I_MPI_FABRICS=
+```
+
+## Included functionality
+
+The Windows stack includes:
+
+- DOLFINx
+- PETSc and petsc4py
+- Intel MPI and mpi4py
+- parallel HDF5 with local HDF5/XDMF support
+- Basix
+- FFCx
+- UFL
+- PT-Scotch mesh partitioning
+- MUMPS sparse direct solver
+- OpenBLAS
+
+Parallel HDF5/XDMF files and distributed DOLFINx computations are supported.
+
+PETSc's MUMPS direct solver is available, for example:
+
+```python
+ksp.setType("preonly")
+pc = ksp.getPC()
+pc.setType("lu")
+pc.setFactorSolverType("mumps")
+```
+
+## Windows-specific notes
+
+### PT-Scotch
+
+The packages use the 32-bit-integer PT-Scotch build, which has been validated for DOLFINx mesh partitioning on Windows.
+
+### Distributed mesh creation
+
+When constructing distributed meshes manually, do not provide an identical complete copy of the global cell array independently on every MPI rank. Supply the mesh data on the root rank or distribute the input appropriately.
+
+### OpenBLAS threads with MPI
+
+For a strict rank-per-core MPI execution model, set:
+
+```bat
+set OPENBLAS_NUM_THREADS=1
+```
+
+This is optional for normal serial use.
+
+## Updating
+
+Update the environment with conda:
+
+```bat
+conda activate fenics-windows
+conda update -c precise-simulation -c conda-forge fenics-dolfinx
+```
+
+## Package channel
+
+Packages are published at:
+
+[https://anaconda.org/precise-simulation](https://anaconda.org/precise-simulation)
+
+This repository contains the recipes and CI infrastructure used to build and publish the native Windows packages.
+
+## Reporting problems
+
+For problems specific to these Windows packages, please open a GitHub issue and include:
+
+- Windows version
+- Python version
+- output of `conda list`
+- the command used to install the packages
+- the complete error message
+
+For general DOLFINx/FEniCSx usage questions that are not Windows-package specific, refer to the upstream [FEniCSx documentation](https://docs.fenicsproject.org/).

@@ -4,10 +4,6 @@ c_stdlib:
 - vs
 cxx_compiler:
 - vs2022
-fortran_compiler:
-- ifx
-fortran_compiler_version:
-- '2025.*'
 impi_devel:
 - 2021.17.0
 mpi:

@@ -53,15 +53,15 @@ foreach ($pythonVersion in $pythonVersions) {
     )
 
     try {
-        Invoke-Micromamba $createArgs
+        Invoke-Micromamba -Arguments $createArgs
 
-        Invoke-Micromamba @(
+        Invoke-Micromamba -Arguments @(
             "run", "-n", $envName,
             "python", "-c",
             "import sys, dolfinx, petsc4py; print(sys.version); print('DOLFINx', dolfinx.__version__); print('petsc4py', petsc4py.__version__)"
         )
 
-        Invoke-Micromamba @(
+        Invoke-Micromamba -Arguments @(
             "run", "-n", $envName,
             "python", "-c",
             "from mpi4py import MPI; from dolfinx import mesh; mesh.create_unit_square(MPI.COMM_SELF, 4, 4); print('serial ABI3 smoke test OK')"

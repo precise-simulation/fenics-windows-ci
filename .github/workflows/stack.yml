@@ -59,7 +59,7 @@ jobs:
           create-args: >-
             -c conda-forge
             rattler-build=0.74.0
-            anaconda-client
+            anaconda-client=1.14.1
           cache-environment: true
           cache-environment-key: ci-${{ hashFiles('.github/workflows/stack.yml') }}
 

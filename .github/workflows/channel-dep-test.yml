@@ -40,10 +40,13 @@ jobs:
         shell: pwsh
         run: Split-Path $env:MAMBA_EXE >> $env:GITHUB_PATH
 
-      # Install exactly as documented in fenics-windows-ci/README.md.
+      # Install exactly as documented in fenics-windows-ci/README.md. Keep
+      # channel priority explicit so a future solver default change cannot mix
+      # a lower-priority build of a package that exists in precise-simulation.
       - name: Solve and install fenics-dolfinx from public channels
         shell: pwsh
         run: |
+          micromamba config set channel_priority strict
           micromamba create -y -n channel-test `
             -c precise-simulation -c conda-forge `
             "python=${{ matrix.python }}" `
@@ -56,7 +59,9 @@ jobs:
           New-Item -ItemType Directory -Force channel-test-lists | Out-Null
           micromamba list -n channel-test --explicit > channel-test-lists/explicit.txt
           micromamba list -n channel-test           > channel-test-lists/list.txt
+          micromamba config get channel_priority   > channel-test-lists/channel-priority.txt
           Get-Content channel-test-lists/list.txt
+          Get-Content channel-test-lists/channel-priority.txt
 
       # Uploaded before the tests run, so the exact selection is retained
       # even when a later step fails.

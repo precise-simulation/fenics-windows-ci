@@ -60,7 +60,7 @@ foreach ($pythonVersion in $pythonVersions) {
     $createArgs = @(
         "create", "-y", "-n", $envName,
         "--override-channels",
-        "--channel-priority", "strict"
+        "--strict-channel-priority"
     )
     foreach ($channel in $channels) {
         $createArgs += @("-c", $channel)

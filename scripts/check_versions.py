@@ -127,6 +127,47 @@ def patch_recipe(name: str, new_version: str) -> None:
     print(f"[plan] {name}: recipe pinned to {new_version} (sha256 {sha[:12]}...)", file=sys.stderr)
 
 
+def sync_dolfinx_windows_petsc_pins(petsc_version: str, petsc4py_version: str) -> None:
+    """Keep DOLFINx's exact Windows PETSc stack pins aligned with this run.
+
+    Strict channel priority is intentional: downstream stages must consume the
+    packages just built into output/.  Consequently, leaving an older literal
+    PETSc/petsc4py patch version in the DOLFINx recipe makes the solve
+    unsatisfiable instead of falling back to a lower-priority channel.
+
+    The replacement counts are deliberate guards.  If the DOLFINx recipe is
+    reorganized, fail here with a useful planner error rather than silently
+    leaving one stale dependency behind and failing much later in rattler-build.
+    """
+    path = RECIPES / "dolfinx" / "recipe.yaml"
+    text = path.read_text(encoding="utf-8")
+
+    text, petsc_count = re.subn(
+        r"petsc ==\d+\.\d+\.\d+",
+        f"petsc =={petsc_version}",
+        text,
+    )
+    text, petsc4py_count = re.subn(
+        r"petsc4py ==\d+\.\d+\.\d+",
+        f"petsc4py =={petsc4py_version}",
+        text,
+    )
+
+    if petsc_count != 4 or petsc4py_count != 2:
+        raise RuntimeError(
+            "DOLFINx Windows PETSc pin layout changed: expected 4 PETSc and "
+            f"2 petsc4py exact pins, found {petsc_count} and {petsc4py_count}. "
+            "Update sync_dolfinx_windows_petsc_pins() with the recipe."
+        )
+
+    path.write_text(text, encoding="utf-8")
+    print(
+        f"[plan] dolfinx: Windows pins synced to petsc={petsc_version}, "
+        f"petsc4py={petsc4py_version}",
+        file=sys.stderr,
+    )
+
+
 def bump_build_number(name: str) -> None:
     path = RECIPES / name / "recipe.yaml"
     text = path.read_text(encoding="utf-8")
@@ -143,6 +184,20 @@ def main() -> int:
     upstream = {name: upstream_version(name) for name in ORDER}
     print(f"[plan] upstream : {upstream}", file=sys.stderr)
     print(f"[plan] channel  : {chan}", file=sys.stderr)
+
+    # The Windows petsc4py recipe deliberately requires the exact PETSc patch
+    # release with the same version number.  Detect an upstream release skew
+    # here rather than allowing strict channel priority to produce a cryptic
+    # downstream solver failure.
+    if upstream["petsc"] != upstream["petsc4py"]:
+        raise RuntimeError(
+            "Windows stack requires matching PETSc/petsc4py patch releases, "
+            f"but upstream latest versions are petsc={upstream['petsc']} and "
+            f"petsc4py={upstream['petsc4py']}. Wait for a matching release or "
+            "choose an explicit compatible pair before rebuilding."
+        )
+
+    sync_dolfinx_windows_petsc_pins(upstream["petsc"], upstream["petsc4py"])
 
     plan: dict[str, dict] = {}
     dirty = False

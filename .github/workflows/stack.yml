@@ -13,6 +13,18 @@ on:
         description: "Publish resulting packages to anaconda.org"
         type: boolean
         default: true
+  pull_request:
+    paths:
+      - "recipes/**"
+      - "scripts/**"
+      - ".github/workflows/stack.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "recipes/**"
+      - "scripts/**"
+      - ".github/workflows/stack.yml"
 
 permissions:
   contents: read
@@ -26,7 +38,10 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 360
     env:
-      FORCE_ALL: ${{ inputs.force_all }}
+      # Version polling is sufficient for scheduled runs. A PR/push that
+      # changes recipes or build/test logic must rebuild even when package
+      # versions have not changed, otherwise recipe-only fixes can be skipped.
+      FORCE_ALL: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || inputs.force_all }}
     steps:
       - uses: actions/checkout@v7
 
@@ -87,7 +102,8 @@ jobs:
         continue-on-error: true
 
       - name: Upload to precise-simulation
-        if: ${{ github.event_name == 'schedule' || inputs.upload }}
+        # Scheduled updates and successful main pushes publish. PRs never do.
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || inputs.upload }}
         shell: pwsh
         env:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}

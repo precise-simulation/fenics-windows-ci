@@ -30,6 +30,17 @@ def loaded_module_path(module_name):
     return path.value
 
 
+def conda_records(package_name):
+    conda_meta = Path(sys.prefix) / "conda-meta"
+    records = []
+    for record_path in sorted(conda_meta.glob(f"{package_name}-*.json")):
+        with record_path.open(encoding="utf-8") as stream:
+            record = json.load(stream)
+        if record.get("name") == package_name:
+            records.append((record_path, record))
+    return records
+
+
 def print_provenance():
     if PETSc.COMM_WORLD.getRank() != 0:
         return
@@ -40,14 +51,8 @@ def print_provenance():
     print(f"petsc4py module: {petsc4py.__file__}")
     print(f"PETSc extension: {PETSc.__file__}")
 
-    conda_meta = Path(sys.prefix) / "conda-meta"
     for package_name in ("petsc", "petsc4py"):
-        records = []
-        for record_path in sorted(conda_meta.glob(f"{package_name}-*.json")):
-            with record_path.open(encoding="utf-8") as stream:
-                record = json.load(stream)
-            if record.get("name") == package_name:
-                records.append((record_path, record))
+        records = conda_records(package_name)
         if not records:
             print(f"Conda {package_name}: <no conda-meta record>")
             continue
@@ -69,9 +74,17 @@ def print_provenance():
 
 def check_interface():
     version = PETSc.Sys.getVersion()
+    runtime_version = ".".join(str(part) for part in version)
+    petsc_records = conda_records("petsc")
+    assert len(petsc_records) == 1, [str(path) for path, _ in petsc_records]
+    record_path, record = petsc_records[0]
+    package_version = record.get("version")
+
     if PETSc.COMM_WORLD.getRank() == 0:
         print(f"PETSc runtime version: {version!r}")
-    assert version == (3, 25, 4), version
+        print(f"PETSc package version: {package_version!r} ({record_path})")
+
+    assert runtime_version == package_version, (runtime_version, package_version)
     assert np.dtype(PETSc.ScalarType).kind == "f"
     assert np.dtype(PETSc.ScalarType).itemsize == 8
     assert np.dtype(PETSc.IntType).itemsize == 4

@@ -137,11 +137,11 @@ def sync_dolfinx_windows_petsc_pins(petsc_version: str, petsc4py_version: str) -
     """Keep DOLFINx's exact Windows PETSc stack pins aligned with this run.
 
     Strict channel priority is intentional: downstream stages must consume the
-    packages just built into output/.  Consequently, leaving an older literal
+    packages just built into output/. Consequently, leaving an older literal
     PETSc/petsc4py patch version in the DOLFINx recipe makes the solve
     unsatisfiable instead of falling back to a lower-priority channel.
 
-    The replacement counts are deliberate guards.  If the DOLFINx recipe is
+    The replacement counts are deliberate guards. If the DOLFINx recipe is
     reorganized, fail here with a useful planner error rather than silently
     leaving one stale dependency behind and failing much later in rattler-build.
     """
@@ -192,7 +192,7 @@ def main() -> int:
     print(f"[plan] channel  : {chan}", file=sys.stderr)
 
     # The Windows petsc4py recipe deliberately requires the exact PETSc patch
-    # release with the same version number.  Detect an upstream release skew
+    # release with the same version number. Detect an upstream release skew
     # here rather than allowing strict channel priority to produce a cryptic
     # downstream solver failure.
     if upstream["petsc"] != upstream["petsc4py"]:

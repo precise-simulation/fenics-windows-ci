@@ -80,7 +80,7 @@ function Assert-LocalPackageVersion {
     }
 
     $selected = @($matches | ForEach-Object { "$($_.name)-$($_.version)-$($_.build)" })
-    Write-Host "local channel verified for $Stage: $($selected -join ', ')"
+    Write-Host "local channel verified for ${Stage}: $($selected -join ', ')"
 
     Copy-Item $repodataPath (Join-Path $logOutput "$Stage-repodata.json") -Force
     [ordered]@{

@@ -43,10 +43,11 @@ jobs:
       # versions have not changed, otherwise recipe-only fixes can be skipped.
       FORCE_ALL: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || inputs.force_all }}
     steps:
-      - uses: actions/checkout@v7
+      # Pin action revisions so CI behavior cannot change underneath the stack.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install build tooling (rattler-build, anaconda-client)
-        uses: mamba-org/setup-micromamba@v3
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
         with:
           # direct URL: the action's release resolution breaks under GitHub
           # API rate limits; this asset is pinned and known-good on win-64
@@ -54,7 +55,7 @@ jobs:
           environment-name: ci
           create-args: >-
             -c conda-forge
-            rattler-build=0.74.*
+            rattler-build=0.74.0
             anaconda-client
           cache-environment: true
           cache-environment-key: ci-${{ hashFiles('.github/workflows/stack.yml') }}
@@ -87,16 +88,21 @@ jobs:
         run: scripts/test-python-abi3.ps1 -Preview
         continue-on-error: true
 
-      # build-stack.ps1 always writes a compact provenance bundle containing
-      # plan.json, exact workspace recipes/variants, channel order, tool version,
-      # and per-stage repodata/package manifests. Configure/CMake logs are added
-      # to the same directory if a stage fails.
+      # build-stack.ps1 writes the rich build-logs bundle once it starts. The
+      # additional direct paths ensure planner output and mutated recipe inputs
+      # survive even if build-stack.ps1 itself has a parse/startup failure.
       - name: Upload build diagnostics
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: build-diagnostics
-          path: build-logs/
+          path: |
+            build-logs/
+            plan.json
+            recipes/*/recipe.yaml
+            recipes/*/variants-win64.yaml
+            scripts/build-stack.ps1
+            scripts/check_versions.py
           if-no-files-found: warn
           retention-days: 14
         continue-on-error: true

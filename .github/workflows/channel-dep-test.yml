@@ -8,13 +8,18 @@ on:
   schedule:
     - cron: "0 4 * * 1"   # weekly, Mondays 04:00 UTC
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/channel-dep-test.yml"
+      - "scripts/test-poisson.py"
+      - "scripts/test-petsc-mumps-metis.py"
 
 permissions:
   contents: read
 
 concurrency:
-  group: channel-smoke
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('channel-smoke-pr-{0}', github.event.pull_request.number) || 'channel-smoke' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   smoke:
@@ -40,14 +45,14 @@ jobs:
         shell: pwsh
         run: Split-Path $env:MAMBA_EXE >> $env:GITHUB_PATH
 
-      # Install exactly as documented in fenics-windows-ci/README.md. Keep
-      # channel priority explicit so a future solver default change cannot mix
-      # a lower-priority build of a package that exists in precise-simulation.
+      # Solve only against the documented channels. `--override-channels`
+      # prevents any setup/user condarc channel from participating; strict
+      # priority guarantees precise-simulation wins for package names it owns.
       - name: Solve and install fenics-dolfinx from public channels
         shell: pwsh
         run: |
-          micromamba config set channel_priority strict
           micromamba create -y -n channel-test `
+            --override-channels --strict-channel-priority `
             -c precise-simulation -c conda-forge `
             "python=${{ matrix.python }}" `
             "libblas=*=*openblas" `
@@ -59,9 +64,7 @@ jobs:
           New-Item -ItemType Directory -Force channel-test-lists | Out-Null
           micromamba list -n channel-test --explicit > channel-test-lists/explicit.txt
           micromamba list -n channel-test           > channel-test-lists/list.txt
-          micromamba config get channel_priority   > channel-test-lists/channel-priority.txt
           Get-Content channel-test-lists/list.txt
-          Get-Content channel-test-lists/channel-priority.txt
 
       # Uploaded before the tests run, so the exact selection is retained
       # even when a later step fails.

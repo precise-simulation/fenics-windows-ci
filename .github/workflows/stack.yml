@@ -14,6 +14,9 @@ on:
         type: boolean
         default: true
 
+permissions:
+  contents: read
+
 concurrency:
   group: stack-build
   cancel-in-progress: false
@@ -69,13 +72,18 @@ jobs:
         run: scripts/test-python-abi3.ps1 -Preview
         continue-on-error: true
 
-      - name: Collect build logs on failure
-        if: failure()
+      # build-stack.ps1 always writes a compact provenance bundle containing
+      # plan.json, exact workspace recipes/variants, channel order, tool version,
+      # and per-stage repodata/package manifests. Configure/CMake logs are added
+      # to the same directory if a stage fails.
+      - name: Upload build diagnostics
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: build-logs
+          name: build-diagnostics
           path: build-logs/
-          if-no-files-found: ignore
+          if-no-files-found: warn
+          retention-days: 14
         continue-on-error: true
 
       - name: Upload to precise-simulation

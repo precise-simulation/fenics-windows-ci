@@ -17,8 +17,8 @@ Windows stack invariants:
   - PETSc and petsc4py use the same selected patch release
   - every exact PETSc/petsc4py pin in the DOLFINx recipe is rewritten to that
     selected pair before any build starts
-  - rebuilding an already-published package version bumps its recipe build
-    revision so recipe-only/downstream rebuilds do not reuse the old revision
+  - rebuilding an already-published package version uses a build number higher
+    than every published win-64 distribution of that version
 """
 from __future__ import annotations
 
@@ -29,11 +29,26 @@ import pathlib
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 CHANNEL_USER = "precise-simulation"
 RECIPES = pathlib.Path(__file__).resolve().parent.parent / "recipes"
 ORDER = ["hdf5", "petsc", "petsc4py", "dolfinx"]
+CHANNEL_PACKAGE = {
+    "hdf5": "hdf5",
+    "petsc": "petsc",
+    "petsc4py": "petsc4py",
+    "dolfinx": "fenics-dolfinx",
+}
+# DOLFINx's real-scalar Windows output uses `build + 100`; the other Windows
+# stage outputs use the context build revision directly.
+WINDOWS_BUILD_NUMBER_OFFSET = {
+    "hdf5": 0,
+    "petsc": 0,
+    "petsc4py": 0,
+    "dolfinx": 100,
+}
 HDF5_SERIES = "1.14."
 STABLE_PATCH_RE = re.compile(r"^\d+\.\d+\.\d+(?:\.post\d+)?$")
 EXACT_PATCH_RE = r"\d+\.\d+\.\d+(?:\.post\d+)?"
@@ -124,17 +139,11 @@ def latest_matching_petsc_pair() -> str:
 
 
 def channel_versions() -> dict[str, str | None]:
-    # anaconda.org package names differ from our stage names for dolfinx
-    channel_pkg = {
-        "hdf5": "hdf5",
-        "petsc": "petsc",
-        "petsc4py": "petsc4py",
-        "dolfinx": "fenics-dolfinx",
-    }
-    out = {}
+    out: dict[str, str | None] = {}
     for name in ORDER:
+        package = CHANNEL_PACKAGE[name]
         try:
-            data = http_json(f"https://api.anaconda.org/package/{CHANNEL_USER}/{channel_pkg[name]}")
+            data = http_json(f"https://api.anaconda.org/package/{CHANNEL_USER}/{package}")
         except urllib.error.HTTPError as exc:
             if exc.code != 404:
                 raise
@@ -143,6 +152,29 @@ def channel_versions() -> dict[str, str | None]:
             versions = data["versions"]
             out[name] = max(versions, key=vkey) if versions else None
     return out
+
+
+def channel_win64_max_build_number(name: str, version: str) -> int | None:
+    """Return highest published win-64 build number for one exact version."""
+    package = CHANNEL_PACKAGE[name]
+    encoded_version = urllib.parse.quote(version, safe="")
+    url = f"https://api.anaconda.org/release/{CHANNEL_USER}/{package}/{encoded_version}"
+    try:
+        data = http_json(url)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+    build_numbers: list[int] = []
+    for distribution in data.get("distributions", []):
+        attrs = distribution.get("attrs") or {}
+        if attrs.get("subdir") != "win-64":
+            continue
+        build_number = attrs.get("build_number")
+        if isinstance(build_number, int):
+            build_numbers.append(build_number)
+    return max(build_numbers) if build_numbers else None
 
 
 def read_recipe(name: str) -> tuple[str, str]:
@@ -230,21 +262,35 @@ def sync_dolfinx_windows_petsc_pins(petsc_version: str, petsc4py_version: str) -
     )
 
 
-def bump_build_number(name: str) -> None:
-    """Increment the recipe context build revision or fail on layout drift."""
+def advance_build_number(name: str, published_build_number: int | None) -> None:
+    """Set context build so the emitted win-64 build exceeds public channel."""
     path = RECIPES / name / "recipe.yaml"
     text = path.read_text(encoding="utf-8")
     match = re.search(r"(?m)^  build:\s*(\d+)\s*$", text)
     if not match:
         raise RuntimeError(
             f"Could not find two-space-indented context build revision in {path}; "
-            "update bump_build_number() for the new recipe layout."
+            "update advance_build_number() for the new recipe layout."
         )
-    old_build = int(match.group(1))
-    new_build = old_build + 1
-    text = text[: match.start(1)] + str(new_build) + text[match.end(1) :]
+
+    current_context_build = int(match.group(1))
+    offset = WINDOWS_BUILD_NUMBER_OFFSET[name]
+    next_context_build = current_context_build + 1
+    if published_build_number is not None:
+        next_context_build = max(next_context_build, published_build_number - offset + 1)
+
+    text = (
+        text[: match.start(1)]
+        + str(next_context_build)
+        + text[match.end(1) :]
+    )
     path.write_text(text, encoding="utf-8")
-    print(f"[plan] {name}: build revision {old_build} -> {new_build}", file=sys.stderr)
+    emitted_build_number = next_context_build + offset
+    print(
+        f"[plan] {name}: context build {current_context_build} -> {next_context_build} "
+        f"(win-64 build_number={emitted_build_number}, published max={published_build_number})",
+        file=sys.stderr,
+    )
 
 
 def main() -> int:
@@ -277,11 +323,12 @@ def main() -> int:
             patch_recipe(name, upstream[name])
 
         # If this exact package version already exists on the public channel,
-        # the current run is a recipe-only/forced/downstream rebuild. Give it a
-        # newer build revision even when the checked-in recipe version is stale
-        # and was just patched to the selected version above.
+        # the current run is a recipe-only/forced/downstream rebuild. Derive
+        # the next build revision from the public win-64 distribution metadata,
+        # not from potentially stale checked-in recipe state.
         if needs and upstream[name] == chan[name]:
-            bump_build_number(name)
+            published_build_number = channel_win64_max_build_number(name, upstream[name])
+            advance_build_number(name, published_build_number)
 
         plan[name] = {"version": upstream[name], "rebuild": bool(needs)}
         dirty = dirty or needs

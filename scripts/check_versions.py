@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide which stages of the win-64 fenics stack need rebuilding.
+"""Decide which stages of the win-64 FEniCS stack need rebuilding.
 
 Compares upstream releases against the published precise-simulation channel,
 patches recipe version/sha256 when an update is needed, synchronizes exact
@@ -7,19 +7,21 @@ Windows PETSc-family pins used by downstream DOLFINx, and emits plan.json.
 
 Rebuild rules:
   - hdf5 rebuilds when the latest compatible 1.14.x release != channel hdf5
-    (or --force); HDF5 2.x requires an explicit stack migration
-  - petsc rebuilds when upstream petsc != channel petsc (or --force)
-  - petsc4py rebuilds when petsc rebuilt or its own version changed
-  - dolfinx   rebuilds when either upstream dependency rebuilt/changed
+    (or forced); HDF5 2.x requires an explicit stack migration
+  - PETSc/petsc4py use the newest stable patch release published by both projects
+  - petsc rebuilds when the selected pair != channel petsc (or forced)
+  - petsc4py rebuilds when petsc rebuilt or its own channel version changed
+  - dolfinx rebuilds when either upstream dependency rebuilt/changed
 
-Windows stack invariant:
-  - PETSc and petsc4py use the same patch release
+Windows stack invariants:
+  - PETSc and petsc4py use the same selected patch release
   - every exact PETSc/petsc4py pin in the DOLFINx recipe is rewritten to that
     selected pair before any build starts
+  - rebuilding an already-published package version bumps its recipe build
+    revision so recipe-only/downstream rebuilds do not reuse the old revision
 """
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
@@ -33,6 +35,8 @@ CHANNEL_USER = "precise-simulation"
 RECIPES = pathlib.Path(__file__).resolve().parent.parent / "recipes"
 ORDER = ["hdf5", "petsc", "petsc4py", "dolfinx"]
 HDF5_SERIES = "1.14."
+STABLE_PATCH_RE = re.compile(r"^\d+\.\d+\.\d+(?:\.post\d+)?$")
+EXACT_PATCH_RE = r"\d+\.\d+\.\d+(?:\.post\d+)?"
 
 
 def http_json(url: str):
@@ -54,24 +58,69 @@ def download_sha256(url: str) -> str:
     return h.hexdigest()
 
 
-def upstream_version(name: str) -> str:
-    if name == "hdf5":
-        data = http_json("https://api.anaconda.org/package/conda-forge/hdf5")
-        versions = [v for v in data["versions"] if v.startswith(HDF5_SERIES)]
-        return max(versions, key=vkey) if versions else None
-    if name in ("petsc", "petsc4py"):
-        return http_json(f"https://pypi.org/pypi/{name}/json")["info"]["version"]
-    # dolfinx: latest GitHub release tag (vX.Y.Z)
-    tag = http_json("https://api.github.com/repos/fenics/dolfinx/releases/latest")["tag_name"]
-    return tag.lstrip("v")
-
-
 def vkey(v: str):
     """Sort key that understands 0.11.0 < 0.11.0.post0."""
     key = []
     for tok in re.findall(r"\d+|[a-z]+", v):
         key.append((1, int(tok), "") if tok.isdigit() else (0, 0, tok))
     return key
+
+
+def upstream_version(name: str) -> str:
+    if name == "hdf5":
+        data = http_json("https://api.anaconda.org/package/conda-forge/hdf5")
+        versions = [v for v in data["versions"] if v.startswith(HDF5_SERIES)]
+        if not versions:
+            raise RuntimeError(f"No conda-forge HDF5 release found in {HDF5_SERIES}x")
+        return max(versions, key=vkey)
+    if name == "dolfinx":
+        # latest stable GitHub release tag (vX.Y.Z[.postN])
+        tag = http_json("https://api.github.com/repos/fenics/dolfinx/releases/latest")["tag_name"]
+        return tag.lstrip("v")
+    raise ValueError(f"upstream_version() does not select paired package {name!r}")
+
+
+def pypi_stable_versions(name: str) -> set[str]:
+    """Return stable, non-fully-yanked PyPI releases with downloadable files."""
+    data = http_json(f"https://pypi.org/pypi/{name}/json")
+    versions: set[str] = set()
+    for version, files in data.get("releases", {}).items():
+        if not STABLE_PATCH_RE.fullmatch(version) or not files:
+            continue
+        if any(not file_info.get("yanked", False) for file_info in files):
+            versions.add(version)
+    if not versions:
+        raise RuntimeError(f"No usable stable PyPI releases found for {name}")
+    return versions
+
+
+def latest_matching_petsc_pair() -> str:
+    """Select newest stable release present for both PETSc and petsc4py.
+
+    PETSc and petsc4py may appear on PyPI at slightly different times. Treat
+    that ordinary publication skew as a hold, not as a broken stack: keep using
+    the newest common release until both packages publish the next patch.
+    """
+    petsc_versions = pypi_stable_versions("petsc")
+    petsc4py_versions = pypi_stable_versions("petsc4py")
+    common = petsc_versions & petsc4py_versions
+    if not common:
+        raise RuntimeError(
+            "PETSc and petsc4py have no common usable stable PyPI release; "
+            "cannot construct the Windows stack safely."
+        )
+
+    selected = max(common, key=vkey)
+    petsc_latest = max(petsc_versions, key=vkey)
+    petsc4py_latest = max(petsc4py_versions, key=vkey)
+    if selected != petsc_latest or selected != petsc4py_latest:
+        print(
+            "[plan] PETSc release skew: "
+            f"latest petsc={petsc_latest}, petsc4py={petsc4py_latest}; "
+            f"holding stack at newest common release {selected}",
+            file=sys.stderr,
+        )
+    return selected
 
 
 def channel_versions() -> dict[str, str | None]:
@@ -99,16 +148,21 @@ def channel_versions() -> dict[str, str | None]:
 def read_recipe(name: str) -> tuple[str, str]:
     """Return (version, sha256) currently pinned in the recipe."""
     text = (RECIPES / name / "recipe.yaml").read_text(encoding="utf-8")
-    ver = re.search(r'version:\s*"([^"]+)"', text).group(1)
-    sha = re.search(r"sha256:\s*([0-9a-f]{64})", text).group(1)
-    return ver, sha
+    version_match = re.search(r'version:\s*"([^"]+)"', text)
+    sha_match = re.search(r"sha256:\s*([0-9a-f]{64})", text)
+    if not version_match or not sha_match:
+        raise RuntimeError(f"Could not read version/sha256 from {name} recipe")
+    return version_match.group(1), sha_match.group(1)
 
 
 def patch_recipe(name: str, new_version: str) -> None:
     """Update version + recomputed source sha256 inside recipe.yaml."""
     path = RECIPES / name / "recipe.yaml"
     text = path.read_text(encoding="utf-8")
-    old_ver = re.search(r'version:\s*"([^"]+)"', text).group(1)
+    old_match = re.search(r'version:\s*"([^"]+)"', text)
+    if not old_match:
+        raise RuntimeError(f"Could not find version in {path}")
+    old_ver = old_match.group(1)
 
     if name == "dolfinx":
         url = f"https://github.com/fenics/dolfinx/archive/refs/tags/v{new_version}.tar.gz"
@@ -121,9 +175,11 @@ def patch_recipe(name: str, new_version: str) -> None:
     else:
         url = f"https://pypi.org/packages/source/{name[0]}/{name}/{name}-{new_version}.tar.gz"
 
-    # only redownload when the version actually changed
-    sha = download_sha256(url) if new_version != old_ver else re.search(
-        r"sha256:\s*([0-9a-f]{64})", text).group(1)
+    # Only redownload when the version actually changed.
+    sha_match = re.search(r"sha256:\s*([0-9a-f]{64})", text)
+    if not sha_match:
+        raise RuntimeError(f"Could not find sha256 in {path}")
+    sha = download_sha256(url) if new_version != old_ver else sha_match.group(1)
 
     if name == "hdf5":
         text = re.sub(r"(url:\s*)\S+", rf"\g<1>{url}", text, count=1)
@@ -149,12 +205,12 @@ def sync_dolfinx_windows_petsc_pins(petsc_version: str, petsc4py_version: str) -
     text = path.read_text(encoding="utf-8")
 
     text, petsc_count = re.subn(
-        r"petsc ==\d+\.\d+\.\d+",
+        rf"petsc =={EXACT_PATCH_RE}",
         f"petsc =={petsc_version}",
         text,
     )
     text, petsc4py_count = re.subn(
-        r"petsc4py ==\d+\.\d+\.\d+",
+        rf"petsc4py =={EXACT_PATCH_RE}",
         f"petsc4py =={petsc4py_version}",
         text,
     )
@@ -175,33 +231,35 @@ def sync_dolfinx_windows_petsc_pins(petsc_version: str, petsc4py_version: str) -
 
 
 def bump_build_number(name: str) -> None:
+    """Increment the recipe context build revision or fail on layout drift."""
     path = RECIPES / name / "recipe.yaml"
     text = path.read_text(encoding="utf-8")
-    m = re.search(r"(\n\s+build:\s*)(\d+)", text)
-    if m:  # simple context form (petsc4py/dolfinx use expressions; skip those)
-        text = text[:m.start()] + m.group(1) + str(int(m.group(2)) + 1) + text[m.end():]
-        path.write_text(text, encoding="utf-8")
+    match = re.search(r"(?m)^  build:\s*(\d+)\s*$", text)
+    if not match:
+        raise RuntimeError(
+            f"Could not find two-space-indented context build revision in {path}; "
+            "update bump_build_number() for the new recipe layout."
+        )
+    old_build = int(match.group(1))
+    new_build = old_build + 1
+    text = text[: match.start(1)] + str(new_build) + text[match.end(1) :]
+    path.write_text(text, encoding="utf-8")
+    print(f"[plan] {name}: build revision {old_build} -> {new_build}", file=sys.stderr)
 
 
 def main() -> int:
     force_all = os.environ.get("FORCE_ALL", "").lower() in ("true", "1")
 
     chan = channel_versions()
-    upstream = {name: upstream_version(name) for name in ORDER}
+    petsc_pair = latest_matching_petsc_pair()
+    upstream = {
+        "hdf5": upstream_version("hdf5"),
+        "petsc": petsc_pair,
+        "petsc4py": petsc_pair,
+        "dolfinx": upstream_version("dolfinx"),
+    }
     print(f"[plan] upstream : {upstream}", file=sys.stderr)
     print(f"[plan] channel  : {chan}", file=sys.stderr)
-
-    # The Windows petsc4py recipe deliberately requires the exact PETSc patch
-    # release with the same version number. Detect an upstream release skew
-    # here rather than allowing strict channel priority to produce a cryptic
-    # downstream solver failure.
-    if upstream["petsc"] != upstream["petsc4py"]:
-        raise RuntimeError(
-            "Windows stack requires matching PETSc/petsc4py patch releases, "
-            f"but upstream latest versions are petsc={upstream['petsc']} and "
-            f"petsc4py={upstream['petsc4py']}. Wait for a matching release or "
-            "choose an explicit compatible pair before rebuilding."
-        )
 
     sync_dolfinx_windows_petsc_pins(upstream["petsc"], upstream["petsc4py"])
 
@@ -214,14 +272,21 @@ def main() -> int:
             or upstream[name] != chan[name]
             or dirty  # downstream of a rebuilt stage always rebuilds
         )
+
         if needs and upstream[name] != rec_ver:
             patch_recipe(name, upstream[name])
-        if needs and upstream[name] == rec_ver and (force_all or dirty or upstream[name] != chan[name]):
+
+        # If this exact package version already exists on the public channel,
+        # the current run is a recipe-only/forced/downstream rebuild. Give it a
+        # newer build revision even when the checked-in recipe version is stale
+        # and was just patched to the selected version above.
+        if needs and upstream[name] == chan[name]:
             bump_build_number(name)
+
         plan[name] = {"version": upstream[name], "rebuild": bool(needs)}
         dirty = dirty or needs
 
-    pathlib.Path("plan.json").write_text(json.dumps(plan, indent=2))
+    pathlib.Path("plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     print(json.dumps(plan, indent=2))
     return 0
 

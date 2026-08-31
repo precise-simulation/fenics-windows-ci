@@ -4,7 +4,10 @@ from petsc4py import PETSc
 
 
 def check_interface():
-    assert PETSc.Sys.getVersion() == (3, 25, 4)
+    version = PETSc.Sys.getVersion()
+    if PETSc.COMM_WORLD.getRank() == 0:
+        print(f"PETSc runtime version: {version!r}")
+    assert version == (3, 25, 4), version
     assert np.dtype(PETSc.ScalarType).kind == "f"
     assert np.dtype(PETSc.ScalarType).itemsize == 8
     assert np.dtype(PETSc.IntType).itemsize == 4

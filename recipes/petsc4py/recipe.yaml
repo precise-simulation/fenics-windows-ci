@@ -1,7 +1,7 @@
 context:
   name: petsc4py
   version: "3.25.4"
-  build: 3
+  build: 4
   version_xy: ${{ (version | split('.'))[:2] | join('.') }}
   python_min: ${{ python_min | default("3.12") }}
   abi3_tag: cp${{ python_min | split(".") | join("") }}
@@ -77,7 +77,9 @@ requirements:
       then:
         - python
         - impi_rt
-        - ${{ pin_compatible('petsc', exact=True) }}
+        # PETSc's run export permits newer 3.25.x releases; keep the
+        # Windows runtime on the patch release petsc4py was built against.
+        - petsc ==${{ version }} ${{ scalar }}_*
     - if: not win
       then:
         - python

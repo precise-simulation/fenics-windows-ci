@@ -29,9 +29,12 @@ on:
 permissions:
   contents: read
 
+# PR revisions are disposable validation runs: only the newest revision matters.
+# Publishing-capable runs remain serialized so two jobs cannot upload the stack
+# concurrently to the public channel.
 concurrency:
-  group: stack-build
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('stack-pr-{0}', github.event.pull_request.number) || 'stack-publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -66,6 +69,32 @@ jobs:
           "$env:MAMBA_ROOT_PREFIX/envs/ci" >> $env:GITHUB_PATH
           "$env:MAMBA_ROOT_PREFIX/envs/ci/Library/bin" >> $env:GITHUB_PATH
           "$env:MAMBA_ROOT_PREFIX/envs/ci/Scripts" >> $env:GITHUB_PATH
+
+      - name: Validate build scripts
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/check_versions.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $parseErrors = @()
+          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors) {
+              foreach ($error in $errors) {
+                $parseErrors += "$($_.Name):$($error.Extent.StartLineNumber): $($error.Message)"
+              }
+            }
+          }
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_ }
+            throw "PowerShell syntax validation failed"
+          }
 
       - name: Decide what to rebuild
         shell: pwsh

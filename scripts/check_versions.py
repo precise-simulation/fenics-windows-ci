@@ -2,7 +2,8 @@
 """Decide which stages of the win-64 fenics stack need rebuilding.
 
 Compares upstream releases against the published precise-simulation channel,
-patches recipe version/sha256 when an update is needed, and emits plan.json.
+patches recipe version/sha256 when an update is needed, synchronizes exact
+Windows PETSc-family pins used by downstream DOLFINx, and emits plan.json.
 
 Rebuild rules:
   - hdf5 rebuilds when the latest compatible 1.14.x release != channel hdf5
@@ -10,6 +11,11 @@ Rebuild rules:
   - petsc rebuilds when upstream petsc != channel petsc (or --force)
   - petsc4py rebuilds when petsc rebuilt or its own version changed
   - dolfinx   rebuilds when either upstream dependency rebuilt/changed
+
+Windows stack invariant:
+  - PETSc and petsc4py use the same patch release
+  - every exact PETSc/petsc4py pin in the DOLFINx recipe is rewritten to that
+    selected pair before any build starts
 """
 from __future__ import annotations
 

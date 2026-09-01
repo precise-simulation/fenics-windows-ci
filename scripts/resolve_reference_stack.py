@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Resolve the conda-forge dependency stack that Windows CI should follow.
 
-The solve is intentionally native linux-64: it asks conda-forge for the same
-DOLFINx/PETSc real-scalar family used on Unix and records the exact selected
-package versions/builds. Windows CI consumes this JSON as dependency authority.
+The solve is intentionally native linux-64: it asks conda-forge for the current
+DOLFINx real-scalar stack and records the exact selected package versions/builds.
+Windows CI consumes this JSON as dependency authority.
 """
 from __future__ import annotations
 
@@ -13,13 +13,15 @@ import pathlib
 import subprocess
 import sys
 
+# Keep this deliberately close to a user's Unix DOLFINx solve. DOLFINx itself
+# must select petsc4py/SLEPc/SLEPc4py; constraining their build strings here can
+# make libmamba backtrack to an obsolete DOLFINx generation even though a newer
+# coherent stack exists.
 REFERENCE_SPECS = [
     "python=3.12.*",
     "fenics-dolfinx",
     "mpich",
     "petsc=*=real_*",
-    "slepc=*=real_*",
-    "slepc4py=*=real_*",
 ]
 REQUIRED = ("fenics-dolfinx", "petsc", "petsc4py", "slepc", "slepc4py", "hdf5", "mpich")
 

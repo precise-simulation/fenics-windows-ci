@@ -111,18 +111,48 @@ class ReferenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "migration detected"):
                     check_versions.assert_supported_families(reference)
 
-    def test_exact_dolfinx_petsc_pin_is_rejected(self):
+    def test_exact_dolfinx_petsc_pin_forms_are_rejected(self):
+        exact_specs = (
+            "petsc ==3.25.4 real_*",
+            "petsc 3.25.4 real_*",
+            "petsc=3.25.4=real_*",
+            "petsc = 3.25.4 real_*",
+            "petsc 3.25.4.* real_*",
+            "petsc 3.25.4.post1 real_*",
+            "petsc4py 3.25.4",
+            '"petsc 3.25.4 real_*"',
+            "'petsc4py=3.25.4'",
+        )
+        for spec in exact_specs:
+            with self.subTest(spec=spec), tempfile.TemporaryDirectory() as temp_dir:
+                root = pathlib.Path(temp_dir)
+                recipe = root / "dolfinx"
+                recipe.mkdir()
+                (recipe / "recipe.yaml").write_text(
+                    f"requirements:\n  host:\n    - {spec}\n",
+                    encoding="utf-8",
+                )
+                with patch.object(check_versions, "RECIPES", root):
+                    with self.assertRaisesRegex(RuntimeError, "exact PETSc-family"):
+                        check_versions.assert_dolfinx_dependency_policy()
+
+    def test_dolfinx_petsc_family_constraints_are_allowed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)
             recipe = root / "dolfinx"
             recipe.mkdir()
             (recipe / "recipe.yaml").write_text(
-                "requirements:\n  host:\n    - petsc ==3.25.4 real_*\n",
+                "requirements:\n"
+                "  host:\n"
+                "    - petsc * real_*\n"
+                "    - petsc 3.25.* real_*\n"
+                "    - petsc >=3.25,<3.26 real_*\n"
+                "    - petsc ${{ version_xy }}.* ${{ scalar }}_*\n"
+                "    - petsc4py\n",
                 encoding="utf-8",
             )
             with patch.object(check_versions, "RECIPES", root):
-                with self.assertRaisesRegex(RuntimeError, "exact PETSc-family"):
-                    check_versions.assert_dolfinx_dependency_policy()
+                check_versions.assert_dolfinx_dependency_policy()
 
     def test_variant_hdf5_value_is_synchronized(self):
         with tempfile.TemporaryDirectory() as temp_dir:

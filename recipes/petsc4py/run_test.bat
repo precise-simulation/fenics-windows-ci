@@ -28,17 +28,42 @@ if not exist "%TEST_SOURCE%\test_windows_ksp.py" (
 if not exist "%TEST_BUILD%" mkdir "%TEST_BUILD%"
 
 python -m pip check > "%TEST_BUILD%\pip-check.txt" 2>&1
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  echo PETSC4PY_PIP_CHECK_OUTPUT_BEGIN
+  type "%TEST_BUILD%\pip-check.txt"
+  echo PETSC4PY_PIP_CHECK_OUTPUT_END
+  exit /b 1
+)
 
 python "%TEST_SOURCE%\test_windows_ksp.py" > "%SERIAL_OUTPUT%" 2>&1
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  echo PETSC4PY_SERIAL_TEST_OUTPUT_BEGIN
+  type "%SERIAL_OUTPUT%"
+  echo PETSC4PY_SERIAL_TEST_OUTPUT_END
+  exit /b 1
+)
 findstr /i /c:"STAGE 7 KSP PASS" "%SERIAL_OUTPUT%" >nul
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  echo PETSC4PY_SERIAL_TEST_OUTPUT_BEGIN
+  type "%SERIAL_OUTPUT%"
+  echo PETSC4PY_SERIAL_TEST_OUTPUT_END
+  exit /b 1
+)
 
 mpiexec.exe -localonly -n 2 -env PATH "%MPI_TEST_PATH%" -env PYTHONPATH "%MPI_PYTHONPATH%" "%PYTHON%" "%TEST_SOURCE%\test_windows_ksp.py" > "%MPI_OUTPUT%" 2>&1
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  echo PETSC4PY_MPI_TEST_OUTPUT_BEGIN
+  type "%MPI_OUTPUT%"
+  echo PETSC4PY_MPI_TEST_OUTPUT_END
+  exit /b 1
+)
 findstr /i /c:"STAGE 7 KSP PASS" "%MPI_OUTPUT%" >nul
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  echo PETSC4PY_MPI_TEST_OUTPUT_BEGIN
+  type "%MPI_OUTPUT%"
+  echo PETSC4PY_MPI_TEST_OUTPUT_END
+  exit /b 1
+)
 
 for /f "delims=" %%I in ('powershell.exe -NoProfile -Command "$p = Get-ChildItem -LiteralPath '%PREFIX%\Lib\site-packages\petsc4py\lib' -Filter 'PETSc*.pyd' | Select-Object -First 1 -ExpandProperty FullName; if ($p) { $p }"') do set "PETSC4PY_EXTENSION=%%I"
 if not defined PETSC4PY_EXTENSION (

@@ -1,7 +1,7 @@
 context:
   name: petsc4py
   version: "3.25.4"
-  build: 2
+  build: 4
   version_xy: ${{ (version | split('.'))[:2] | join('.') }}
   python_min: ${{ python_min | default("3.12") }}
   abi3_tag: cp${{ python_min | split(".") | join("") }}
@@ -63,7 +63,7 @@ requirements:
     - if: win
       then:
         - impi-devel
-        - petsc ==${{ version }} ${{ scalar }}_*
+        - petsc ${{ version_xy }}.* ${{ scalar }}_*
     - if: not win
       then:
         - ${{ mpi }}
@@ -145,6 +145,7 @@ tests:
             requirements:
               run:
                 - python 3.13.*
+                - abi3audit
     else:
       # cuda builds are ~untestable
       # because petsc 3.25 links libnvidia-ml, a driver library

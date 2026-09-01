@@ -13,31 +13,45 @@ on:
         description: "Publish resulting packages to anaconda.org"
         type: boolean
         default: true
+  pull_request:
+    paths:
+      - "recipes/**"
+      - "scripts/**"
+      - ".github/workflows/stack.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "recipes/**"
+      - "scripts/**"
+      - ".github/workflows/stack.yml"
+
+permissions:
+  contents: read
 
 concurrency:
-  group: stack-build
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('stack-pr-{0}', github.event.pull_request.number) || 'stack-publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     runs-on: windows-2022
     timeout-minutes: 360
     env:
-      FORCE_ALL: ${{ inputs.force_all }}
+      FORCE_ALL: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || inputs.force_all }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install build tooling (rattler-build, anaconda-client)
-        uses: mamba-org/setup-micromamba@v3
+      - name: Install build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
         with:
-          # direct URL: the action's release resolution breaks under GitHub
-          # API rate limits; this asset is pinned and known-good on win-64
-          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.8.1-0/micromamba-win-64
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
           environment-name: ci
           create-args: >-
             -c conda-forge
-            rattler-build=0.74.*
-            anaconda-client
+            python=3.12
+            rattler-build=0.74.0
+            anaconda-client=1.14.1
           cache-environment: true
           cache-environment-key: ci-${{ hashFiles('.github/workflows/stack.yml') }}
 
@@ -48,12 +62,42 @@ jobs:
           "$env:MAMBA_ROOT_PREFIX/envs/ci/Library/bin" >> $env:GITHUB_PATH
           "$env:MAMBA_ROOT_PREFIX/envs/ci/Scripts" >> $env:GITHUB_PATH
 
-      - name: Decide what to rebuild
+      - name: Validate build scripts
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/check_versions.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s scripts -p "test_*.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $parseErrors = @()
+          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors) {
+              foreach ($error in $errors) {
+                $parseErrors += "$($_.Name):$($error.Extent.StartLineNumber): $($error.Message)"
+              }
+            }
+          }
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_ }
+            throw "PowerShell syntax validation failed"
+          }
+
+      - name: Resolve reference and decide what to rebuild
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python scripts/check_versions.py
+          $micromamba = if ($env:MAMBA_EXE) { $env:MAMBA_EXE } else { "micromamba" }
+          python scripts/check_versions.py --micromamba $micromamba
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Content plan.json
 
       - name: Build changed stages
@@ -69,17 +113,24 @@ jobs:
         run: scripts/test-python-abi3.ps1 -Preview
         continue-on-error: true
 
-      - name: Collect build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: build-logs
-          path: build-logs/
-          if-no-files-found: ignore
+          name: build-diagnostics
+          path: |
+            build-logs/
+            plan.json
+            recipes/*/recipe.yaml
+            recipes/*/variants-win64.yaml
+            scripts/build-stack.ps1
+            scripts/check_versions.py
+          if-no-files-found: warn
+          retention-days: 14
         continue-on-error: true
 
       - name: Upload to precise-simulation
-        if: ${{ github.event_name == 'schedule' || inputs.upload }}
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || inputs.upload }}
         shell: pwsh
         env:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}

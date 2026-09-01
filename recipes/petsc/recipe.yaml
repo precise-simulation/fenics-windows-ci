@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: petsc
   version: "3.25.4"
-  build: 6
+  build: 7
   # these variables should all be overridden in variant files
   # but default values are sometimes needed for conda-smithy rerender
   mpi: ${{ mpi | default('mpich') }}
@@ -78,8 +78,8 @@ requirements:
         # ScaLAPACK/MUMPS win64 toolchain (flang targets the MSVC ABI;
         # flang-rt_win-64 provides flang_rt.runtime.*.lib without which
         # nothing Fortran can be linked)
-        - flang
-        - flang-rt_win-64
+        - flang <23
+        - flang-rt_win-64 <23
         - cmake
         - ninja
     - if: not win

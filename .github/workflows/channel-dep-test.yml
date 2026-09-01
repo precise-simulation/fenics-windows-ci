@@ -8,13 +8,18 @@ on:
   schedule:
     - cron: "0 4 * * 1"   # weekly, Mondays 04:00 UTC
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/channel-dep-test.yml"
+      - "scripts/test-poisson.py"
+      - "scripts/test-petsc-mumps-metis.py"
 
 permissions:
   contents: read
 
 concurrency:
-  group: channel-smoke
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('channel-smoke-pr-{0}', github.event.pull_request.number) || 'channel-smoke' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   smoke:
@@ -25,12 +30,12 @@ jobs:
       matrix:
         python: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # No environment cache anywhere in this workflow: every run must
       # perform a fresh dependency solve against current repodata.
       - name: Install micromamba
-        uses: mamba-org/setup-micromamba@v3
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
         with:
           # direct URL: the action's release resolution breaks under GitHub
           # API rate limits; this asset is pinned and known-good on win-64
@@ -40,11 +45,14 @@ jobs:
         shell: pwsh
         run: Split-Path $env:MAMBA_EXE >> $env:GITHUB_PATH
 
-      # Install exactly as documented in fenics-windows-ci/README.md.
+      # Solve only against the documented channels. `--override-channels`
+      # prevents any setup/user condarc channel from participating; strict
+      # priority guarantees precise-simulation wins for package names it owns.
       - name: Solve and install fenics-dolfinx from public channels
         shell: pwsh
         run: |
           micromamba create -y -n channel-test `
+            --override-channels --strict-channel-priority `
             -c precise-simulation -c conda-forge `
             "python=${{ matrix.python }}" `
             "libblas=*=*openblas" `
@@ -61,11 +69,12 @@ jobs:
       # Uploaded before the tests run, so the exact selection is retained
       # even when a later step fails.
       - name: Upload selected package lists
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: channel-smoke-py${{ matrix.python }}
           path: channel-test-lists/
           if-no-files-found: error
+          retention-days: 14
 
       - name: Put test environment on PATH
         shell: pwsh

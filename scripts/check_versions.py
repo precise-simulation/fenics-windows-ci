@@ -282,7 +282,15 @@ def assert_supported_families(reference: dict) -> None:
 
 def assert_dolfinx_dependency_policy() -> None:
     text = (RECIPES / "dolfinx" / "recipe.yaml").read_text(encoding="utf-8")
-    exact = re.findall(r"(?m)^\s*-\s+(petsc|petsc4py)\s+==([^\s]+)", text)
+    exact = re.findall(
+        r"""(?mx)
+        ^\s*-\s+["']?(petsc|petsc4py)
+        (?:\s*(?:==|=)\s*|\s+)
+        (\d+\.\d+\.\d+)
+        (?=[A-Za-z0-9_.-]*(?:\.\*)?(?:\s|=|["']|$))
+        """,
+        text,
+    )
     if exact:
         raise RuntimeError(
             "DOLFINx recipe contains exact PETSc-family patch pins; dependency selection must "

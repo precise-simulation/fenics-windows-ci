@@ -11,6 +11,7 @@ import check_versions
 REFERENCE = {
     "platform": "linux-64",
     "specs": check_versions.REFERENCE_SPECS,
+    "virtual_package_overrides": check_versions.REFERENCE_VIRTUAL_PACKAGE_OVERRIDES,
     "dolfinx_family": "0.11",
     "petsc_family": "3.25",
     "packages": {
@@ -78,12 +79,19 @@ class ReferenceTest(unittest.TestCase):
         self.assertIn("--dry-run", cmd)
         self.assertEqual(cmd[cmd.index("--platform") + 1], "linux-64")
         self.assertEqual(cmd[-len(check_versions.REFERENCE_SPECS) :], check_versions.REFERENCE_SPECS)
+        solve_env = run.call_args.kwargs["env"]
+        for key, value in check_versions.REFERENCE_VIRTUAL_PACKAGE_OVERRIDES.items():
+            self.assertEqual(solve_env[key], value)
 
     def test_build_reference_records_expected_packages(self):
         result = check_versions.build_reference(reference_solve())
         self.assertEqual(result["petsc_family"], "3.25")
         self.assertEqual(result["packages"]["mpi"]["name"], "mpich")
         self.assertEqual(result["packages"]["petsc"]["build_string"], "real_h2")
+        self.assertEqual(
+            result["virtual_package_overrides"],
+            check_versions.REFERENCE_VIRTUAL_PACKAGE_OVERRIDES,
+        )
 
     def test_build_reference_rejects_incoherent_slepc_family(self):
         with self.assertRaisesRegex(RuntimeError, "incoherent"):

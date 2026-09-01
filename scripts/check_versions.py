@@ -46,6 +46,17 @@ REFERENCE_PACKAGES = (
 )
 REFERENCE_KEYS = (*REFERENCE_PACKAGES, "mpi")
 
+# --platform selects linux-64 repodata, but the solver also consumes virtual
+# packages describing the host. Make those target assumptions explicit so a
+# Windows-hosted dry-run is equivalent to a conservative generic Linux solve
+# rather than inheriting __win and backtracking to obsolete package families.
+REFERENCE_VIRTUAL_PACKAGE_OVERRIDES = {
+    "CONDA_OVERRIDE_LINUX": "5.15.0",
+    "CONDA_OVERRIDE_GLIBC": "2.17",
+    "CONDA_OVERRIDE_ARCHSPEC": "x86_64",
+    "CONDA_OVERRIDE_CUDA": "",
+}
+
 
 def http_json(url: str):
     headers = {"User-Agent": "fenics-windows-ci"}
@@ -97,7 +108,15 @@ def run_reference_solve(micromamba: str) -> dict:
         "fenics-reference",
         *REFERENCE_SPECS,
     ]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+    solve_env = os.environ.copy()
+    solve_env.update(REFERENCE_VIRTUAL_PACKAGE_OVERRIDES)
+    proc = subprocess.run(
+        cmd,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=solve_env,
+    )
     if proc.returncode:
         sys.stderr.write(proc.stderr)
         raise RuntimeError(f"conda-forge reference solve failed with exit code {proc.returncode}")
@@ -138,6 +157,7 @@ def build_reference(solve: dict) -> dict:
     return {
         "platform": "linux-64",
         "specs": REFERENCE_SPECS,
+        "virtual_package_overrides": REFERENCE_VIRTUAL_PACKAGE_OVERRIDES,
         "dolfinx_family": version_family(packages["fenics-dolfinx"]["version"]),
         "petsc_family": petsc_family,
         "packages": packages,
@@ -293,6 +313,11 @@ def advance_build_number(name: str, published_build_number: int | None) -> None:
 def print_parity(reference: dict, targets: dict[str, str]) -> None:
     packages = reference["packages"]
     print("Reference conda-forge stack (linux-64 dry-run solve):", file=sys.stderr)
+    virtuals = reference.get("virtual_package_overrides") or {}
+    if virtuals:
+        print("  target virtual-package overrides:", file=sys.stderr)
+        for key, value in virtuals.items():
+            print(f"    {key}={value!r}", file=sys.stderr)
     for key in REFERENCE_KEYS:
         record = packages[key]
         build = record.get("build_string", "")
@@ -325,11 +350,10 @@ def main() -> int:
     # Resolve once. Nothing is installed: libmamba only computes the linux-64
     # environment that current conda-forge DOLFINx would receive.
     reference = resolve_reference(args.micromamba)
-    assert_supported_families(reference)
-    assert_dolfinx_dependency_policy()
-
     targets = reference_targets(reference)
     print_parity(reference, targets)
+    assert_supported_families(reference)
+    assert_dolfinx_dependency_policy()
 
     # HDF5 is a variant input to downstream recipes, not just a source version.
     patch_variant_value("petsc", "hdf5", targets["hdf5"])

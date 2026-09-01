@@ -45,7 +45,7 @@ jobs:
       - name: Install build tooling
         uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
         with:
-          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.8.1-0/micromamba-win-64
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
           environment-name: ci
           create-args: >-
             -c conda-forge

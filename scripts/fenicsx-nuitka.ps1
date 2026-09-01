@@ -26,15 +26,19 @@ $channels = @(
     "-c", "precise-simulation",
     "-c", "conda-forge"
 )
+
+# Let the published FEniCSx packages and the solver select the current coherent
+# patch/build set. Keep only the Windows ABI/variant choices that this bundle
+# relies on explicitly; do not freeze PETSc/DOLFINx/HDF5 patch releases here.
 $packages = @(
-    "python=3.12.14",
-    "fenics-dolfinx=0.11.0.post0=py312hde24a44_110",
-    "fenics-libdolfinx=0.11.0.post0=py312h539a487_110",
-    "hdf5=1.14.6=mpi_impi_hros3off_10",
-    "petsc=3.25.4=real_hbc849e4_7",
-    "petsc4py=3.25.4=py312hb00311a_3",
-    "mpi4py=4.1.2",
-    "metis=5.2.1",
+    "python=3.12.*",
+    "fenics-dolfinx",
+    "fenics-libdolfinx",
+    "hdf5=*=mpi_impi_*",
+    "petsc=*=real_*",
+    "petsc4py",
+    "mpi4py",
+    "metis",
     "libblas=*=*openblas",
     "nuitka=4.1.3",
     "c-compiler",

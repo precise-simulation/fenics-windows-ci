@@ -63,7 +63,7 @@ requirements:
     - if: win
       then:
         - impi-devel
-        - petsc ==${{ version }} ${{ scalar }}_*
+        - petsc ${{ version_xy }}.* ${{ scalar }}_*
     - if: not win
       then:
         - ${{ mpi }}
@@ -77,9 +77,6 @@ requirements:
       then:
         - python
         - impi_rt
-        # PETSc's run export permits newer 3.25.x releases; keep the
-        # Windows runtime on the patch release petsc4py was built against.
-        - petsc ==${{ version }} ${{ scalar }}_*
     - if: not win
       then:
         - python
@@ -148,6 +145,7 @@ tests:
             requirements:
               run:
                 - python 3.13.*
+                - abi3audit
     else:
       # cuda builds are ~untestable
       # because petsc 3.25 links libnvidia-ml, a driver library

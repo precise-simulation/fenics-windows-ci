@@ -61,7 +61,7 @@ outputs:
         - if: win
           then:
             - libopenblas * pthreads_*
-            - petsc ==3.25.4 ${{ scalar }}_*
+            - petsc * ${{ scalar }}_*
         - if: not win
           then:
             - libadios2
@@ -150,7 +150,7 @@ outputs:
             - if: win
               then: libopenblas * pthreads_*
             - if: win
-              then: petsc ==3.25.4 ${{ scalar }}_*
+              then: petsc * ${{ scalar }}_*
             - if: win
               # unittests compile the installed public headers, which include
               # boost headers directly; no longer exported since the private-
@@ -214,8 +214,8 @@ outputs:
         - if: win
           then:
             - libopenblas * pthreads_*
-            - petsc ==3.25.4 ${{ scalar }}_*
-            - petsc4py ==3.25.4
+            - petsc * ${{ scalar }}_*
+            - petsc4py
         - if: not win
           then:
             - petsc * ${{ scalar }}_*
@@ -244,8 +244,8 @@ outputs:
         - numpy >=2
         - if: win
           then:
-            - petsc ==3.25.4 ${{ scalar }}_*
-            - petsc4py ==3.25.4
+            - petsc * ${{ scalar }}_*
+            - petsc4py
         - if: not win
           then:
             - petsc4py

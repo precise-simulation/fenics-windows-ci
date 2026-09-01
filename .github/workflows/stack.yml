@@ -34,38 +34,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Resolve the dependency authority natively on Linux. This is intentionally
-  # separate from the Windows build so a conda-forge migration is visible and
-  # fails before any expensive compilation starts.
-  reference:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Install micromamba
-        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
-        with:
-          environment-name: reference-tools
-          create-args: >-
-            -c conda-forge
-            python=3.12
-
-      - name: Resolve current conda-forge DOLFINx stack
-        shell: bash -el {0}
-        run: |
-          python scripts/resolve_reference_stack.py --output reference-stack.json
-
-      - name: Upload reference solve
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: conda-forge-reference
-          path: reference-stack.json
-          if-no-files-found: error
-          retention-days: 14
-
   build:
-    needs: reference
     runs-on: windows-2022
     timeout-minutes: 360
     env:
@@ -73,19 +42,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Download conda-forge reference solve
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: conda-forge-reference
-          path: .
-
-      - name: Install build tooling (rattler-build, anaconda-client)
+      - name: Install build tooling
         uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
         with:
           micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.8.1-0/micromamba-win-64
           environment-name: ci
           create-args: >-
             -c conda-forge
+            python=3.12
             rattler-build=0.74.0
             anaconda-client=1.14.1
           cache-environment: true
@@ -101,7 +65,7 @@ jobs:
       - name: Validate build scripts
         shell: pwsh
         run: |
-          python -m py_compile scripts/check_versions.py scripts/resolve_reference_stack.py
+          python -m py_compile scripts/check_versions.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s scripts -p "test_*.py"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -126,13 +90,14 @@ jobs:
             throw "PowerShell syntax validation failed"
           }
 
-      - name: Decide what to rebuild
+      - name: Resolve reference and decide what to rebuild
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python scripts/check_versions.py --reference reference-stack.json
-          Get-Content reference-stack.json
+          $micromamba = if ($env:MAMBA_EXE) { $env:MAMBA_EXE } else { "micromamba" }
+          python scripts/check_versions.py --micromamba $micromamba
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Content plan.json
 
       - name: Build changed stages
@@ -155,13 +120,11 @@ jobs:
           name: build-diagnostics
           path: |
             build-logs/
-            reference-stack.json
             plan.json
             recipes/*/recipe.yaml
             recipes/*/variants-win64.yaml
             scripts/build-stack.ps1
             scripts/check_versions.py
-            scripts/resolve_reference_stack.py
           if-no-files-found: warn
           retention-days: 14
         continue-on-error: true

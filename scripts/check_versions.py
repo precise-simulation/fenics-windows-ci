@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Plan a win-64 FEniCS stack build from a conda-forge reference solve.
+"""Plan a win-64 FEniCS stack build from the current conda-forge DOLFINx solve.
 
-The Linux conda-forge DOLFINx solve is the dependency authority. Patch releases
-inside the currently supported dependency families follow that solve exactly;
-a major/minor family migration fails in preflight and requires an explicit
-Windows-stack migration instead of silently continuing an obsolete family.
+The planner performs one dry-run libmamba solve for linux-64 and uses that
+result as the dependency authority. Patch releases inside the currently
+supported dependency families follow the solve exactly; a major/minor family
+migration fails in preflight and requires an explicit Windows-stack migration.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -29,7 +30,21 @@ CHANNEL_PACKAGE = {
     "dolfinx": "fenics-dolfinx",
 }
 WINDOWS_BUILD_NUMBER_OFFSET = {"hdf5": 0, "petsc": 0, "petsc4py": 0, "dolfinx": 100}
-REFERENCE_KEYS = ("fenics-dolfinx", "petsc", "petsc4py", "slepc", "slepc4py", "hdf5", "mpi")
+REFERENCE_SPECS = [
+    "python=3.12.*",
+    "fenics-dolfinx",
+    "mpich",
+    "petsc=*=real_*",
+]
+REFERENCE_PACKAGES = (
+    "fenics-dolfinx",
+    "petsc",
+    "petsc4py",
+    "slepc",
+    "slepc4py",
+    "hdf5",
+)
+REFERENCE_KEYS = (*REFERENCE_PACKAGES, "mpi")
 
 
 def http_json(url: str):
@@ -65,23 +80,72 @@ def version_family(version: str) -> str:
     return ".".join(parts[:2])
 
 
-def load_reference(path: pathlib.Path) -> dict:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema") != 1 or data.get("platform") != "linux-64":
-        raise RuntimeError(f"unsupported reference stack metadata in {path}")
-    packages = data.get("packages") or {}
-    missing = [name for name in REFERENCE_KEYS if not (packages.get(name) or {}).get("version")]
+def run_reference_solve(micromamba: str) -> dict:
+    """Ask libmamba for the current coherent linux-64 DOLFINx environment."""
+    cmd = [
+        micromamba,
+        "create",
+        "--dry-run",
+        "--json",
+        "--platform",
+        "linux-64",
+        "--override-channels",
+        "--strict-channel-priority",
+        "-c",
+        "conda-forge",
+        "-n",
+        "fenics-reference",
+        *REFERENCE_SPECS,
+    ]
+    proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+    if proc.returncode:
+        sys.stderr.write(proc.stderr)
+        raise RuntimeError(f"conda-forge reference solve failed with exit code {proc.returncode}")
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"micromamba did not return JSON: {proc.stdout[:1000]!r}") from exc
+
+
+def compact_record(record: dict) -> dict:
+    return {
+        key: record.get(key)
+        for key in ("name", "version", "build_string", "build_number", "channel", "subdir", "url")
+        if record.get(key) is not None
+    }
+
+
+def build_reference(solve: dict) -> dict:
+    actions = solve.get("actions") or {}
+    records = actions.get("LINK") or actions.get("link") or []
+    by_name = {record.get("name"): record for record in records if record.get("name")}
+    required = (*REFERENCE_PACKAGES, "mpich")
+    missing = [name for name in required if name not in by_name]
     if missing:
-        raise RuntimeError(f"reference stack missing package versions: {', '.join(missing)}")
+        raise RuntimeError(f"reference solve is missing required packages: {', '.join(missing)}")
+
+    packages = {name: compact_record(by_name[name]) for name in REFERENCE_PACKAGES}
+    packages["mpi"] = compact_record(by_name["mpich"])
 
     petsc_family = version_family(packages["petsc"]["version"])
     for name in ("petsc4py", "slepc", "slepc4py"):
         family = version_family(packages[name]["version"])
         if family != petsc_family:
             raise RuntimeError(
-                f"reference PETSc family is incoherent: petsc={petsc_family}, {name}={family}"
+                f"incoherent conda-forge PETSc family: petsc={petsc_family}, {name}={family}"
             )
-    return data
+
+    return {
+        "platform": "linux-64",
+        "specs": REFERENCE_SPECS,
+        "dolfinx_family": version_family(packages["fenics-dolfinx"]["version"]),
+        "petsc_family": petsc_family,
+        "packages": packages,
+    }
+
+
+def resolve_reference(micromamba: str) -> dict:
+    return build_reference(run_reference_solve(micromamba))
 
 
 def channel_versions() -> dict[str, str | None]:
@@ -228,8 +292,8 @@ def advance_build_number(name: str, published_build_number: int | None) -> None:
 
 def print_parity(reference: dict, targets: dict[str, str]) -> None:
     packages = reference["packages"]
-    print("Reference conda-forge stack (linux-64):", file=sys.stderr)
-    for key in ("fenics-dolfinx", "petsc", "petsc4py", "slepc", "slepc4py", "hdf5", "mpi"):
+    print("Reference conda-forge stack (linux-64 dry-run solve):", file=sys.stderr)
+    for key in REFERENCE_KEYS:
         record = packages[key]
         build = record.get("build_string", "")
         print(f"  {key:14} {record['version']:12} {build}", file=sys.stderr)
@@ -253,11 +317,14 @@ def reference_targets(reference: dict) -> dict[str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reference", default="reference-stack.json")
+    parser.add_argument("--micromamba", default="micromamba")
     args = parser.parse_args()
 
     force_all = os.environ.get("FORCE_ALL", "").lower() in ("true", "1")
-    reference = load_reference(pathlib.Path(args.reference))
+
+    # Resolve once. Nothing is installed: libmamba only computes the linux-64
+    # environment that current conda-forge DOLFINx would receive.
+    reference = resolve_reference(args.micromamba)
     assert_supported_families(reference)
     assert_dolfinx_dependency_policy()
 
@@ -287,13 +354,9 @@ def main() -> int:
         plan[name] = {"version": targets[name], "rebuild": bool(needs)}
         dirty = dirty or needs
 
-    packages = reference["packages"]
-    plan["reference"] = {
-        "platform": reference["platform"],
-        "dolfinx_family": reference["dolfinx_family"],
-        "petsc_family": reference["petsc_family"],
-        "packages": {key: packages[key]["version"] for key in REFERENCE_KEYS},
-    }
+    # Keep the complete compact solver result inside the build plan so there is
+    # one diagnostic artifact and enough provenance to reproduce the decision.
+    plan["reference"] = reference
     pathlib.Path("plan.json").write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(plan, indent=2))
     return 0

@@ -9,8 +9,8 @@ import check_versions
 
 
 REFERENCE = {
-    "schema": 1,
     "platform": "linux-64",
+    "specs": check_versions.REFERENCE_SPECS,
     "dolfinx_family": "0.11",
     "petsc_family": "3.25",
     "packages": {
@@ -23,6 +23,21 @@ REFERENCE = {
         "mpi": {"name": "mpich", "version": "4.3.1"},
     },
 }
+
+
+def reference_solve(slepc_version="3.25.2"):
+    records = []
+    for name, version, build in [
+        ("fenics-dolfinx", "0.11.0", "real_h1"),
+        ("petsc", "3.25.5", "real_h2"),
+        ("petsc4py", "3.25.5", "real_h3"),
+        ("slepc", slepc_version, "real_h4"),
+        ("slepc4py", "3.25.2", "real_h5"),
+        ("hdf5", "1.14.6", "mpi_mpich_h6"),
+        ("mpich", "4.3.1", "h7"),
+    ]:
+        records.append({"name": name, "version": version, "build_string": build})
+    return {"actions": {"LINK": records}}
 
 
 def write_recipe(root, name, version):
@@ -55,20 +70,24 @@ class ChannelVersionsTest(unittest.TestCase):
 
 
 class ReferenceTest(unittest.TestCase):
-    def test_load_reference_accepts_same_minor_family(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = pathlib.Path(temp_dir) / "reference.json"
-            path.write_text(json.dumps(REFERENCE), encoding="utf-8")
-            self.assertEqual(check_versions.load_reference(path)["petsc_family"], "3.25")
+    def test_run_reference_solve_targets_linux_without_installing(self):
+        completed = type("Completed", (), {"returncode": 0, "stdout": '{"actions": {}}', "stderr": ""})()
+        with patch.object(check_versions.subprocess, "run", return_value=completed) as run:
+            check_versions.run_reference_solve("micromamba")
+        cmd = run.call_args.args[0]
+        self.assertIn("--dry-run", cmd)
+        self.assertEqual(cmd[cmd.index("--platform") + 1], "linux-64")
+        self.assertEqual(cmd[-len(check_versions.REFERENCE_SPECS) :], check_versions.REFERENCE_SPECS)
 
-    def test_load_reference_rejects_incoherent_slepc_family(self):
-        reference = json.loads(json.dumps(REFERENCE))
-        reference["packages"]["slepc"]["version"] = "3.26.0"
-        with tempfile.TemporaryDirectory() as temp_dir:
-            path = pathlib.Path(temp_dir) / "reference.json"
-            path.write_text(json.dumps(reference), encoding="utf-8")
-            with self.assertRaisesRegex(RuntimeError, "incoherent"):
-                check_versions.load_reference(path)
+    def test_build_reference_records_expected_packages(self):
+        result = check_versions.build_reference(reference_solve())
+        self.assertEqual(result["petsc_family"], "3.25")
+        self.assertEqual(result["packages"]["mpi"]["name"], "mpich")
+        self.assertEqual(result["packages"]["petsc"]["build_string"], "real_h2")
+
+    def test_build_reference_rejects_incoherent_slepc_family(self):
+        with self.assertRaisesRegex(RuntimeError, "incoherent"):
+            check_versions.build_reference(reference_solve(slepc_version="3.26.0"))
 
     def test_family_migration_fails_before_build(self):
         with tempfile.TemporaryDirectory() as temp_dir:

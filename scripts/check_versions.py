@@ -84,11 +84,6 @@ def load_reference(path: pathlib.Path) -> dict:
     return data
 
 
-def latest_dolfinx_release() -> str:
-    tag = http_json("https://api.github.com/repos/fenics/dolfinx/releases/latest")["tag_name"]
-    return tag.lstrip("v")
-
-
 def channel_versions() -> dict[str, str | None]:
     out: dict[str, str | None] = {}
     for name in ORDER:
@@ -246,6 +241,16 @@ def print_parity(reference: dict, targets: dict[str, str]) -> None:
     print(f"  {'mpi':14} impi (Windows-specific)", file=sys.stderr)
 
 
+def reference_targets(reference: dict) -> dict[str, str]:
+    packages = reference["packages"]
+    return {
+        "hdf5": packages["hdf5"]["version"],
+        "petsc": packages["petsc"]["version"],
+        "petsc4py": packages["petsc4py"]["version"],
+        "dolfinx": packages["fenics-dolfinx"]["version"],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--reference", default="reference-stack.json")
@@ -256,20 +261,7 @@ def main() -> int:
     assert_supported_families(reference)
     assert_dolfinx_dependency_policy()
 
-    packages = reference["packages"]
-    latest_dolfinx = latest_dolfinx_release()
-    if version_family(latest_dolfinx) != reference["dolfinx_family"]:
-        raise RuntimeError(
-            f"latest upstream DOLFINx {latest_dolfinx} is outside conda-forge reference family "
-            f"{reference['dolfinx_family']}; wait for/perform the conda-forge migration first"
-        )
-
-    targets = {
-        "hdf5": packages["hdf5"]["version"],
-        "petsc": packages["petsc"]["version"],
-        "petsc4py": packages["petsc4py"]["version"],
-        "dolfinx": latest_dolfinx,
-    }
+    targets = reference_targets(reference)
     print_parity(reference, targets)
 
     # HDF5 is a variant input to downstream recipes, not just a source version.
@@ -295,6 +287,7 @@ def main() -> int:
         plan[name] = {"version": targets[name], "rebuild": bool(needs)}
         dirty = dirty or needs
 
+    packages = reference["packages"]
     plan["reference"] = {
         "platform": reference["platform"],
         "dolfinx_family": reference["dolfinx_family"],

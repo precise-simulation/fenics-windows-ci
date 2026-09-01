@@ -16,14 +16,20 @@ on:
   pull_request:
     paths:
       - "recipes/**"
-      - "scripts/**"
+      - "scripts/build-stack.ps1"
+      - "scripts/check_versions.py"
+      - "scripts/test_check_versions.py"
+      - "scripts/test-python-abi3.ps1"
       - ".github/workflows/stack.yml"
   push:
     branches:
       - main
     paths:
       - "recipes/**"
-      - "scripts/**"
+      - "scripts/build-stack.ps1"
+      - "scripts/check_versions.py"
+      - "scripts/test_check_versions.py"
+      - "scripts/test-python-abi3.ps1"
       - ".github/workflows/stack.yml"
 
 permissions:

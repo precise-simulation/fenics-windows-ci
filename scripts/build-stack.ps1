@@ -28,9 +28,6 @@ $rattlerVersion = (& $rattler --version 2>&1 | Out-String).Trim()
 Write-Host "rattler-build: $rattlerVersion"
 Set-Content (Join-Path $logOutput "tooling.txt") "rattler-build: $rattlerVersion"
 Copy-Item (Resolve-Path $PlanFile) (Join-Path $logOutput "plan.json")
-if (Test-Path (Join-Path $root "reference-stack.json")) {
-    Copy-Item (Join-Path $root "reference-stack.json") (Join-Path $logOutput "reference-stack.json") -Force
-}
 
 function Add-NoarchStub {
     param([string]$Dir)

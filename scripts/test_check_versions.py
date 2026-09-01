@@ -108,6 +108,13 @@ class ReferenceTest(unittest.TestCase):
                 check_versions.patch_variant_value("petsc", "hdf5", "1.14.7")
             self.assertIn("hdf5:\n- 1.14.7\n", variant.read_text(encoding="utf-8"))
 
+    def test_reference_targets_use_reference_dolfinx_version(self):
+        reference = json.loads(json.dumps(REFERENCE))
+        reference["packages"]["fenics-dolfinx"]["version"] = "0.11.7"
+        targets = check_versions.reference_targets(reference)
+        self.assertEqual(targets["dolfinx"], "0.11.7")
+        self.assertEqual(targets["petsc"], "3.25.5")
+
 
 class RecipePatchTest(unittest.TestCase):
     @patch.object(check_versions, "download_sha256", return_value="a" * 64)

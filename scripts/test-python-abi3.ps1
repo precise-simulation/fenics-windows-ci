@@ -109,6 +109,19 @@ foreach ($pythonVersion in $pythonVersions) {
         throw
     }
     finally {
-        & micromamba env remove -y -n $envName 2>$null | Out-Null
+        # A failed preview solve never created an environment. Avoid running a
+        # failing cleanup command in that case, since its native exit code can
+        # otherwise make an intentionally skipped preview step fail.
+        if ($environmentCreated) {
+            & micromamba env remove -y -n $envName 2>$null | Out-Null
+        }
     }
+}
+
+# A preview solve failure is intentionally non-fatal. Native-command failures
+# leave $LASTEXITCODE nonzero even after they are caught, so explicitly return
+# success after all preview iterations. Real import/runtime failures throw
+# above and therefore never reach this point.
+if ($Preview) {
+    exit 0
 }

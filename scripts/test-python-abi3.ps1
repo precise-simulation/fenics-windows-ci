@@ -20,7 +20,7 @@ $channels += "precise-simulation"
 
 if ($Preview) {
     $pythonVersions = @("3.15.*")
-    $channels += "conda-forge/label/python_dev", "conda-forge"
+    $channels += "conda-forge/label/python_dev", "conda-forge/label/python_rc", "conda-forge"
 } else {
     # Test both ends of the supported ABI3 range: the build/minimum Python
     # and the newest stable Python currently supported by the stack.
@@ -71,8 +71,21 @@ foreach ($pythonVersion in $pythonVersions) {
         "fenics-dolfinx"
     )
 
+    $environmentCreated = $false
     try {
-        Invoke-Micromamba -Arguments $createArgs
+        try {
+            Invoke-Micromamba -Arguments $createArgs
+            $environmentCreated = $true
+        }
+        catch {
+            if ($Preview) {
+                Write-Warning "Python 3.15 ecosystem not solvable yet — preview skipped"
+                Write-Warning $_.Exception.Message
+                continue
+            }
+            throw
+        }
+
         Save-EnvironmentProvenance -EnvironmentName $envName -Tag $modeTag
 
         Invoke-Micromamba -Arguments @(
@@ -88,11 +101,27 @@ foreach ($pythonVersion in $pythonVersions) {
         )
     }
     catch {
-        # Preserve the solve if an import/runtime check fails after creation.
-        Save-EnvironmentProvenance -EnvironmentName $envName -Tag "$modeTag-failure"
+        # If creation succeeded, any failure below this point is a real
+        # consumer/import/runtime failure rather than preview-channel lag.
+        if ($environmentCreated) {
+            Save-EnvironmentProvenance -EnvironmentName $envName -Tag "$modeTag-failure"
+        }
         throw
     }
     finally {
-        & micromamba env remove -y -n $envName 2>$null | Out-Null
+        # A failed preview solve never created an environment. Avoid running a
+        # failing cleanup command in that case, since its native exit code can
+        # otherwise make an intentionally skipped preview step fail.
+        if ($environmentCreated) {
+            & micromamba env remove -y -n $envName 2>$null | Out-Null
+        }
     }
+}
+
+# A preview solve failure is intentionally non-fatal. Native-command failures
+# leave $LASTEXITCODE nonzero even after they are caught, so explicitly return
+# success after all preview iterations. Real import/runtime failures throw
+# above and therefore never reach this point.
+if ($Preview) {
+    exit 0
 }

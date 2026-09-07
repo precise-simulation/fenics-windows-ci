@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** in progress — Phase 1 compatibility proof.
+**Status:** in progress — Phases 1-2 complete; Phase 3 JIT runtime setup is next.
 
 This epic replaces the Windows runtime Visual Studio compiler dependency used by FFCx/CFFI JIT with a small, self-contained LLVM-MinGW toolchain. It does not change the compiler used to build PETSc, DOLFINx, Basix, or other native packages.
 
@@ -66,9 +66,24 @@ Phases are ordered. A later phase may be prototyped early when useful, but its p
 
 ### Implementation status
 
-Phase 1 has started with an isolated `windows-2022` CFFI compatibility harness in `.github/workflows/llvm-mingw-jit.yml`. The first slice checksum-pins upstream LLVM-MinGW, sanitizes Visual Studio/Windows SDK activation state, generates GNU import libraries targeting `python3.dll`, compiles and loads a minimal CFFI extension through the `mingw32` setuptools backend, inspects PE imports, and retains diagnostics.
+Phases 1 and 2 are complete.
 
-The remaining Phase 1 work is to apply the same mechanism to FFCx, fix the Windows C17 flag selection for the GNU-style driver, run a fresh `scripts/test-poisson.py` JIT, and close any compatibility gaps exposed by the runner.
+Phase 1 proved fresh CFFI and FFCx Poisson JIT on CPython 3.12-3.14 with the
+setuptools `mingw32` backend, LLVM-MinGW Clang/LLD, Stable-ABI
+`python3.dll` imports, and sanitized Visual Studio/Windows SDK state.
+
+Phase 2 packages the conservative proven toolchain as
+`fenics-jit-llvm-mingw`. The package has no runtime dependencies, installs
+and compiles in an otherwise empty conda prefix, generates its Python GNU import
+libraries during package construction, and passes the same packaged CFFI/FFCx
+matrix on CPython 3.12-3.14. A rattler-build rebuild is bit-for-bit identical to
+the original package. The initial baseline is 5,508 files, 465.08 MiB installed
+and 86.90 MiB compressed.
+
+Phase 3 should replace the prototype setup/configuration path with a small owned
+runtime helper that resolves the packaged compiler, Python development inputs,
+and setuptools backend hermetically. `fenics-dolfinx` runtime metadata remains
+unchanged until the later metadata-switch gate.
 
 ## Primary gates
 

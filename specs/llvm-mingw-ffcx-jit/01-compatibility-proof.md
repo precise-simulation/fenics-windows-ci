@@ -1,6 +1,6 @@
 # Phase 1: prove LLVM-MinGW compatibility
 
-**Status:** compatibility proof passed; packaging remains Phase 2.
+**Status:** complete — compatibility proof passed; the packaged proof also passes in Phase 2.
 
 ## Objective
 

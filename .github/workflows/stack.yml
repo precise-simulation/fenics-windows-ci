@@ -83,7 +83,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $parseErrors = @()
-          Get-ChildItem scripts -Recurse -Filter *.ps1 | ForEach-Object {
+          $parseTargets = @(Get-ChildItem scripts -Filter *.ps1)
+          $parseTargets += Get-Item scripts/llvm-mingw-jit/run-phase5-functional-validation.ps1
+          $parseTargets | ForEach-Object {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
@@ -92,8 +94,8 @@ jobs:
               [ref]$errors
             ) | Out-Null
             if ($errors) {
-              foreach ($error in $errors) {
-                $parseErrors += "$($_.Name):$($error.Extent.StartLineNumber): $($error.Message)"
+              foreach ($parseError in $errors) {
+                $parseErrors += "$($_.Name):$($parseError.Extent.StartLineNumber): $($parseError.Message)"
               }
             }
           }

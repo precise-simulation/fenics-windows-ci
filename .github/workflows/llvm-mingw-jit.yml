@@ -1,28 +1,16 @@
 name: llvm-mingw-jit
 
+# Dedicated deep JIT validation is intentionally manual. The stack workflow is
+# the single automatic PR/main gate, so one repository change creates one run.
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - ".github/workflows/llvm-mingw-jit.yml"
-      - "recipes/fenics-jit-llvm-mingw/**"
-      - "scripts/llvm-mingw-jit/**"
-      - "specs/llvm-mingw-ffcx-jit/**"
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/llvm-mingw-jit.yml"
-      - "recipes/fenics-jit-llvm-mingw/**"
-      - "scripts/llvm-mingw-jit/**"
-      - "specs/llvm-mingw-ffcx-jit/**"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('llvm-mingw-jit-pr-{0}', github.event.pull_request.number) || 'llvm-mingw-jit-main' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: llvm-mingw-jit-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   runtime-package:

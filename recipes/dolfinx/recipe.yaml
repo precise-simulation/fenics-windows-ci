@@ -232,7 +232,7 @@ outputs:
         # Native DOLFINx/PETSc build requirements above remain on VS2022.
         - if: win
           then:
-            - fenics-jit-llvm-mingw 20260826
+            - fenics-jit-llvm-mingw ==20260826
             # CFFI on Python 3.12+ uses setuptools' vendored distutils backend.
             - setuptools
           else:

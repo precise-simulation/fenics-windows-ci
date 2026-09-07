@@ -207,13 +207,6 @@ if ($PoissonScript) {
     Remove-Item -Recurse -Force $cacheHome -ErrorAction Ignore
     New-Item -ItemType Directory -Force $cacheDir, $poissonDiagnostics | Out-Null
 
-    $patchScript = Join-Path $PSScriptRoot "patch-ffcx-c17.py"
-    & $python $patchScript --diagnostics-dir $poissonDiagnostics 2>&1 |
-        Tee-Object -FilePath (Join-Path $poissonDiagnostics "ffcx-patch-output.txt")
-    if ($LASTEXITCODE -ne 0) {
-        throw "FFCx C17 patch failed"
-    }
-
     $poissonProof = Join-Path $PSScriptRoot "ffcx-poisson-proof.py"
     $poissonLog = Join-Path $poissonDiagnostics "poisson-output.txt"
     & $python $poissonProof `

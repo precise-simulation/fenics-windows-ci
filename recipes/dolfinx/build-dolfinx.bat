@@ -9,6 +9,10 @@ rem (see apply-caster-petsc-fix.py)
 %PYTHON% "%RECIPE_DIR%\apply-caster-petsc-fix.py" "%SRC_DIR%"
 if errorlevel 1 exit 1
 
+rem Windows runtime FFCx JIT uses the packaged hermetic LLVM-MinGW helper.
+%PYTHON% "%RECIPE_DIR%\apply-windows-jit-runtime.py" "%SRC_DIR%"
+if errorlevel 1 exit 1
+
 set "CXXFLAGS=%CXXFLAGS% -DH5_BUILT_AS_DYNAMIC_LIB /MP2 /wd4244 /wd4267"
 rem fenics-libdolfinx no longer exports Boost headers, but the wrapper
 rem sources include boost headers directly (geometry.h, FunctionSpace.h),

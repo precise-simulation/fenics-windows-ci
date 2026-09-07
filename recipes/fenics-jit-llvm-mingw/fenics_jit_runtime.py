@@ -289,6 +289,8 @@ class RuntimeConfig:
         dll_handles: list[object] = []
         shim = None
         original_distribution = None
+        cffi_module = None
+        original_set_source = None
 
         try:
             sanitized = self.sanitized_environment()
@@ -325,6 +327,29 @@ class RuntimeConfig:
 
             shim.Distribution = RuntimeDistribution
 
+            # FFCx 0.11 emits the MSVC spelling "-std:c17" on win32. The
+            # MinGW setuptools backend uses a GNU Clang driver, so normalize
+            # CFFI compile flags in-process rather than modifying FFCx files.
+            import cffi as cffi_module_import
+
+            cffi_module = cffi_module_import
+            original_set_source = cffi_module.FFI.set_source
+
+            def runtime_set_source(ffi_self, module_name, source, *args, **kwargs):
+                compile_args = list(kwargs.get("extra_compile_args") or [])
+                normalized_args = [
+                    "-std=c17" if arg == "-std:c17" else arg
+                    for arg in compile_args
+                ]
+                if "-D__STDC_NO_COMPLEX__" not in normalized_args:
+                    normalized_args.append("-D__STDC_NO_COMPLEX__")
+                kwargs["extra_compile_args"] = normalized_args
+                return original_set_source(
+                    ffi_self, module_name, source, *args, **kwargs
+                )
+
+            cffi_module.FFI.set_source = runtime_set_source
+
             record = self.diagnostic_record()
             if diagnostics_dir is not None:
                 diagnostics = Path(diagnostics_dir).resolve()
@@ -359,6 +384,8 @@ class RuntimeConfig:
 
             yield self
         finally:
+            if cffi_module is not None and original_set_source is not None:
+                cffi_module.FFI.set_source = original_set_source
             if shim is not None and original_distribution is not None:
                 shim.Distribution = original_distribution
             for handle in reversed(dll_handles):

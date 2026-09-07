@@ -40,9 +40,11 @@ jobs:
           micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
           environment-name: llvm-mingw-jit
           create-args: >-
-            --override-channels
-            -c conda-forge
+            --override-channels --strict-channel-priority
+            -c precise-simulation -c conda-forge
             python=${{ matrix.python }}
+            "libblas=*=*openblas"
+            fenics-dolfinx
             cffi
             setuptools
 
@@ -53,7 +55,7 @@ jobs:
             -Destination ".jit-toolchain" `
             -DiagnosticsDir "jit-diagnostics/toolchain"
 
-      - name: Run isolated CFFI compile/load proof
+      - name: Run isolated CFFI and FFCx Poisson proofs
         shell: pwsh
         run: |
           $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/llvm-mingw-jit"
@@ -62,7 +64,8 @@ jobs:
             -PythonPrefix $prefix `
             -ToolchainRoot $toolchain `
             -WorkDir "jit-work" `
-            -DiagnosticsDir "jit-diagnostics/proof"
+            -DiagnosticsDir "jit-diagnostics/proof" `
+            -PoissonScript "scripts/test-poisson.py"
 
       - name: Upload JIT diagnostics
         if: always()
@@ -74,5 +77,8 @@ jobs:
             jit-work/setup.cfg
             jit-work/*.c
             jit-work/*.pyd
+            jit-work/ffcx-cache/**/*.c
+            jit-work/ffcx-cache/**/*.pyd
+            jit-work/ffcx-cache/**/setup.cfg
           if-no-files-found: warn
           retention-days: 14

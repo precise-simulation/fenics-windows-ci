@@ -145,55 +145,71 @@ if ($linkPlan -notmatch "(?i)(ld\.lld|lld-link)") {
     throw "LLVM-MinGW clang link plan did not select LLD"
 }
 
-$python3Candidates = @(
-    (Join-Path $pythonPrefixPath "python3.dll"),
-    (Join-Path $pythonPrefixPath "DLLs/python3.dll"),
-    (Join-Path $pythonPrefixPath "Library/bin/python3.dll")
-)
-$python3Dll = $python3Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $python3Dll) {
-    throw "Could not locate CPython stable-ABI python3.dll below $pythonPrefixPath"
-}
-
-$importLibDir = Join-Path $workPath "python-import-lib"
-New-Item -ItemType Directory -Force $importLibDir | Out-Null
-
-$exports = & $readobj --coff-exports $python3Dll 2>&1
-if ($LASTEXITCODE -ne 0) { throw "llvm-readobj failed while reading python3.dll exports" }
-$exports | Set-Content (Join-Path $diagnosticsPath "python3-exports.txt")
-
-$exportNames = @(
-    $exports |
-        ForEach-Object {
-            if ($_ -match "^\s*Name:\s+(.+?)\s*$") { $Matches[1] }
-        } |
-        Where-Object { $_ } |
-        Sort-Object -Unique
-)
-if ($exportNames.Count -lt 10) {
-    throw "Unexpectedly few exports found in python3.dll: $($exportNames.Count)"
-}
-
-$defPath = Join-Path $importLibDir "python3.def"
-@("LIBRARY python3.dll", "EXPORTS") + $exportNames |
-    Set-Content $defPath -Encoding ascii
-
 $versionTag = & $python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')"
 if ($LASTEXITCODE -ne 0) { throw "Failed to determine Python version tag" }
 $versionTag = $versionTag.Trim()
 
-foreach ($libraryName in @("libpython3.a", "libpython$versionTag.a")) {
-    $libraryPath = Join-Path $importLibDir $libraryName
-    & $dlltool -m i386:x86-64 -d $defPath -l $libraryPath -D python3.dll 2>&1 |
-        Add-Content (Join-Path $diagnosticsPath "dlltool.txt")
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $libraryPath)) {
-        throw "Failed to create GNU import library: $libraryName"
+$packagedImportLibDir = Join-Path $toolchainRootPath "lib\python"
+$packagedStableLib = Join-Path $packagedImportLibDir "libpython3.a"
+$packagedVersionLib = Join-Path $packagedImportLibDir "libpython$versionTag.a"
+
+if ((Test-Path $packagedStableLib) -and (Test-Path $packagedVersionLib)) {
+    $importLibDir = $packagedImportLibDir
+    "source=packaged" | Set-Content (Join-Path $diagnosticsPath "python-import-library-source.txt")
+    "stable=$packagedStableLib" | Add-Content (Join-Path $diagnosticsPath "python-import-library-source.txt")
+    "version=$packagedVersionLib" | Add-Content (Join-Path $diagnosticsPath "python-import-library-source.txt")
+} else {
+    # Phase 1 fallback for testing a raw upstream archive. Phase 2 packages
+    # these import libraries at construction time, so end-user JIT no longer
+    # needs llvm-dlltool or Python export discovery.
+    $python3Candidates = @(
+        (Join-Path $pythonPrefixPath "python3.dll"),
+        (Join-Path $pythonPrefixPath "DLLs/python3.dll"),
+        (Join-Path $pythonPrefixPath "Library/bin/python3.dll")
+    )
+    $python3Dll = $python3Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $python3Dll) {
+        throw "Could not locate CPython stable-ABI python3.dll below $pythonPrefixPath"
     }
+
+    $importLibDir = Join-Path $workPath "python-import-lib"
+    New-Item -ItemType Directory -Force $importLibDir | Out-Null
+
+    $exports = & $readobj --coff-exports $python3Dll 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "llvm-readobj failed while reading python3.dll exports" }
+    $exports | Set-Content (Join-Path $diagnosticsPath "python3-exports.txt")
+
+    $exportNames = @(
+        $exports |
+            ForEach-Object {
+                if ($_ -match "^\s*Name:\s+(.+?)\s*$") { $Matches[1] }
+            } |
+            Where-Object { $_ } |
+            Sort-Object -Unique
+    )
+    if ($exportNames.Count -lt 10) {
+        throw "Unexpectedly few exports found in python3.dll: $($exportNames.Count)"
+    }
+
+    $defPath = Join-Path $importLibDir "python3.def"
+    @("LIBRARY python3.dll", "EXPORTS") + $exportNames |
+        Set-Content $defPath -Encoding ascii
+
+    foreach ($libraryName in @("libpython3.a", "libpython$versionTag.a")) {
+        $libraryPath = Join-Path $importLibDir $libraryName
+        & $dlltool -m i386:x86-64 -d $defPath -l $libraryPath -D python3.dll 2>&1 |
+            Add-Content (Join-Path $diagnosticsPath "dlltool.txt")
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $libraryPath)) {
+            throw "Failed to create GNU import library: $libraryName"
+        }
+    }
+
+    "source=generated" | Set-Content (Join-Path $diagnosticsPath "python-import-library-source.txt")
 }
 
 # setuptools adds the interpreter "libs" directory before extension-specific
-# library directories. Put the prototype GNU import libraries there so
-# "-lpythonXY" resolves to an import descriptor targeting python3.dll.
+# library directories. Put the selected GNU import libraries there so
+# "-lpythonXY" deterministically resolves to a descriptor targeting python3.dll.
 $pythonLibDir = Join-Path $pythonPrefixPath "libs"
 New-Item -ItemType Directory -Force $pythonLibDir | Out-Null
 foreach ($libraryName in @("libpython3.a", "libpython$versionTag.a")) {

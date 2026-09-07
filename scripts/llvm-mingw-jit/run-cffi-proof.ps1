@@ -202,17 +202,29 @@ if ($backend -ne "mingw32") {
 }
 
 $buildLog = Get-Content $proofLog -Raw
-if ($buildLog -notmatch [regex]::Escape("x86_64-w64-mingw32-clang.exe")) {
-    throw "CFFI build log does not show LLVM-MinGW clang"
+$commandLogPath = Join-Path $diagnosticsPath "compiler-commands.txt"
+if (-not (Test-Path $commandLogPath)) {
+    throw "CFFI proof did not record setuptools compiler commands"
 }
-if ($buildLog -notmatch [regex]::Escape("-std=c17")) {
-    throw "CFFI build log does not show GNU-driver-compatible C17 flag"
+$commandLog = Get-Content $commandLogPath -Raw
+if ($commandLog -notmatch [regex]::Escape("x86_64-w64-mingw32-clang.exe")) {
+    throw "Recorded compiler commands do not use LLVM-MinGW clang"
+}
+if ($commandLog -notmatch [regex]::Escape("-std=c17")) {
+    throw "Recorded compiler commands do not show GNU-driver-compatible C17 flag"
+}
+if ($commandLog -notmatch "(?im)^.*-c .*_llvm_mingw_cffi_probe\.c.*$") {
+    throw "Recorded commands do not contain the CFFI compile step"
+}
+if ($commandLog -notmatch "(?im)^.*-shared .*\.pyd.*$") {
+    throw "Recorded commands do not contain the CFFI shared-extension link step"
 }
 
 $diagnosticText = @(
     Get-Content (Join-Path $diagnosticsPath "clang-search-dirs.txt") -Raw
     Get-Content (Join-Path $diagnosticsPath "clang-include-search.txt") -Raw
     Get-Content (Join-Path $diagnosticsPath "clang-link-plan.txt") -Raw
+    $commandLog
     $buildLog
 ) -join "`n"
 

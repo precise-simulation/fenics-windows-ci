@@ -118,10 +118,10 @@ function Assert-HelperDiagnostics {
         throw "Compiler commands do not use packaged LLVM-MinGW Clang"
     }
 
-    if ($environment -notmatch "(?m)^CC=x86_64-w64-mingw32-clang\.exe$") {
+    if ($environment -notmatch "(?m)^CC=x86_64-w64-mingw32-clang\.exe\r?$") {
         throw "Runtime helper did not select packaged CC"
     }
-    if ($environment -notmatch "(?m)^FFCX_CFFI_COMPILER_BACKEND=mingw32$") {
+    if ($environment -notmatch "(?m)^FFCX_CFFI_COMPILER_BACKEND=mingw32\r?$") {
         throw "Runtime helper did not expose the FFCx backend selection"
     }
 

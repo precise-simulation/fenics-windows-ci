@@ -1,6 +1,6 @@
 # Phase 5: functional validation
 
-**Status:** implementation in progress — the conservative functional matrix is wired into the single `stack` workflow and awaits GitHub runner validation.
+**Status:** complete — stack run #160 (`34125754984`) passed the full conservative functional matrix on the GitHub Windows runner.
 
 ## Objective
 
@@ -66,7 +66,7 @@ The two-rank test must prove:
 
 ## Exit criteria
 
-Phase 5 is complete when the full conservative runtime package passes the complete matrix with:
+Phase 5 is complete. Stack run #160 (`34125754984`) passed the full conservative runtime package matrix with:
 
 - no MSVC/host SDK fallback;
 - correct Python DLL imports;

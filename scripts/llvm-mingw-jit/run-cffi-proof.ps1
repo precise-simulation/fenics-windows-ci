@@ -330,6 +330,9 @@ if ($PoissonScript) {
     if ($poissonCommands -match [regex]::Escape("-std:c17")) {
         throw "FFCx Poisson commands still contain the MSVC-only -std:c17 flag"
     }
+    if ($poissonCommands -notmatch [regex]::Escape("-D__STDC_NO_COMPLEX__")) {
+        throw "FFCx Poisson commands do not suppress complex UFCx members for MSVC ABI compatibility"
+    }
     if ($poissonCommands -notmatch "(?im)^.*-c .*\.c.*$") {
         throw "FFCx Poisson commands do not contain a C compile step"
     }

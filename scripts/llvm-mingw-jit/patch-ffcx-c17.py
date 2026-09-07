@@ -17,10 +17,15 @@ OLD = """    # Compile in C17 mode
 
 NEW = """    # Compile in C17 mode. Windows MSVC and GNU-style drivers use
     # different spellings, so key this off the selected CFFI backend rather
-    # than sys.platform alone.
+    # than sys.platform alone. The MSVC-built DOLFINx UFCx ABI omits complex
+    # function-pointer members. LLVM-MinGW supports C99 complex, so explicitly
+    # suppress those members to keep ufcx_integral layout ABI-compatible.
     cffi_compiler_backend = os.environ.get("FFCX_CFFI_COMPILER_BACKEND", "").lower()
-    if sys.platform.startswith("win32") and cffi_compiler_backend != "mingw32":
-        cffi_base_compile_args = ["-std:c17"]
+    if sys.platform.startswith("win32"):
+        if cffi_compiler_backend == "mingw32":
+            cffi_base_compile_args = ["-std=c17", "-D__STDC_NO_COMPLEX__"]
+        else:
+            cffi_base_compile_args = ["-std:c17"]
     else:
         cffi_base_compile_args = ["-std=c17"]
 """

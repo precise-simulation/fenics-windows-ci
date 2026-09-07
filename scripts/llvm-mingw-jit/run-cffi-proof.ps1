@@ -47,7 +47,7 @@ $env:PATH = @(
 
 $remove = @(
     "VSINSTALLDIR", "VCINSTALLDIR", "VCToolsInstallDir",
-    "INCLUDE", "LIB", "LIBPATH",
+    "INCLUDE", "LIB", "LIBPATH", "LIBRARY_PATH",
     "WindowsSdkDir", "WindowsSDKVersion",
     "UniversalCRTSdkDir", "UCRTVersion",
     "DISTUTILS_USE_SDK", "MSSdk",
@@ -95,7 +95,6 @@ if ($resolvedLink) {
     "CXX=$env:CXX"
     "python=$python"
     "toolchain_root=$toolchainRootPath"
-    "LIBRARY_PATH=$env:LIBRARY_PATH"
 ) | Set-Content (Join-Path $diagnosticsPath "environment.txt")
 
 & $python -c "import sys,sysconfig; print(sys.version); print('prefix=' + sys.prefix); print('include=' + sysconfig.get_path('include')); print('ext_suffix=' + str(sysconfig.get_config_var('EXT_SUFFIX')))" 2>&1 |
@@ -181,6 +180,7 @@ foreach ($libraryName in @("libpython3.a", "libpython$versionTag.a")) {
 }
 $env:LIBRARY_PATH = $importLibDir
 $env:JIT_PYTHON_LIB_DIR = $importLibDir
+"LIBRARY_PATH=$env:LIBRARY_PATH" | Add-Content (Join-Path $diagnosticsPath "environment.txt")
 $proofScript = Join-Path $PSScriptRoot "minimal-cffi-proof.py"
 $proofLog = Join-Path $diagnosticsPath "cffi-build.txt"
 
@@ -342,8 +342,8 @@ if ($PoissonScript) {
 
     $poissonDiagnosticText = @(
         $poissonCommands
-        Get-Content $poissonLog -Raw
-        Get-Content (Join-Path $poissonDiagnostics "ffcx-c17-patch.txt") -Raw
+        (Get-Content $poissonLog -Raw)
+        (Get-Content (Join-Path $poissonDiagnostics "ffcx-c17-patch.txt") -Raw)
     ) -join "`n"
     foreach ($pattern in $forbiddenPathPatterns) {
         if ($poissonDiagnosticText -match $pattern) {

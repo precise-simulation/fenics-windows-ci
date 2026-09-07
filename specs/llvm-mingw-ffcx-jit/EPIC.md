@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** in progress — Phases 1-2 complete; Phase 3 JIT runtime setup is next.
+**Status:** in progress — Phases 1-3 complete; Phase 4 DOLFINx runtime metadata switch is next.
 
 This epic replaces the Windows runtime Visual Studio compiler dependency used by FFCx/CFFI JIT with a small, self-contained LLVM-MinGW toolchain. It does not change the compiler used to build PETSc, DOLFINx, Basix, or other native packages.
 
@@ -66,7 +66,7 @@ Phases are ordered. A later phase may be prototyped early when useful, but its p
 
 ### Implementation status
 
-Phases 1 and 2 are complete.
+Phases 1, 2, and 3 are complete.
 
 Phase 1 proved fresh CFFI and FFCx Poisson JIT on CPython 3.12-3.14 with the
 setuptools `mingw32` backend, LLVM-MinGW Clang/LLD, Stable-ABI
@@ -77,13 +77,21 @@ Phase 2 packages the conservative proven toolchain as
 and compiles in an otherwise empty conda prefix, generates its Python GNU import
 libraries during package construction, and passes the same packaged CFFI/FFCx
 matrix on CPython 3.12-3.14. A rattler-build rebuild is bit-for-bit identical to
-the original package. The initial baseline is 5,508 files, 465.08 MiB installed
-and 86.90 MiB compressed.
+the original package.
 
-Phase 3 should replace the prototype setup/configuration path with a small owned
-runtime helper that resolves the packaged compiler, Python development inputs,
-and setuptools backend hermetically. `fenics-dolfinx` runtime metadata remains
-unchanged until the later metadata-switch gate.
+Phase 3 packages an owned hermetic runtime helper that resolves compiler,
+linker, Python development inputs, UFCx headers, and the setuptools backend
+without compiler activation or persistent environment changes. CI poisons
+ambient Visual Studio/Windows SDK/compiler variables and verifies the actual
+compile/link inputs remain package-relative. The fresh Poisson proof passes on
+CPython 3.12-3.14, and a two-rank MPI probe confirms identical JIT
+configuration across child processes. Dedicated workflow run #44
+(`34094463578`) is green.
+
+Phase 4 may now switch the Windows `fenics-dolfinx` runtime metadata from the
+general compiler dependency to `fenics-jit-llvm-mingw` plus an explicit
+runtime setuptools/distutils provider, while keeping the native package build
+toolchain on VS2022.
 
 ## Primary gates
 

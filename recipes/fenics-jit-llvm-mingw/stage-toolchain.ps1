@@ -26,7 +26,10 @@ if ($actualSha256 -ne $archiveSha256) {
 $extractRoot = Join-Path $env:SRC_DIR "_llvm-mingw-extract"
 Remove-Item -Recurse -Force $extractRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $extractRoot | Out-Null
-Expand-Archive -Path $archive -DestinationPath $extractRoot
+$tar = Join-Path $env:SystemRoot "System32\tar.exe"
+if (-not (Test-Path $tar)) { throw "Windows tar.exe not found: $tar" }
+& $tar -xf $archive -C $extractRoot
+if ($LASTEXITCODE -ne 0) { throw "Failed to extract LLVM-MinGW archive with tar.exe" }
 
 $sourceRoot = Join-Path $extractRoot "llvm-mingw-$version-ucrt-x86_64"
 if (-not (Test-Path $sourceRoot)) {
@@ -62,7 +65,6 @@ function Copy-Tree {
 # Phase 5 will measure and prune individual executables/libraries.
 Copy-Tree "bin" "bin"
 Copy-Tree "lib\clang" "lib\clang"
-Copy-Tree "generic-w64-mingw32" "generic-w64-mingw32"
 Copy-Tree "x86_64-w64-mingw32" "x86_64-w64-mingw32"
 
 foreach ($name in @("versions.txt", "LICENSE.TXT")) {

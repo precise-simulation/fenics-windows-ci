@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** in progress — Phases 1-4 complete; Phase 5 functional validation is in progress.
+**Status:** in progress — Phases 1-5 complete; Phase 6 toolchain minimization is next.
 
 This epic replaces the Windows runtime Visual Studio compiler dependency used by FFCx/CFFI JIT with a small, self-contained LLVM-MinGW toolchain. It does not change the compiler used to build PETSc, DOLFINx, Basix, or other native packages.
 
@@ -66,7 +66,7 @@ Phases are ordered. A later phase may be prototyped early when useful, but its p
 
 ### Implementation status
 
-Phases 1, 2, 3, and 4 are complete. Phase 5 validation is implemented and awaiting the full stack CI gate.
+Phases 1, 2, 3, 4, and 5 are complete. Phase 6 toolchain minimization is next.
 
 Phase 1 proved fresh CFFI and FFCx Poisson JIT on CPython 3.12-3.14 with the
 setuptools `mingw32` backend, LLVM-MinGW Clang/LLD, Stable-ABI
@@ -94,9 +94,10 @@ general compiler dependency to `fenics-jit-llvm-mingw` plus explicit
 Stack run #155 (`34105011298`) is green on the normal package and Python
 3.12-3.14 consumer path.
 
-Phase 5 adds broad generated-form coverage, deterministic fresh/cache-reload
+Phase 5 added broad generated-form coverage, deterministic fresh/cache-reload
 checks, two-rank MPI compile/cache semantics, paths containing spaces, and PE
-dependency inspection before minimization begins.
+dependency inspection. Stack run #160 (`34125754984`) passed the complete
+functional gate on CPython 3.12-3.14; the Python 3.15 preview step also passed.
 
 ## Primary gates
 

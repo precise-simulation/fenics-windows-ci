@@ -59,9 +59,18 @@ Get-ChildItem Env: |
     Where-Object Name -Like "VSCMD_*" |
     ForEach-Object { Remove-Item "Env:$($_.Name)" -ErrorAction Ignore }
 
-$env:CC = $clang
-$env:CXX = $clangxx
+# setuptools' MinGW backend passes CC through shlex.split().  A native
+# Windows path such as D:\a\... is therefore unsafe here because backslashes
+# are consumed as escapes.  Resolve the driver hermetically through the
+# sanitized PATH instead.
+$env:CC = "x86_64-w64-mingw32-clang.exe"
+$env:CXX = "x86_64-w64-mingw32-clang++.exe"
 $env:SETUPTOOLS_USE_DISTUTILS = "local"
+
+$resolvedCc = Get-Command $env:CC -ErrorAction Stop
+if ([System.IO.Path]::GetFullPath($resolvedCc.Source) -ne [System.IO.Path]::GetFullPath($clang)) {
+    throw "CC does not resolve to packaged LLVM-MinGW clang: $($resolvedCc.Source)"
+}
 
 $forbiddenCommands = @("cl.exe", "vswhere.exe", "vcvarsall.bat")
 foreach ($command in $forbiddenCommands) {

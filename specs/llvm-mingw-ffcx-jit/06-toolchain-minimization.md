@@ -1,5 +1,7 @@
 # Phase 6: minimize the toolchain
 
+**Status:** in progress — Phase 5 is green; the conservative package baseline is recorded before reproducible pruning begins.
+
 ## Objective
 
 Reduce the conservative Phase 2 LLVM-MinGW runtime package to the smallest maintainable subset that still passes the complete Phase 5 validation matrix.
@@ -7,6 +9,14 @@ Reduce the conservative Phase 2 LLVM-MinGW runtime package to the smallest maint
 Minimization must be reproducible rather than hand-pruned.
 
 ## Size baseline
+
+Phase 5 stack run #160 (`34125754984`) records the conservative LLVM-MinGW package at:
+
+- staged JIT payload: **465.10 MiB**;
+- conda package installed content: **466.91 MiB**;
+- compressed `.conda` artifact: **86.91 MiB**.
+
+The previous Windows runtime compiler dependency closure baseline and standalone-bundle increment still need to be measured before evaluating the 50% gate.
 
 Before removing files, record:
 

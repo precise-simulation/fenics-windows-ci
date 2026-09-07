@@ -118,8 +118,14 @@ function Assert-HelperDiagnostics {
         throw "Compiler commands do not use packaged LLVM-MinGW Clang"
     }
 
-    if ($environment -notmatch "(?m)^CC=x86_64-w64-mingw32-clang\.exe\r?$") {
-        throw "Runtime helper did not select packaged CC"
+    $ccLine = @($environment -split "\r?\n" | Where-Object { $_ -like "CC=*" }) | Select-Object -First 1
+    if (-not $ccLine) {
+        throw "Runtime helper diagnostics did not record CC"
+    }
+    $selectedCc = [System.IO.Path]::GetFullPath($ccLine.Substring(3))
+    $expectedCc = [System.IO.Path]::GetFullPath([string]$config.clang)
+    if ($selectedCc -ne $expectedCc) {
+        throw "Runtime helper did not select packaged CC: $selectedCc"
     }
     if ($environment -notmatch "(?m)^FFCX_CFFI_COMPILER_BACKEND=mingw32\r?$") {
         throw "Runtime helper did not expose the FFCx backend selection"

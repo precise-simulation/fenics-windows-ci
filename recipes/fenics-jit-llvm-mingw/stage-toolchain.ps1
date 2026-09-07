@@ -68,6 +68,14 @@ Copy-Tree "include" "include"
 Copy-Tree "lib\clang" "lib\clang"
 Copy-Tree "x86_64-w64-mingw32" "x86_64-w64-mingw32"
 
+$runtimeDir = Join-Path $destination "runtime"
+New-Item -ItemType Directory -Force $runtimeDir | Out-Null
+$runtimeHelperSource = Join-Path $PSScriptRoot "fenics_jit_runtime.py"
+if (-not (Test-Path $runtimeHelperSource)) {
+    throw "Runtime helper source missing from recipe: $runtimeHelperSource"
+}
+Copy-Item -Force $runtimeHelperSource (Join-Path $runtimeDir "fenics_jit_runtime.py")
+
 foreach ($name in @("versions.txt", "LICENSE.TXT")) {
     $source = Join-Path $sourceRoot $name
     if (Test-Path $source) {
@@ -151,6 +159,7 @@ $metadata = [ordered]@{
     lld_version = $lldVersion
     python_import_library_abi = "python3.dll"
     python_import_library_aliases = @("python3", "python312", "python313", "python314")
+    runtime_helper = "runtime/fenics_jit_runtime.py"
 }
 $metadata | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $destination "metadata.json") -Encoding UTF8
 

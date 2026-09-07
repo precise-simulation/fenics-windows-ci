@@ -60,6 +60,11 @@ if ($record.Count -ne 1) {
     throw "Could not identify exactly one runtime package record in repodata"
 }
 
+$runtimeDepends = @($record[0].depends | Where-Object { $_ })
+if ($runtimeDepends.Count -ne 0) {
+    throw "Runtime package must be dependency-free; repodata depends: $($runtimeDepends -join ', ')"
+}
+
 $metrics = [ordered]@{
     package = $package.Name
     package_bytes = $package.Length

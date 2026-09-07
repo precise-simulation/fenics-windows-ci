@@ -62,6 +62,11 @@ def main() -> None:
     compiler = None
 
     with config.activate(diagnostics_dir=diagnostics, verbose=True):
+        # DOLFINx/FFCx capture the default cache root during import. Set it
+        # before importing either package so this proof always forces a fresh,
+        # retained cache below the requested diagnostics work tree.
+        os.environ["XDG_CACHE_HOME"] = str(cache_dir.parent)
+
         import cffi
         import dolfinx
         import ffcx
@@ -92,8 +97,6 @@ def main() -> None:
             raise RuntimeError(
                 f"Runtime helper did not select mingw32 for FFCx; got {compiler!r}"
             )
-
-        os.environ["XDG_CACHE_HOME"] = str(cache_dir.parent)
 
         def logged_check_call(cmd, *call_args, **call_kwargs):
             rendered = subprocess.list2cmdline([str(part) for part in cmd])

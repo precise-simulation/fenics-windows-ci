@@ -16,6 +16,7 @@ if not exist "%JIT_ROOT%\lib\python\libpython313.a" exit /b 1
 if not exist "%JIT_ROOT%\lib\python\libpython314.a" exit /b 1
 if not exist "%JIT_ROOT%\manifest.csv" exit /b 1
 if not exist "%JIT_ROOT%\metadata.json" exit /b 1
+if not exist "%JIT_ROOT%\runtime\fenics_jit_runtime.py" exit /b 1
 
 "%CLANG%" --version
 if errorlevel 1 exit /b 1

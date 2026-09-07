@@ -8,6 +8,7 @@ set "CLANG=%JIT_BIN%\x86_64-w64-mingw32-clang.exe"
 if not exist "%CLANG%" exit /b 1
 if not exist "%JIT_BIN%\ld.lld.exe" exit /b 1
 if not exist "%JIT_ROOT%\x86_64-w64-mingw32\lib" exit /b 1
+if not exist "%JIT_ROOT%\include\io.h" exit /b 1
 if not exist "%JIT_ROOT%\lib\clang" exit /b 1
 if not exist "%JIT_ROOT%\lib\python\libpython3.a" exit /b 1
 if not exist "%JIT_ROOT%\lib\python\libpython312.a" exit /b 1

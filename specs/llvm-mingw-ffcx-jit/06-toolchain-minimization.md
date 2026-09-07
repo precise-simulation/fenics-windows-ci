@@ -64,7 +64,10 @@ Upload size reports, retained-file manifests, compiler/linker logs, and the mini
 `recipes/fenics-jit-llvm-mingw/minimize-toolchain.ps1`. It removes all
 AArch64, ARM64EC, ARMv7, and i686 driver/tool aliases from the staged `bin`
 tree, asserts that no unsupported target sysroot was staged, and writes a
-before/after removal report. Full Phase 5 validation is pending for this stage.
+before/after removal report. Stack run #162 (`34129806540`) passed the full
+Phase 5 matrix. Stage A removed **184 files / 7.92 MiB**; the final package
+changed from **466.91 to 458.96 MiB installed** and from **86.91 to 86.85 MiB
+compressed**.
 
 Remove target-specific files for unsupported architectures, as applicable:
 
@@ -78,6 +81,12 @@ Retain only x86-64.
 Run the full validation matrix.
 
 ## Stage B: remove C++ support
+
+**Implementation:** build 2 extends the same reproducible minimizer to remove
+the libc++ header tree, libc++/libc++abi/libunwind target files, libunwind
+headers, and C++ driver aliases. The runtime helper pins both `CC` and `CXX`
+to the packaged Clang C driver so setuptools cannot fall back to a host C++
+compiler. Full Phase 5 validation is pending for this stage.
 
 FFCx JIT generates C only.
 

@@ -94,9 +94,10 @@ class RuntimeConfig:
         bin_dir = _require_dir(root / "bin", "LLVM-MinGW bin directory")
 
         clang = _require_file(bin_dir / "x86_64-w64-mingw32-clang.exe", "Clang C driver")
-        clangxx = _require_file(
-            bin_dir / "x86_64-w64-mingw32-clang++.exe", "Clang C++ driver"
-        )
+        # FFCx emits C only. Keep CXX pinned to the same packaged C driver so
+        # setuptools cannot discover a host C++ compiler if it probes CXX,
+        # without requiring any clang++/libc++ payload in the runtime package.
+        clangxx = clang
         lld = _require_file(bin_dir / "ld.lld.exe", "LLD linker")
         readobj = _require_file(bin_dir / "llvm-readobj.exe", "llvm-readobj")
         toolchain_include_dir = _require_dir(root / "include", "mingw-w64/UCRT include root")
@@ -267,8 +268,8 @@ class RuntimeConfig:
         selected_cxx = Path(os.environ["CXX"]).resolve()
         if selected_cc != self.clang:
             raise RuntimeError(f"CC is not the packaged Clang driver: {selected_cc}")
-        if selected_cxx != self.clangxx:
-            raise RuntimeError(f"CXX is not the packaged Clang++ driver: {selected_cxx}")
+        if selected_cxx != self.clang:
+            raise RuntimeError(f"CXX is not pinned to the packaged Clang C driver: {selected_cxx}")
 
         # Runtime PATH is retained for conda DLL/MPI provider discovery, but
         # Visual Studio and host Windows SDK directories themselves are removed.

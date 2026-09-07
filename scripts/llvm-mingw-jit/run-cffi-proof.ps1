@@ -6,7 +6,8 @@ param(
     [string]$ToolchainRoot,
 
     [string]$WorkDir = "jit-work",
-    [string]$DiagnosticsDir = "jit-diagnostics/proof"
+    [string]$DiagnosticsDir = "jit-diagnostics/proof",
+    [string]$PoissonScript = ""
 )
 
 Set-StrictMode -Version Latest
@@ -94,6 +95,7 @@ if ($resolvedLink) {
     "CXX=$env:CXX"
     "python=$python"
     "toolchain_root=$toolchainRootPath"
+    "LIBRARY_PATH=$env:LIBRARY_PATH"
 ) | Set-Content (Join-Path $diagnosticsPath "environment.txt")
 
 & $python -c "import sys,sysconfig; print(sys.version); print('prefix=' + sys.prefix); print('include=' + sysconfig.get_path('include')); print('ext_suffix=' + str(sysconfig.get_config_var('EXT_SUFFIX')))" 2>&1 |
@@ -169,6 +171,15 @@ foreach ($libraryName in @("libpython3.a", "libpython$versionTag.a")) {
     }
 }
 
+# setuptools adds the interpreter "libs" directory before extension-specific
+# library directories. Put the prototype GNU import libraries there so
+# "-lpythonXY" resolves to an import descriptor targeting python3.dll.
+$pythonLibDir = Join-Path $pythonPrefixPath "libs"
+New-Item -ItemType Directory -Force $pythonLibDir | Out-Null
+foreach ($libraryName in @("libpython3.a", "libpython$versionTag.a")) {
+    Copy-Item -Force (Join-Path $importLibDir $libraryName) (Join-Path $pythonLibDir $libraryName)
+}
+$env:LIBRARY_PATH = $importLibDir
 $env:JIT_PYTHON_LIB_DIR = $importLibDir
 $proofScript = Join-Path $PSScriptRoot "minimal-cffi-proof.py"
 $proofLog = Join-Path $diagnosticsPath "cffi-build.txt"
@@ -239,3 +250,106 @@ foreach ($pattern in $forbiddenPathPatterns) {
 }
 
 Write-Host "LLVM-MinGW CFFI proof passed: $pydPath"
+
+if ($PoissonScript) {
+    $poissonPath = [System.IO.Path]::GetFullPath($PoissonScript)
+    if (-not (Test-Path $poissonPath)) {
+        throw "Poisson test script not found: $poissonPath"
+    }
+
+    $poissonDiagnostics = Join-Path $diagnosticsPath "poisson"
+    $cacheHome = Join-Path $workPath "ffcx-cache"
+    $cacheDir = Join-Path $cacheHome "fenics"
+    Remove-Item -Recurse -Force $cacheHome -ErrorAction Ignore
+    New-Item -ItemType Directory -Force $cacheDir, $poissonDiagnostics | Out-Null
+
+    $env:XDG_CACHE_HOME = $cacheHome
+    $env:FFCX_CFFI_COMPILER_BACKEND = "mingw32"
+
+    $patchScript = Join-Path $PSScriptRoot "patch-ffcx-c17.py"
+    & $python $patchScript --diagnostics-dir $poissonDiagnostics 2>&1 |
+        Tee-Object -FilePath (Join-Path $poissonDiagnostics "ffcx-patch-output.txt")
+    if ($LASTEXITCODE -ne 0) {
+        throw "FFCx C17 patch failed"
+    }
+
+    & $python -c "import dolfinx, ffcx, cffi, setuptools; print('dolfinx=' + dolfinx.__version__); print('ffcx=' + ffcx.__version__); print('cffi=' + cffi.__version__); print('setuptools=' + setuptools.__version__)" 2>&1 |
+        Set-Content (Join-Path $poissonDiagnostics "versions.txt")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not import the installed FEniCS/JIT stack"
+    }
+
+    $poissonProof = Join-Path $PSScriptRoot "ffcx-poisson-proof.py"
+    $poissonLog = Join-Path $poissonDiagnostics "poisson-output.txt"
+    & $python $poissonProof `
+        --poisson-script $poissonPath `
+        --cache-dir $cacheDir `
+        --diagnostics-dir $poissonDiagnostics 2>&1 |
+        Tee-Object -FilePath $poissonLog
+    if ($LASTEXITCODE -ne 0) {
+        throw "Fresh FFCx Poisson JIT proof failed"
+    }
+
+    $poissonBackend = (Get-Content (Join-Path $poissonDiagnostics "setuptools-compiler.txt") -Raw).Trim()
+    if ($poissonBackend -ne "mingw32") {
+        throw "Expected FFCx setuptools compiler backend mingw32, got '$poissonBackend'"
+    }
+
+    $poissonCommandPath = Join-Path $poissonDiagnostics "compiler-commands.txt"
+    if (-not (Test-Path $poissonCommandPath)) {
+        throw "FFCx Poisson proof did not record compiler commands"
+    }
+    $poissonCommands = Get-Content $poissonCommandPath -Raw
+    if ($poissonCommands -notmatch [regex]::Escape("x86_64-w64-mingw32-clang.exe")) {
+        throw "FFCx Poisson commands do not use packaged LLVM-MinGW clang"
+    }
+    if ($poissonCommands -notmatch [regex]::Escape("-std=c17")) {
+        throw "FFCx Poisson commands do not contain GNU-driver-compatible -std=c17"
+    }
+    if ($poissonCommands -match [regex]::Escape("-std:c17")) {
+        throw "FFCx Poisson commands still contain the MSVC-only -std:c17 flag"
+    }
+    if ($poissonCommands -notmatch "(?im)^.*-c .*\.c.*$") {
+        throw "FFCx Poisson commands do not contain a C compile step"
+    }
+    if ($poissonCommands -notmatch "(?im)^.*-shared .*\.pyd.*$") {
+        throw "FFCx Poisson commands do not contain a shared-extension link step"
+    }
+
+    $pydPaths = Get-Content (Join-Path $poissonDiagnostics "pyd-paths.txt") |
+        Where-Object { $_ -and (Test-Path $_) }
+    if (-not $pydPaths) {
+        throw "FFCx Poisson proof recorded no readable JIT .pyd files"
+    }
+
+    $poissonImportsPath = Join-Path $poissonDiagnostics "pyd-imports.txt"
+    Remove-Item $poissonImportsPath -ErrorAction Ignore
+    foreach ($jitPyd in $pydPaths) {
+        "=== $jitPyd ===" | Add-Content $poissonImportsPath
+        $jitImports = & $readobj --coff-imports $jitPyd 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "llvm-readobj failed while inspecting FFCx JIT module: $jitPyd"
+        }
+        $jitImports | Add-Content $poissonImportsPath
+        $jitImportText = $jitImports -join "`n"
+        if ($jitImportText -notmatch "(?i)python3\.dll") {
+            throw "FFCx JIT module does not import python3.dll: $jitPyd"
+        }
+        if ($jitImportText -match "(?i)python3\d{2}t?(?:_d)?\.dll") {
+            throw "FFCx JIT module unexpectedly imports a version-specific Python DLL: $jitPyd"
+        }
+    }
+
+    $poissonDiagnosticText = @(
+        $poissonCommands
+        Get-Content $poissonLog -Raw
+        Get-Content (Join-Path $poissonDiagnostics "ffcx-c17-patch.txt") -Raw
+    ) -join "`n"
+    foreach ($pattern in $forbiddenPathPatterns) {
+        if ($poissonDiagnosticText -match $pattern) {
+            throw "Host Visual Studio/Windows SDK path leaked into FFCx Poisson diagnostics: $($Matches[0])"
+        }
+    }
+
+    Write-Host "LLVM-MinGW fresh FFCx Poisson JIT proof passed"
+}

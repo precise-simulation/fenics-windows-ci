@@ -16,7 +16,6 @@ on:
   pull_request:
     paths:
       - "recipes/**"
-      - "!recipes/fenics-jit-llvm-mingw/**"
       - "scripts/build-stack.ps1"
       - "scripts/check_versions.py"
       - "scripts/test_check_versions.py"
@@ -27,7 +26,6 @@ on:
       - main
     paths:
       - "recipes/**"
-      - "!recipes/fenics-jit-llvm-mingw/**"
       - "scripts/build-stack.ps1"
       - "scripts/check_versions.py"
       - "scripts/test_check_versions.py"

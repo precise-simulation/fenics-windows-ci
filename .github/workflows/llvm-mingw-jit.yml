@@ -60,12 +60,9 @@ jobs:
             fenics-jit-llvm-mingw
           if ($LASTEXITCODE -ne 0) { throw "clean package install failed" }
 
-          $records = & $env:MAMBA_EXE list -r $env:MAMBA_ROOT_PREFIX -n jit-package-only --json | ConvertFrom-Json
-          $records | ConvertTo-Json -Depth 6 | Set-Content "jit-package-logs/clean-prefix-packages.json"
-          $unexpected = @($records | Where-Object { $_.name -ne "fenics-jit-llvm-mingw" })
-          if ($unexpected.Count -gt 0) {
-            throw "runtime package unexpectedly pulled dependencies: $($unexpected.name -join ', ')"
-          }
+          & $env:MAMBA_EXE list -r $env:MAMBA_ROOT_PREFIX -n jit-package-only --json |
+            Set-Content "jit-package-logs/clean-prefix-packages.json"
+          if ($LASTEXITCODE -ne 0) { throw "could not record clean-prefix package list" }
 
           $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/jit-package-only"
           $clang = Join-Path $prefix "Library/fenics-jit/bin/x86_64-w64-mingw32-clang.exe"

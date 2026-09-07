@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import subprocess
 from pathlib import Path
 
 from cffi import FFI
 from cffi._shimmed_dist_utils import Distribution
+from setuptools._distutils.compilers.C.base import Compiler
 
 
 def main() -> None:
@@ -43,15 +45,28 @@ def main() -> None:
                 f"JIT-local setup.cfg did not select mingw32; got {compiler!r}"
             )
 
-        ffi = FFI()
-        ffi.cdef("int add_ints(int a, int b);")
-        ffi.set_source(
-            "_llvm_mingw_cffi_probe",
-            "int add_ints(int a, int b) { return a + b; }",
-            extra_compile_args=["-std=c17"],
-            library_dirs=[str(python_lib_dir)],
-        )
-        output = Path(ffi.compile(tmpdir=str(work_dir), verbose=True)).resolve()
+        command_log = diagnostics_dir / "compiler-commands.txt"
+        original_call = Compiler.call
+
+        def logged_call(self, cmd, *, env=None, **kwargs):
+            rendered = subprocess.list2cmdline([str(part) for part in cmd])
+            with command_log.open("a", encoding="utf-8") as stream:
+                stream.write(rendered + "\n")
+            return original_call(self, cmd, env=env, **kwargs)
+
+        Compiler.call = logged_call
+        try:
+            ffi = FFI()
+            ffi.cdef("int add_ints(int a, int b);")
+            ffi.set_source(
+                "_llvm_mingw_cffi_probe",
+                "int add_ints(int a, int b) { return a + b; }",
+                extra_compile_args=["-std=c17"],
+                library_dirs=[str(python_lib_dir)],
+            )
+            output = Path(ffi.compile(tmpdir=str(work_dir), verbose=True)).resolve()
+        finally:
+            Compiler.call = original_call
     finally:
         os.chdir(previous_cwd)
 

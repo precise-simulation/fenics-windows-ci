@@ -121,26 +121,44 @@ scripts/test-poisson.py
 
 This verifies generation, compilation, import of the JIT module, assembly, and solve.
 
+
 ### Compiler selection
 
 CFFI delegates compilation to setuptools/distutils `build_ext`. On Windows this normally selects MSVC.
 
-Configure the JIT build explicitly to use the MinGW compiler backend and LLVM-MinGW C driver, for example conceptually:
+The direct `cffi.FFI.compile()` path used by FFCx does **not** expose a compiler-backend argument. Setting `CC` alone is insufficient: it changes the executable used by a GNU-style backend only after that backend has been selected. The implementation must therefore explicitly select setuptools' `mingw32` compiler backend as well as point that backend at LLVM-MinGW Clang.
+
+The first prototype should use a JIT-local configuration owned by the FFCx cache/build directory, for example conceptually:
+
+```ini
+[build_ext]
+compiler = mingw32
+```
+
+together with a process-local:
 
 ```text
-compiler = mingw32
 CC = <runtime>/bin/x86_64-w64-mingw32-clang.exe
 ```
 
-The configuration should be process-local or JIT-local. Do not depend on a user's global `setup.cfg`, shell activation, or registry configuration.
+CFFI changes into its temporary build directory before creating the setuptools `Distribution`, whose `parse_config_files()` path is then used by `build_ext`. Verify this local-config mechanism against the exact CFFI/setuptools versions used by the packages rather than assuming it remains stable.
+
+If a JIT-local `setup.cfg` cannot be made deterministic, use a small owned integration patch/helper that sets `build_ext.compiler = "mingw32"` programmatically before CFFI invokes the build. Do not rely on a user's global `setup.cfg`, shell activation, registry configuration, or command-line state.
 
 Prefer the smallest maintainable integration in this order:
 
-1. explicit CFFI/FFCx compiler selection supported by the existing APIs;
-2. a small FFCx/DOLFINx integration patch;
-3. a narrow launcher/shim around the C compiler invocation.
+1. verified JIT-local setuptools compiler selection plus process-local `CC`;
+2. a small FFCx/CFFI integration patch that sets the backend programmatically;
+3. a narrow custom compile/link adapter if setuptools compiler selection proves too fragile.
 
 Do not globally replace the Python build compiler.
+
+The CI proof must record both:
+
+- the selected setuptools compiler type, which must be `mingw32`;
+- the actual compiler/linker subprocesses, which must resolve to the packaged LLVM-MinGW Clang/LLD toolchain.
+
+This prevents a test from passing merely because `clang.exe` appears in logs while setuptools still initialized an unintended backend.
 
 ### FFCx compile flags
 
@@ -160,6 +178,7 @@ Make compile flags depend on the selected compiler backend rather than only `sys
 
 Prefer an upstreamable FFCx fix if practical; otherwise carry a small documented package patch.
 
+
 ### CPython headers and Python import libraries
 
 CFFI JIT compiles a real CPython extension. The JIT therefore needs both:
@@ -169,16 +188,20 @@ CFFI JIT compiles a real CPython extension. The JIT therefore needs both:
 
 In a normal conda environment the active Python package supplies its headers. A standalone/Nuitka bundle does not normally carry those development files, so they must be staged explicitly later in this plan.
 
-The Windows DOLFINx package is built with the CPython 3.12 stable ABI but is exercised by this repository on CPython 3.12, 3.13, and 3.14. Do not assume that one versioned GNU import library is sufficient for all three interpreters.
+CFFI already attempts to compile ordinary CPython 3 Windows extensions with `Py_LIMITED_API` by default when the interpreter configuration permits it. Therefore the main unresolved stable-ABI problem is not merely defining `Py_LIMITED_API`; it is ensuring that setuptools' MinGW link step binds the extension to the intended Python DLL.
+
+On official Windows CPython, setuptools' `build_ext.get_libraries()` automatically adds a versioned Python library such as `python312`, `python313`, or `python314` whenever the selected compiler is non-MSVC. A `libpython3.a` file alone is therefore insufficient unless the integration also changes setuptools' selected library name.
 
 Resolve the import-library strategy before switching runtime metadata:
 
-1. Prefer a stable-ABI path if CFFI can be made to compile the generated wrapper with `Py_LIMITED_API` and link it deliberately against the stable `python3.dll` ABI. Generate and ship a GNU-style import library for `python3.dll`, then verify the resulting JIT module on CPython 3.12, 3.13, and 3.14.
-2. If setuptools/CFFI still requires versioned libraries such as `python312`, `python313`, or `python314`, provide the matching GNU import library for each supported interpreter and select it from the active runtime. This may be implemented as Python-version-specific package contents or generated package-time artifacts, but the JIT compiler package must not silently bind to only the build-time Python version.
+1. **Preferred stable-ABI strategy:** retain CFFI's limited-API wrapper and ensure the link ultimately imports `python3.dll`. Two concrete implementations should be evaluated:
+   - override the JIT-local setuptools Python-library selection so `build_ext` requests `python3`; or
+   - provide version-named GNU import libraries such as `libpython312.a`, `libpython313.a`, and `libpython314.a` whose import descriptors deliberately target `python3.dll`. This lets setuptools keep requesting its normal versioned name while the produced PE module imports the stable-ABI DLL.
+2. **Fallback:** if the stable-ABI route cannot be made reliable, generate a normal GNU import library for the active interpreter's versioned DLL and select it per CPython version. This is acceptable only if CI proves the resulting module on each supported interpreter and the package contents cannot silently bind to the build-time Python version.
 
 Generate any required GNU import libraries during package construction and ship only the final import libraries required by JIT. Do not retain helper tools such as `llvm-dlltool` in the runtime solely for this purpose.
 
-The CI proof must inspect the generated `.pyd` imports and show that the chosen strategy loads correctly on every supported CPython version.
+The CI proof must inspect the generated `.pyd` PE import table. If the stable-ABI strategy is selected, the acceptance condition is an import of `python3.dll`, not merely successful linking. Verify fresh JIT and module load on CPython 3.12, 3.13, and 3.14.
 
 ## Phase 2: dedicated runtime package
 
@@ -207,11 +230,14 @@ Pin and record:
 
 The first package should contain a conservative working subset. Size minimization is a later phase and must not be mixed with the initial compatibility work.
 
+
 ## Phase 3: switch the DOLFINx runtime dependency
 
 Keep Windows build requirements on VS2022 unchanged.
 
 Replace the Windows runtime dependency that currently brings in the generic C compiler with the dedicated JIT package.
+
+CFFI runtime compilation on Python 3.12+ requires setuptools' vendored distutils implementation. The conda-forge `cffi` runtime package does not itself guarantee a runtime `setuptools` dependency, so the FEniCS runtime must declare it explicitly rather than depending on an unrelated transitive install.
 
 Conceptually:
 
@@ -219,22 +245,39 @@ Conceptually:
 run:
   - fenics-jit-llvm-mingw
   - cffi
+  - setuptools
   - fenics-ffcx
   - ...
 ```
 
+Pin or constrain the CFFI/setuptools pair when necessary for the verified JIT adapter. Prefer keeping version-sensitive behavior behind the small owned adapter/helper so routine dependency updates can be tested in isolation.
+
 The installed runtime must be able to perform FFCx JIT without conda compiler activation.
+
 
 ## Phase 4: JIT runtime setup
 
-Provide a small runtime helper that resolves the compiler relative to the installed prefix or bundled application and sets only the environment required for the JIT subprocess.
+Provide a small runtime helper that owns all JIT build discovery rather than relying on ambient Python/compiler state. It must resolve paths relative to the installed prefix or bundled application and set only the environment/configuration required for the JIT subprocess.
 
-It should not modify the user's persistent environment.
+At minimum the helper must provide or control:
 
-When verbose JIT logging is enabled, report the selected compiler, target, and CRT so failures can be diagnosed, for example:
+- setuptools compiler backend: `mingw32`;
+- LLVM-MinGW C compiler executable;
+- Clang/LLD target and relevant compile/link flags;
+- CPython include directory containing `Python.h` and `pyconfig.h`;
+- directory and logical name of the GNU Python import library;
+- FFCx/UFCx include directory;
+- any packaged mingw-w64/UCRT include and import-library roots.
+
+For a normal conda environment these paths may resolve into the active prefix. For a standalone/Nuitka bundle they must resolve into the staged bundle directories, including the staged `python-dev` tree. Merely copying CPython headers/import libraries beside the executable is insufficient: the helper must pass those paths into the CFFI/setuptools build so `build_ext` does not fall back to `sysconfig` locations in the original conda/build prefix.
+
+The helper should not modify the user's persistent environment.
+
+When verbose JIT logging is enabled, report the selected compiler, backend, target, CRT, Python include root, and Python link target so failures can be diagnosed, for example:
 
 ```text
-FFCx JIT compiler: LLVM-MinGW / Clang <version> / x86_64 / UCRT
+FFCx JIT compiler: LLVM-MinGW / Clang <version> / mingw32 / x86_64 / UCRT
+FFCx JIT Python: <include-root> / python3.dll
 ```
 
 ## Phase 5: functional test matrix
@@ -261,6 +304,18 @@ Generated JIT `.pyd` files should also be inspected for runtime dependencies. Th
 For each fresh-cache test, retain the verbose compiler/linker log as a CI artifact so accidental fallback to MSVC is diagnosable even after a failure.
 
 ## Phase 6: minimize the toolchain
+
+
+Before removing files, record a baseline for the runtime compiler footprint being replaced. The size report must include:
+
+- installed size of the current Windows compiler dependency closure pulled into a `fenics-dolfinx` runtime environment;
+- compressed package/download size attributable to that compiler closure where measurable;
+- installed and compressed sizes of the conservative LLVM-MinGW JIT package;
+- installed and compressed sizes after each minimization stage;
+- incremental size added to the standalone/Nuitka bundle.
+
+The minimum size acceptance criterion is that the final LLVM-MinGW JIT compiler footprint is **no more than 50% of the installed size of the current Windows runtime compiler dependency closure**, while still passing the complete functional matrix. If it does not meet that threshold, the implementation should not replace the current runtime dependency without an explicit decision explaining why the size reduction is still worthwhile.
+
 
 Only start minimization after the conservative package passes the full test matrix.
 
@@ -477,27 +532,32 @@ The work is complete when:
 - the runtime compiler is packaged independently from the full development compiler stack;
 - the minimized package is generated by a reproducible script;
 - every retained toolchain component has a documented reason;
-- package size before and after minimization is recorded in CI or release metadata.
+- package size before and after minimization is recorded in CI or release metadata;
+- the final installed LLVM-MinGW JIT compiler footprint is no more than 50% of the current Windows runtime compiler dependency closure;
+- the incremental standalone/Nuitka bundle size attributable to JIT support is recorded.
 
 A one-time test on a genuinely pristine Windows VM with Visual Studio not installed is a useful final release-confidence check, but it is optional and is not a prerequisite for implementation or CI acceptance.
+
 
 ## Implementation order
 
 1. Add a dedicated GitHub `windows-2022` experimental workflow for LLVM-MinGW JIT.
-2. Download a pinned upstream LLVM-MinGW UCRT x86-64 archive and prove it can build and load a CFFI extension with the packaged CPython.
-3. Resolve the CPython-header and Python import-library strategy, including whether the JIT can use the stable `python3.dll` ABI or needs versioned libraries for CPython 3.12, 3.13, and 3.14.
-4. Add the sanitized JIT environment plus compiler/linker/search-path tracing; make accidental MSVC or host Windows SDK use a hard failure.
-5. Run the existing FFCx/DOLFINx Poisson JIT from an empty cache with only LLVM-MinGW and the selected Python development inputs available to the JIT process.
-6. Resolve FFCx compiler-specific flags cleanly.
-7. Prove fresh JIT on CPython 3.12, 3.13, and 3.14 before changing runtime dependency metadata.
-8. Add the dedicated runtime compiler package.
-9. Switch `fenics-dolfinx` Windows runtime metadata to the dedicated package.
-10. Add the broader JIT, cache, dependency-inspection, and MPI test matrix.
-11. Add deterministic toolchain minimization and run every reduction stage on the hosted runner.
-12. Measure and remove unnecessary architectures, C++ support, tools, libraries, and symbols.
-13. Stage the minimized toolchain, matching CPython development inputs, and CFFI/setuptools build-backend runtime in the Nuitka standalone bundle.
-14. Make the original build prefix inaccessible and force a fresh standalone JIT under the sanitized environment.
-15. Fold the proven checks into the normal package/release CI gates.
-16. Optionally perform a final one-time acceptance test on a Windows VM where Visual Studio is physically absent.
+2. Download a pinned upstream LLVM-MinGW UCRT x86-64 archive and prove it can build and load a minimal CFFI extension with the packaged CPython.
+3. Implement and verify deterministic JIT-local selection of setuptools' `mingw32` backend plus the packaged LLVM-MinGW `CC`; record the selected backend in CI.
+4. Resolve FFCx compiler-specific flags, including using `-std=c17` for the GNU-driver Clang path before attempting the first FFCx Poisson JIT.
+5. Resolve the CPython-header and Python import-library strategy, including setuptools' automatic versioned `pythonXY` library selection and whether version-named GNU import libraries can deliberately target `python3.dll`.
+6. Add the sanitized JIT environment plus compiler/linker/search-path tracing; make accidental MSVC or host Windows SDK use a hard failure.
+7. Run the existing FFCx/DOLFINx Poisson JIT from an empty cache with only LLVM-MinGW and the selected Python development inputs available to the JIT process.
+8. Prove fresh JIT on CPython 3.12, 3.13, and 3.14 before changing runtime dependency metadata, including PE import-table inspection.
+9. Add the dedicated runtime compiler package and an explicit runtime `setuptools` dependency.
+10. Switch `fenics-dolfinx` Windows runtime metadata to the dedicated package.
+11. Add the broader JIT, cache, dependency-inspection, and MPI test matrix.
+12. Record the current compiler dependency-closure size and the conservative LLVM-MinGW package size.
+13. Add deterministic toolchain minimization and run every reduction stage on the hosted runner.
+14. Measure and remove unnecessary architectures, C++ support, tools, libraries, and symbols; require the final installed compiler footprint to be at most 50% of the current runtime compiler dependency closure.
+15. Stage the minimized toolchain, matching CPython development inputs, and CFFI/setuptools build-backend runtime in the Nuitka standalone bundle.
+16. Wire the standalone runtime helper to the staged Python headers/import libraries, make the original build prefix inaccessible, and force a fresh standalone JIT under the sanitized environment.
+17. Fold the proven checks into the normal package/release CI gates.
+18. Optionally perform a final one-time acceptance test on a Windows VM where Visual Studio is physically absent.
 
-The primary go/no-go point is step 5: a fresh Poisson solve must JIT successfully with LLVM-MinGW while the JIT process cannot resolve or invoke MSVC tools and does not consume Visual Studio or host Windows SDK headers/libraries. Step 7 is the package-switch gate: all currently supported Windows CPython versions must pass before replacing the existing `c-compiler` runtime dependency.
+The primary functional go/no-go point is step 7: a fresh Poisson solve must JIT successfully with LLVM-MinGW while the JIT process cannot resolve or invoke MSVC tools and does not consume Visual Studio or host Windows SDK headers/libraries. Step 8 is the package-switch gate: all currently supported Windows CPython versions must pass before replacing the existing `c-compiler` runtime dependency. Step 14 is the size gate: the minimized compiler must meet the defined footprint reduction while still passing the full test matrix.

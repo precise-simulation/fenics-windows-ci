@@ -83,10 +83,18 @@ Run the full validation matrix.
 ## Stage B: remove C++ support
 
 **Implementation:** build 2 extends the same reproducible minimizer to remove
-the libc++ header tree, libc++/libc++abi/libunwind target files, libunwind
-headers, and C++ driver aliases. The runtime helper pins both `CC` and `CXX`
-to the packaged Clang C driver so setuptools cannot fall back to a host C++
-compiler. Full Phase 5 validation is pending for this stage.
+the libc++ header tree, libc++/libc++abi target files, libunwind headers,
+dynamic target libunwind files, and C++ driver aliases. The runtime helper pins
+both `CC` and `CXX` to the packaged Clang C driver so setuptools cannot
+fall back to a host C++ compiler.
+
+Run #163 (`34133171394`) established an important boundary before the package
+smoke test: plain x86-64 Clang C shared-library links pass `-lunwind`, so
+`x86_64-w64-mingw32/lib/libunwind.a` is required and is retained. Separately,
+the LLVM executables themselves depend on the root `bin/libc++.dll` and
+`bin/libunwind.dll`; these are compiler-tool runtime dependencies rather than
+generated-FFCx C++ support and are also retained. Full Phase 5 validation is
+pending for the corrected Stage B.
 
 FFCx JIT generates C only.
 

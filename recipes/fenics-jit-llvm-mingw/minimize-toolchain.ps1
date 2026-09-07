@@ -118,7 +118,9 @@ function Invoke-StageB {
 
     if (Test-Path -LiteralPath $targetLib -PathType Container) {
         foreach ($file in @(Get-ChildItem -LiteralPath $targetLib -File | Sort-Object Name)) {
-            if ($file.Name -match "^(?:libc\+\+|libunwind)") {
+            $removeCxx = $file.Name -match "^libc\+\+"
+            $removeUnwind = $file.Name -match "^libunwind" -and $file.Name -ne "libunwind.a"
+            if ($removeCxx -or $removeUnwind) {
                 Remove-PayloadFile -File $file -RemovalStage "stage-b" -Group "cxx-runtime-library"
             }
         }
@@ -142,17 +144,29 @@ function Invoke-StageB {
         throw "C++ driver aliases remain after Stage B: $($remainingDrivers.Name -join ', ')"
     }
 
+    $staticUnwind = Join-Path $targetLib "libunwind.a"
+    if (-not (Test-Path -LiteralPath $staticUnwind -PathType Leaf)) {
+        throw "Required Clang C link runtime missing after Stage B: $staticUnwind"
+    }
+
     $remainingRuntime = @()
-    foreach ($dir in @($targetBin, $targetLib)) {
-        if (Test-Path -LiteralPath $dir -PathType Container) {
-            $remainingRuntime += @(
-                Get-ChildItem -LiteralPath $dir -File |
-                    Where-Object { $_.Name -match "^(?:libc\+\+|libunwind)" }
-            )
-        }
+    if (Test-Path -LiteralPath $targetBin -PathType Container) {
+        $remainingRuntime += @(
+            Get-ChildItem -LiteralPath $targetBin -File |
+                Where-Object { $_.Name -match "^(?:libc\+\+|libunwind)" }
+        )
+    }
+    if (Test-Path -LiteralPath $targetLib -PathType Container) {
+        $remainingRuntime += @(
+            Get-ChildItem -LiteralPath $targetLib -File |
+                Where-Object {
+                    $_.Name -match "^libc\+\+" -or
+                    ($_.Name -match "^libunwind" -and $_.Name -ne "libunwind.a")
+                }
+        )
     }
     if ($remainingRuntime.Count -ne 0) {
-        throw "C++ runtime files remain after Stage B: $($remainingRuntime.Name -join ', ')"
+        throw "Unneeded target C++ runtime files remain after Stage B: $($remainingRuntime.Name -join ', ')"
     }
 }
 

@@ -10,7 +10,6 @@ from pathlib import Path
 
 from cffi import FFI
 from cffi._shimmed_dist_utils import Distribution
-from setuptools._distutils.compilers.C.base import Compiler
 
 
 def main() -> None:
@@ -46,15 +45,15 @@ def main() -> None:
             )
 
         command_log = diagnostics_dir / "compiler-commands.txt"
-        original_call = Compiler.call
+        original_check_call = subprocess.check_call
 
-        def logged_call(self, cmd, *, env=None, **kwargs):
+        def logged_check_call(cmd, *call_args, **call_kwargs):
             rendered = subprocess.list2cmdline([str(part) for part in cmd])
             with command_log.open("a", encoding="utf-8") as stream:
                 stream.write(rendered + "\n")
-            return original_call(self, cmd, env=env, **kwargs)
+            return original_check_call(cmd, *call_args, **call_kwargs)
 
-        Compiler.call = logged_call
+        subprocess.check_call = logged_check_call
         try:
             ffi = FFI()
             ffi.cdef("int add_ints(int a, int b);")
@@ -66,7 +65,7 @@ def main() -> None:
             )
             output = Path(ffi.compile(tmpdir=str(work_dir), verbose=True)).resolve()
         finally:
-            Compiler.call = original_call
+            subprocess.check_call = original_check_call
     finally:
         os.chdir(previous_cwd)
 

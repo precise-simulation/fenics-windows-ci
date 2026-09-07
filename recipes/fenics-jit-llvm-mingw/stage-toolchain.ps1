@@ -64,6 +64,7 @@ function Copy-Tree {
 # Phase 2 deliberately packages the conservative known-working set.
 # Phase 5 will measure and prune individual executables/libraries.
 Copy-Tree "bin" "bin"
+Copy-Tree "include" "include"
 Copy-Tree "lib\clang" "lib\clang"
 Copy-Tree "x86_64-w64-mingw32" "x86_64-w64-mingw32"
 

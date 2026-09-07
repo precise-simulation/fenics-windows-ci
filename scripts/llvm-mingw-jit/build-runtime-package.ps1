@@ -65,11 +65,45 @@ if ($runtimeDepends.Count -ne 0) {
     throw "Runtime package must be dependency-free; repodata depends: $($runtimeDepends -join ', ')"
 }
 
+# Verify reproducibility using rattler-build's rebuild path. Rebuild reuses the
+# rendered recipe, exact solved build dependencies, and original build
+# timestamp/SOURCE_DATE_EPOCH embedded in the package.
+$originalSha256 = (Get-FileHash $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+$rebuildDir = Join-Path $env:RUNNER_TEMP "fenics-jit-llvm-mingw-rebuild"
+Remove-Item -Recurse -Force $rebuildDir -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $rebuildDir | Out-Null
+
+$rebuildLog = Join-Path $diagnostics "rattler-rebuild.log"
+& $rattler rebuild `
+    --package-file $package.FullName `
+    --output-dir $rebuildDir `
+    --test skip 2>&1 | Tee-Object -FilePath $rebuildLog
+if ($LASTEXITCODE -ne 0) {
+    throw "rattler-build rebuild failed for fenics-jit-llvm-mingw"
+}
+
+$rebuiltPackages = @(Get-ChildItem $rebuildDir -Recurse -File -Filter "fenics-jit-llvm-mingw-*-rebuilt-*.conda")
+if ($rebuiltPackages.Count -ne 1) {
+    throw "Expected exactly one rebuilt runtime package, found $($rebuiltPackages.Count)"
+}
+$rebuiltSha256 = (Get-FileHash $rebuiltPackages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($rebuiltSha256 -ne $originalSha256) {
+    throw "Runtime package is not bit-for-bit reproducible: original=$originalSha256 rebuilt=$rebuiltSha256"
+}
+
+@(
+    "original=$originalSha256"
+    "rebuilt=$rebuiltSha256"
+    "bit_for_bit_identical=true"
+) | Set-Content (Join-Path $diagnostics "reproducibility.txt") -Encoding Ascii
+
 $metrics = [ordered]@{
     package = $package.Name
     package_bytes = $package.Length
     package_mib = [math]::Round($package.Length / 1MB, 2)
-    sha256 = (Get-FileHash $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    sha256 = $originalSha256
+    rebuild_sha256 = $rebuiltSha256
+    reproducible = $true
     repodata_record = $record[0]
 }
 $metrics | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $diagnostics "package-metrics.json")
@@ -81,3 +115,4 @@ Write-Host "fenics-jit-llvm-mingw package built:"
 Write-Host "  $($package.FullName)"
 Write-Host "  compressed MiB: $($metrics.package_mib)"
 Write-Host "  sha256: $($metrics.sha256)"
+Write-Host "  bit-for-bit rebuild: verified"

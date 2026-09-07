@@ -5,3 +5,8 @@ tools/
 __pycache__/
 
 output-smoke/
+
+# LLVM-MinGW JIT experiment
+.jit-toolchain/
+jit-work/
+jit-diagnostics/

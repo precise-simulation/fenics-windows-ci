@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -144,7 +145,13 @@ def _inspect_pyds(cache_dirs: list[Path], diagnostics: Path) -> list[Path]:
     report.write_text("", encoding="utf-8")
 
     for pyd in pyds:
-        result = subprocess.run([str(readobj), "--coff-imports", str(pyd)], check=True, capture_output=True, text=True)
+        result = subprocess.run(
+            [str(readobj), "--coff-imports", str(pyd)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         text = result.stdout + result.stderr
         with report.open("a", encoding="utf-8") as stream:
             stream.write(f"=== {pyd} ===\n{text}\n")
@@ -184,7 +191,14 @@ for raw in sys.argv[1:]:
         and "microsoft visual studio" not in entry.lower()
         and "windows kits" not in entry.lower()
     )
-    result = subprocess.run([sys.executable, "-c", child, *[str(path) for path in pyds]], check=True, capture_output=True, text=True, env=env)
+    result = subprocess.run(
+        [sys.executable, "-c", child, *[str(path) for path in pyds]],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
     (diagnostics / "cache-load-without-toolchain.txt").write_text(result.stdout + result.stderr, encoding="utf-8")
 
 
@@ -382,7 +396,14 @@ def _mpi_validation(cache_root: Path, diagnostics: Path) -> None:
     V = fem.functionspace(domain, ("Lagrange", 2))
     u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
     beta = fem.Constant(domain, PETSc.ScalarType(4.375))
-    mpi_form = ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx + beta * u * v * ufl.dx + beta * v * ufl.ds
+    # Keep every integral bilinear. Mixing beta * v * ds into this form
+    # creates a one-argument integral beside two-argument integrals and UFL
+    # correctly rejects the form with ArityMismatch.
+    mpi_form = (
+        ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
+        + beta * u * v * ufl.dx
+        + beta * u * v * ufl.ds
+    )
     options = {"cache_dir": cache_root, "cffi_verbose": True}
     command_path = diagnostics / f"mpi-rank-{comm.rank}-compiler-commands.txt"
     with _record_check_calls(command_path) as calls:
@@ -423,7 +444,19 @@ def main() -> None:
     if args.mode == "serial":
         _serial_validation(cache_root, diagnostics)
     else:
-        _mpi_validation(cache_root, diagnostics)
+        try:
+            _mpi_validation(cache_root, diagnostics)
+        except BaseException:
+            # DOLFINx\'s mpi_jit protocol can leave peer ranks blocked in a
+            # collective when one rank fails before cache publication. Abort
+            # the communicator so a test failure is reported immediately
+            # instead of waiting for the workflow-level timeout.
+            traceback.print_exc()
+            sys.stderr.flush()
+            try:
+                MPI.COMM_WORLD.Abort(1)
+            finally:
+                os._exit(1)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/llvm-mingw-jit.yml"
+      - "recipes/fenics-jit-llvm-mingw/**"
       - "scripts/llvm-mingw-jit/**"
       - "specs/llvm-mingw-ffcx-jit/**"
   push:
@@ -12,7 +13,9 @@ on:
       - main
     paths:
       - ".github/workflows/llvm-mingw-jit.yml"
+      - "recipes/fenics-jit-llvm-mingw/**"
       - "scripts/llvm-mingw-jit/**"
+      - "specs/llvm-mingw-ffcx-jit/**"
 
 permissions:
   contents: read
@@ -22,10 +25,74 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  cffi-proof:
-    name: CFFI proof (Python ${{ matrix.python }})
+  runtime-package:
+    name: Build runtime package
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install package build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: jit-package-build
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            rattler-build=0.74.0
+
+      - name: Build conservative LLVM-MinGW runtime package
+        shell: pwsh
+        run: ./scripts/llvm-mingw-jit/build-runtime-package.ps1
+
+      - name: Install package into compiler-free clean prefix
+        shell: pwsh
+        run: |
+          $localPath = (Resolve-Path "jit-package-output").Path -replace "\\", "/"
+          $localChannel = "file:///$localPath"
+          & $env:MAMBA_EXE create -y `
+            -r $env:MAMBA_ROOT_PREFIX `
+            -n jit-package-only `
+            --override-channels --strict-channel-priority `
+            -c $localChannel `
+            fenics-jit-llvm-mingw
+          if ($LASTEXITCODE -ne 0) { throw "clean package install failed" }
+
+          $records = & $env:MAMBA_EXE list -r $env:MAMBA_ROOT_PREFIX -n jit-package-only --json | ConvertFrom-Json
+          $records | ConvertTo-Json -Depth 6 | Set-Content "jit-package-logs/clean-prefix-packages.json"
+          $unexpected = @($records | Where-Object { $_.name -ne "fenics-jit-llvm-mingw" })
+          if ($unexpected.Count -gt 0) {
+            throw "runtime package unexpectedly pulled dependencies: $($unexpected.name -join ', ')"
+          }
+
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/jit-package-only"
+          $clang = Join-Path $prefix "Library/fenics-jit/bin/x86_64-w64-mingw32-clang.exe"
+          $smokeC = Join-Path $env:RUNNER_TEMP "fenics-jit-package-smoke.c"
+          $smokeDll = Join-Path $env:RUNNER_TEMP "fenics-jit-package-smoke.dll"
+          "__declspec(dllexport) int fenics_jit_package_smoke(void) { return 42; }" | Set-Content $smokeC -Encoding ascii
+          & $clang -shared $smokeC -o $smokeDll
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $smokeDll)) {
+            throw "compiler-free clean-prefix smoke compile failed"
+          }
+
+      - name: Upload runtime package
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: llvm-mingw-runtime-package
+          path: |
+            jit-package-output/
+            jit-package-logs/
+          if-no-files-found: error
+          retention-days: 14
+
+  package-jit:
+    name: Packaged JIT (Python ${{ matrix.python }})
+    needs: runtime-package
+    runs-on: windows-2022
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +101,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install isolated Python runtime
+      - name: Download runtime package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: llvm-mingw-runtime-package
+          path: .
+
+      - name: Install isolated FEniCS runtime
         uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
         with:
           micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
@@ -48,18 +121,24 @@ jobs:
             cffi
             setuptools
 
-      - name: Download and verify LLVM-MinGW
+      - name: Install packaged LLVM-MinGW JIT runtime
         shell: pwsh
         run: |
-          ./scripts/llvm-mingw-jit/prepare-llvm-mingw.ps1 `
-            -Destination ".jit-toolchain" `
-            -DiagnosticsDir "jit-diagnostics/toolchain"
+          $localPath = (Resolve-Path "jit-package-output").Path -replace "\\", "/"
+          $localChannel = "file:///$localPath"
+          & $env:MAMBA_EXE install -y `
+            -r $env:MAMBA_ROOT_PREFIX `
+            -n llvm-mingw-jit `
+            --override-channels --strict-channel-priority `
+            -c $localChannel -c precise-simulation -c conda-forge `
+            fenics-jit-llvm-mingw
+          if ($LASTEXITCODE -ne 0) { throw "runtime package install failed" }
 
-      - name: Run isolated CFFI and FFCx Poisson proofs
+      - name: Run packaged CFFI and FFCx Poisson proofs
         shell: pwsh
         run: |
           $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/llvm-mingw-jit"
-          $toolchain = Join-Path (Get-Location) ".jit-toolchain/llvm-mingw-20260826-ucrt-x86_64"
+          $toolchain = Join-Path $prefix "Library/fenics-jit"
           ./scripts/llvm-mingw-jit/run-cffi-proof.ps1 `
             -PythonPrefix $prefix `
             -ToolchainRoot $toolchain `
@@ -67,11 +146,16 @@ jobs:
             -DiagnosticsDir "jit-diagnostics/proof" `
             -PoissonScript "scripts/test-poisson.py"
 
+          $importSource = Get-Content "jit-diagnostics/proof/python-import-library-source.txt" -Raw
+          if ($importSource -notmatch "source=packaged") {
+            throw "JIT proof did not use package-built Python import libraries"
+          }
+
       - name: Upload JIT diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: llvm-mingw-cffi-py${{ matrix.python }}
+          name: llvm-mingw-package-jit-py${{ matrix.python }}
           path: |
             jit-diagnostics/
             jit-work/setup.cfg

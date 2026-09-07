@@ -63,11 +63,19 @@ $env:CC = $clang
 $env:CXX = $clangxx
 $env:SETUPTOOLS_USE_DISTUTILS = "local"
 
-$forbiddenCommands = @("cl.exe", "link.exe", "vswhere.exe", "vcvarsall.bat")
+$forbiddenCommands = @("cl.exe", "vswhere.exe", "vcvarsall.bat")
 foreach ($command in $forbiddenCommands) {
     $resolved = Get-Command $command -ErrorAction SilentlyContinue
     if ($resolved) {
         throw "Forbidden host tool is resolvable in sanitized JIT PATH: $command -> $($resolved.Source)"
+    }
+}
+
+$resolvedLink = Get-Command "link.exe" -ErrorAction SilentlyContinue
+if ($resolvedLink) {
+    $linkPath = [System.IO.Path]::GetFullPath($resolvedLink.Source)
+    if (-not $linkPath.StartsWith($jitBin, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "MSVC/host link.exe is resolvable in sanitized JIT PATH: $linkPath"
     }
 }
 

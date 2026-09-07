@@ -22,9 +22,10 @@ build:
     file: build.bat
 
 requirements:
-  host:
+  build:
     # Build-time only: python3.dll supplies the Stable-ABI exports used to
     # construct GNU import libraries for the supported runtime interpreters.
+    # Keeping this in the build prefix prevents a Python runtime dependency.
     - python 3.12.*
 
 tests:

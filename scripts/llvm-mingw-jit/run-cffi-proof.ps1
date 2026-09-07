@@ -20,211 +20,154 @@ $diagnosticsPath = [System.IO.Path]::GetFullPath($DiagnosticsDir)
 $jitBin = Join-Path $toolchainRootPath "bin"
 $python = Join-Path $pythonPrefixPath "python.exe"
 $clang = Join-Path $jitBin "x86_64-w64-mingw32-clang.exe"
-$clangxx = Join-Path $jitBin "x86_64-w64-mingw32-clang++.exe"
-$dlltool = Join-Path $jitBin "llvm-dlltool.exe"
 $readobj = Join-Path $jitBin "llvm-readobj.exe"
+$runtimeHelper = Join-Path $toolchainRootPath "runtime\fenics_jit_runtime.py"
 
-foreach ($path in @($python, $clang, $clangxx, $dlltool, $readobj)) {
+foreach ($path in @($python, $clang, $readobj, $runtimeHelper)) {
     if (-not (Test-Path $path)) {
-        throw "Required executable missing: $path"
+        throw "Required JIT runtime file missing: $path"
     }
 }
 
-Remove-Item -Recurse -Force $workPath -ErrorAction Ignore
+Remove-Item -Recurse -Force $workPath, $diagnosticsPath -ErrorAction Ignore
 New-Item -ItemType Directory -Force $workPath, $diagnosticsPath | Out-Null
 
-# The currently published fenics-dolfinx still depends on the conda Windows
-# compiler activation package. Hide any compiler/discovery executables that
-# package drops into runtime PATH directories so this Phase 1 proof tests
-# LLVM-MinGW with the old toolchain genuinely unavailable to the JIT process.
-$disabledToolLog = Join-Path $diagnosticsPath "disabled-host-tools.txt"
-$runtimePathDirs = @(
-    (Join-Path $pythonPrefixPath "Library/bin"),
-    (Join-Path $pythonPrefixPath "Scripts"),
-    $pythonPrefixPath
-)
-foreach ($runtimeDir in $runtimePathDirs) {
-    foreach ($toolName in @("cl.exe", "link.exe", "vswhere.exe", "vcvarsall.bat")) {
-        $candidate = Join-Path $runtimeDir $toolName
-        if (Test-Path $candidate) {
-            $disabled = "$candidate.disabled-for-llvm-mingw-jit"
-            Move-Item -Force $candidate $disabled
-            "$candidate -> $disabled" | Add-Content $disabledToolLog
-        }
-    }
-}
-
-# The GitHub runner has Visual Studio and Windows SDKs installed. Replace,
-# rather than extend, PATH and clear activation state before the JIT process.
-$systemRoot = $env:SystemRoot
-$env:PATH = @(
-    $jitBin,
-    $pythonPrefixPath,
-    (Join-Path $pythonPrefixPath "Library/bin"),
-    (Join-Path $pythonPrefixPath "Scripts"),
-    (Join-Path $systemRoot "System32"),
-    $systemRoot
-) -join ";"
-
-$remove = @(
-    "VSINSTALLDIR", "VCINSTALLDIR", "VCToolsInstallDir",
-    "INCLUDE", "LIB", "LIBPATH", "LIBRARY_PATH",
-    "WindowsSdkDir", "WindowsSDKVersion",
-    "UniversalCRTSdkDir", "UCRTVersion",
-    "DISTUTILS_USE_SDK", "MSSdk",
-    "CC", "CXX", "CPP", "LD", "LDSHARED"
-)
-foreach ($name in $remove) {
-    Remove-Item "Env:$name" -ErrorAction Ignore
-}
-Get-ChildItem Env: |
-    Where-Object Name -Like "VSCMD_*" |
-    ForEach-Object { Remove-Item "Env:$($_.Name)" -ErrorAction Ignore }
-
-# setuptools' MinGW backend passes CC through shlex.split().  A native
-# Windows path such as D:\a\... is therefore unsafe here because backslashes
-# are consumed as escapes.  Resolve the driver hermetically through the
-# sanitized PATH instead.
-$env:CC = "x86_64-w64-mingw32-clang.exe"
-$env:CXX = "x86_64-w64-mingw32-clang++.exe"
-$env:SETUPTOOLS_USE_DISTUTILS = "local"
-
-$resolvedCc = Get-Command $env:CC -ErrorAction Stop
-if ([System.IO.Path]::GetFullPath($resolvedCc.Source) -ne [System.IO.Path]::GetFullPath($clang)) {
-    throw "CC does not resolve to packaged LLVM-MinGW clang: $($resolvedCc.Source)"
-}
-
-$forbiddenCommands = @("cl.exe", "vswhere.exe", "vcvarsall.bat")
-foreach ($command in $forbiddenCommands) {
-    $resolved = Get-Command $command -ErrorAction SilentlyContinue
-    if ($resolved) {
-        throw "Forbidden host tool is resolvable in sanitized JIT PATH: $command -> $($resolved.Source)"
-    }
-}
-
-$resolvedLink = Get-Command "link.exe" -ErrorAction SilentlyContinue
-if ($resolvedLink) {
-    $linkPath = [System.IO.Path]::GetFullPath($resolvedLink.Source)
-    if (-not $linkPath.StartsWith($jitBin, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "MSVC/host link.exe is resolvable in sanitized JIT PATH: $linkPath"
-    }
-}
+# Deliberately poison all ambient compiler/SDK signals. The Python runtime
+# helper, not this wrapper, must neutralize them inside the JIT process.
+$poisonRoot = Join-Path $workPath "ambient-poison"
+$env:VSINSTALLDIR = Join-Path $poisonRoot "Microsoft Visual Studio"
+$env:VCINSTALLDIR = Join-Path $poisonRoot "Microsoft Visual Studio\VC"
+$env:VCToolsInstallDir = Join-Path $poisonRoot "Microsoft Visual Studio\VC\Tools"
+$env:INCLUDE = Join-Path $poisonRoot "Windows Kits\Include"
+$env:LIB = Join-Path $poisonRoot "Windows Kits\Lib"
+$env:LIBPATH = Join-Path $poisonRoot "Windows Kits\LibPath"
+$env:LIBRARY_PATH = Join-Path $poisonRoot "fake-library-path"
+$env:WindowsSdkDir = Join-Path $poisonRoot "Windows Kits"
+$env:WindowsSDKVersion = "poison"
+$env:UniversalCRTSdkDir = Join-Path $poisonRoot "Windows Kits\UCRT"
+$env:UCRTVersion = "poison"
+$env:DISTUTILS_USE_SDK = "1"
+$env:MSSdk = "1"
+$env:CC = "cl.exe"
+$env:CXX = "cl.exe"
+$env:CPP = "cl.exe /E"
+$env:LD = "link.exe"
+$env:LDSHARED = "link.exe /DLL"
+$env:VSCMD_ARG_TGT_ARCH = "x64"
+$env:CPATH = Join-Path $poisonRoot "cp"
+$env:C_INCLUDE_PATH = Join-Path $poisonRoot "c-include"
+$env:CPLUS_INCLUDE_PATH = Join-Path $poisonRoot "cxx-include"
+$env:COMPILER_PATH = Join-Path $poisonRoot "compiler-path"
+$env:GCC_EXEC_PREFIX = Join-Path $poisonRoot "gcc-prefix"
 
 @(
-    "PATH=$env:PATH"
+    "VSINSTALLDIR=$env:VSINSTALLDIR"
+    "WindowsSdkDir=$env:WindowsSdkDir"
+    "INCLUDE=$env:INCLUDE"
+    "LIB=$env:LIB"
     "CC=$env:CC"
     "CXX=$env:CXX"
-    "python=$python"
-    "toolchain_root=$toolchainRootPath"
-) | Set-Content (Join-Path $diagnosticsPath "environment.txt")
+    "LD=$env:LD"
+) | Set-Content (Join-Path $diagnosticsPath "ambient-poison.txt")
 
-& $python -c "import sys,sysconfig; print(sys.version); print('prefix=' + sys.prefix); print('include=' + sysconfig.get_path('include')); print('ext_suffix=' + str(sysconfig.get_config_var('EXT_SUFFIX')))" 2>&1 |
-    Set-Content (Join-Path $diagnosticsPath "python-runtime.txt")
-if ($LASTEXITCODE -ne 0) { throw "Python runtime diagnostics failed" }
-
-& $clang --version 2>&1 | Set-Content (Join-Path $diagnosticsPath "clang-version.txt")
-if ($LASTEXITCODE -ne 0) { throw "clang --version failed" }
-
-& $clang -dumpmachine 2>&1 | Set-Content (Join-Path $diagnosticsPath "clang-target.txt")
-if ($LASTEXITCODE -ne 0) { throw "clang -dumpmachine failed" }
-
-& $clang -print-search-dirs 2>&1 | Set-Content (Join-Path $diagnosticsPath "clang-search-dirs.txt")
-if ($LASTEXITCODE -ne 0) { throw "clang -print-search-dirs failed" }
-
-$probeC = Join-Path $workPath "driver-probe.c"
-"int probe(void) { return 0; }" | Set-Content $probeC -Encoding ascii
-& $clang -v -E -x c $probeC -o NUL 2>&1 | Set-Content (Join-Path $diagnosticsPath "clang-include-search.txt")
-if ($LASTEXITCODE -ne 0) { throw "clang include-search probe failed" }
-
-& $clang -### -shared $probeC -o (Join-Path $workPath "driver-probe.dll") 2>&1 |
-    Set-Content (Join-Path $diagnosticsPath "clang-link-plan.txt")
-if ($LASTEXITCODE -ne 0) { throw "clang linker-plan probe failed" }
-
-$linkPlan = Get-Content (Join-Path $diagnosticsPath "clang-link-plan.txt") -Raw
-if ($linkPlan -notmatch "(?i)(ld\.lld|lld-link)") {
-    throw "LLVM-MinGW clang link plan did not select LLD"
-}
-
-$versionTag = & $python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')"
-if ($LASTEXITCODE -ne 0) { throw "Failed to determine Python version tag" }
-$versionTag = $versionTag.Trim()
-
-$packagedImportLibDir = Join-Path $toolchainRootPath "lib\python"
-$packagedStableLib = Join-Path $packagedImportLibDir "libpython3.a"
-$packagedVersionLib = Join-Path $packagedImportLibDir "libpython$versionTag.a"
-
-if ((Test-Path $packagedStableLib) -and (Test-Path $packagedVersionLib)) {
-    $importLibDir = $packagedImportLibDir
-    "source=packaged" | Set-Content (Join-Path $diagnosticsPath "python-import-library-source.txt")
-    "stable=$packagedStableLib" | Add-Content (Join-Path $diagnosticsPath "python-import-library-source.txt")
-    "version=$packagedVersionLib" | Add-Content (Join-Path $diagnosticsPath "python-import-library-source.txt")
-} else {
-    # Phase 1 fallback for testing a raw upstream archive. Phase 2 packages
-    # these import libraries at construction time, so end-user JIT no longer
-    # needs llvm-dlltool or Python export discovery.
-    $python3Candidates = @(
-        (Join-Path $pythonPrefixPath "python3.dll"),
-        (Join-Path $pythonPrefixPath "DLLs/python3.dll"),
-        (Join-Path $pythonPrefixPath "Library/bin/python3.dll")
+function Assert-HelperDiagnostics {
+    param(
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [Parameter(Mandatory = $true)][string]$CommandLogPath
     )
-    $python3Dll = $python3Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $python3Dll) {
-        throw "Could not locate CPython stable-ABI python3.dll below $pythonPrefixPath"
+
+    $configPath = Join-Path $Directory "runtime-config.json"
+    $environmentPath = Join-Path $Directory "runtime-environment.txt"
+    if (-not (Test-Path $configPath)) {
+        throw "Runtime helper did not emit configuration diagnostics: $configPath"
+    }
+    if (-not (Test-Path $environmentPath)) {
+        throw "Runtime helper did not emit environment diagnostics: $environmentPath"
+    }
+    if (-not (Test-Path $CommandLogPath)) {
+        throw "JIT proof did not record compiler commands: $CommandLogPath"
     }
 
-    $importLibDir = Join-Path $workPath "python-import-lib"
-    New-Item -ItemType Directory -Force $importLibDir | Out-Null
+    $config = Get-Content $configPath -Raw | ConvertFrom-Json
+    $commands = Get-Content $CommandLogPath -Raw
+    $environment = Get-Content $environmentPath -Raw
 
-    $exports = & $readobj --coff-exports $python3Dll 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "llvm-readobj failed while reading python3.dll exports" }
-    $exports | Set-Content (Join-Path $diagnosticsPath "python3-exports.txt")
-
-    $exportNames = @(
-        $exports |
-            ForEach-Object {
-                if ($_ -match "^\s*Name:\s+(.+?)\s*$") { $Matches[1] }
-            } |
-            Where-Object { $_ } |
-            Sort-Object -Unique
-    )
-    if ($exportNames.Count -lt 10) {
-        throw "Unexpectedly few exports found in python3.dll: $($exportNames.Count)"
+    if ($config.backend -ne "mingw32") {
+        throw "Runtime helper selected unexpected backend: $($config.backend)"
+    }
+    if ($config.crt -ne "UCRT") {
+        throw "Runtime helper selected unexpected CRT: $($config.crt)"
+    }
+    if ($config.clang_reported_target -notmatch "(?i)^x86_64-w64-(mingw32|windows-gnu)$") {
+        throw "Runtime helper selected unexpected Clang target: $($config.clang_reported_target)"
     }
 
-    $defPath = Join-Path $importLibDir "python3.def"
-    @("LIBRARY python3.dll", "EXPORTS") + $exportNames |
-        Set-Content $defPath -Encoding ascii
-
-    foreach ($libraryName in @("libpython3.a", "libpython$versionTag.a")) {
-        $libraryPath = Join-Path $importLibDir $libraryName
-        & $dlltool -m i386:x86-64 -d $defPath -l $libraryPath -D python3.dll 2>&1 |
-            Add-Content (Join-Path $diagnosticsPath "dlltool.txt")
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $libraryPath)) {
-            throw "Failed to create GNU import library: $libraryName"
+    foreach ($requiredPath in @(
+        [string]$config.python_include,
+        [string]$config.ffcx_include,
+        [string]$config.toolchain_include,
+        [string]$config.python_import_library_dir,
+        [string]$config.target_library_dir
+    )) {
+        if ($commands.IndexOf($requiredPath, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            throw "Compiler/linker commands do not contain helper-selected path: $requiredPath"
         }
     }
 
-    "source=generated" | Set-Content (Join-Path $diagnosticsPath "python-import-library-source.txt")
+    if ($commands -notmatch [regex]::Escape("x86_64-w64-mingw32-clang.exe")) {
+        throw "Compiler commands do not use packaged LLVM-MinGW Clang"
+    }
+
+    if ($environment -notmatch "(?m)^CC=x86_64-w64-mingw32-clang\.exe$") {
+        throw "Runtime helper did not select packaged CC"
+    }
+    if ($environment -notmatch "(?m)^FFCX_CFFI_COMPILER_BACKEND=mingw32$") {
+        throw "Runtime helper did not expose the FFCx backend selection"
+    }
+
+    $forbidden = @(
+        [regex]::Escape($poisonRoot),
+        "(?i)\\Microsoft Visual Studio\\",
+        "(?i)\\Windows Kits\\"
+    )
+    $text = $commands + "`n" + $environment + "`n" + (Get-Content $configPath -Raw)
+    foreach ($pattern in $forbidden) {
+        if ($text -match $pattern) {
+            throw "Ambient compiler/SDK path leaked into helper-selected JIT inputs: $($Matches[0])"
+        }
+    }
+
+    return $config
 }
 
-# setuptools adds the interpreter "libs" directory before extension-specific
-# library directories. Put the selected GNU import libraries there so
-# "-lpythonXY" deterministically resolves to a descriptor targeting python3.dll.
-$pythonLibDir = Join-Path $pythonPrefixPath "libs"
-New-Item -ItemType Directory -Force $pythonLibDir | Out-Null
-foreach ($libraryName in @("libpython3.a", "libpython$versionTag.a")) {
-    Copy-Item -Force (Join-Path $importLibDir $libraryName) (Join-Path $pythonLibDir $libraryName)
-}
-$env:LIBRARY_PATH = $importLibDir
-$env:JIT_PYTHON_LIB_DIR = $importLibDir
-"LIBRARY_PATH=$env:LIBRARY_PATH" | Add-Content (Join-Path $diagnosticsPath "environment.txt")
 $proofScript = Join-Path $PSScriptRoot "minimal-cffi-proof.py"
 $proofLog = Join-Path $diagnosticsPath "cffi-build.txt"
 
-& $python $proofScript --work-dir $workPath --diagnostics-dir $diagnosticsPath --python-lib-dir $importLibDir 2>&1 |
+& $python $proofScript `
+    --work-dir $workPath `
+    --diagnostics-dir $diagnosticsPath `
+    --toolchain-root $toolchainRootPath `
+    --python-prefix $pythonPrefixPath 2>&1 |
     Tee-Object -FilePath $proofLog
 if ($LASTEXITCODE -ne 0) {
-    throw "Minimal CFFI proof failed"
+    throw "Minimal CFFI runtime-helper proof failed"
+}
+
+$backend = (Get-Content (Join-Path $diagnosticsPath "setuptools-compiler.txt") -Raw).Trim()
+if ($backend -ne "mingw32") {
+    throw "Expected runtime helper compiler backend mingw32, got '$backend'"
+}
+
+$commandLogPath = Join-Path $diagnosticsPath "compiler-commands.txt"
+$config = Assert-HelperDiagnostics -Directory $diagnosticsPath -CommandLogPath $commandLogPath
+$commandLog = Get-Content $commandLogPath -Raw
+if ($commandLog -notmatch [regex]::Escape("-std=c17")) {
+    throw "Minimal CFFI commands do not contain GNU-driver-compatible C17 flag"
+}
+
+$poisonCfg = Get-Content (Join-Path $workPath "setup.cfg") -Raw
+if ($poisonCfg -notmatch "compiler\s*=\s*msvc") {
+    throw "Minimal CFFI proof did not retain the deliberately poisoned setup.cfg"
 }
 
 $pydPath = (Get-Content (Join-Path $diagnosticsPath "pyd-path.txt") -Raw).Trim()
@@ -244,49 +187,7 @@ if ($imports -match "(?i)python3\d{2}t?(?:_d)?\.dll") {
     throw "CFFI .pyd unexpectedly imports a version-specific Python DLL"
 }
 
-$backend = (Get-Content (Join-Path $diagnosticsPath "setuptools-compiler.txt") -Raw).Trim()
-if ($backend -ne "mingw32") {
-    throw "Expected setuptools compiler backend mingw32, got '$backend'"
-}
-
-$buildLog = Get-Content $proofLog -Raw
-$commandLogPath = Join-Path $diagnosticsPath "compiler-commands.txt"
-if (-not (Test-Path $commandLogPath)) {
-    throw "CFFI proof did not record setuptools compiler commands"
-}
-$commandLog = Get-Content $commandLogPath -Raw
-if ($commandLog -notmatch [regex]::Escape("x86_64-w64-mingw32-clang.exe")) {
-    throw "Recorded compiler commands do not use LLVM-MinGW clang"
-}
-if ($commandLog -notmatch [regex]::Escape("-std=c17")) {
-    throw "Recorded compiler commands do not show GNU-driver-compatible C17 flag"
-}
-if ($commandLog -notmatch "(?im)^.*-c .*_llvm_mingw_cffi_probe\.c.*$") {
-    throw "Recorded commands do not contain the CFFI compile step"
-}
-if ($commandLog -notmatch "(?im)^.*-shared .*\.pyd.*$") {
-    throw "Recorded commands do not contain the CFFI shared-extension link step"
-}
-
-$diagnosticText = @(
-    Get-Content (Join-Path $diagnosticsPath "clang-search-dirs.txt") -Raw
-    Get-Content (Join-Path $diagnosticsPath "clang-include-search.txt") -Raw
-    Get-Content (Join-Path $diagnosticsPath "clang-link-plan.txt") -Raw
-    $commandLog
-    $buildLog
-) -join "`n"
-
-$forbiddenPathPatterns = @(
-    "(?i)\\Microsoft Visual Studio\\",
-    "(?i)\\Windows Kits\\"
-)
-foreach ($pattern in $forbiddenPathPatterns) {
-    if ($diagnosticText -match $pattern) {
-        throw "Host Visual Studio/Windows SDK path leaked into JIT diagnostics: $($Matches[0])"
-    }
-}
-
-Write-Host "LLVM-MinGW CFFI proof passed: $pydPath"
+Write-Host "Hermetic LLVM-MinGW CFFI helper proof passed: $pydPath"
 
 if ($PoissonScript) {
     $poissonPath = [System.IO.Path]::GetFullPath($PoissonScript)
@@ -299,9 +200,6 @@ if ($PoissonScript) {
     $cacheDir = Join-Path $cacheHome "fenics"
     Remove-Item -Recurse -Force $cacheHome -ErrorAction Ignore
     New-Item -ItemType Directory -Force $cacheDir, $poissonDiagnostics | Out-Null
-
-    $env:XDG_CACHE_HOME = $cacheHome
-    $env:FFCX_CFFI_COMPILER_BACKEND = "mingw32"
 
     $patchScript = Join-Path $PSScriptRoot "patch-ffcx-c17.py"
     & $python $patchScript --diagnostics-dir $poissonDiagnostics 2>&1 |
@@ -321,25 +219,23 @@ if ($PoissonScript) {
     & $python $poissonProof `
         --poisson-script $poissonPath `
         --cache-dir $cacheDir `
-        --diagnostics-dir $poissonDiagnostics 2>&1 |
+        --diagnostics-dir $poissonDiagnostics `
+        --toolchain-root $toolchainRootPath `
+        --python-prefix $pythonPrefixPath 2>&1 |
         Tee-Object -FilePath $poissonLog
     if ($LASTEXITCODE -ne 0) {
-        throw "Fresh FFCx Poisson JIT proof failed"
+        throw "Fresh FFCx Poisson runtime-helper proof failed"
     }
 
     $poissonBackend = (Get-Content (Join-Path $poissonDiagnostics "setuptools-compiler.txt") -Raw).Trim()
     if ($poissonBackend -ne "mingw32") {
-        throw "Expected FFCx setuptools compiler backend mingw32, got '$poissonBackend'"
+        throw "Expected FFCx runtime helper backend mingw32, got '$poissonBackend'"
     }
 
     $poissonCommandPath = Join-Path $poissonDiagnostics "compiler-commands.txt"
-    if (-not (Test-Path $poissonCommandPath)) {
-        throw "FFCx Poisson proof did not record compiler commands"
-    }
+    $poissonConfig = Assert-HelperDiagnostics -Directory $poissonDiagnostics -CommandLogPath $poissonCommandPath
     $poissonCommands = Get-Content $poissonCommandPath -Raw
-    if ($poissonCommands -notmatch [regex]::Escape("x86_64-w64-mingw32-clang.exe")) {
-        throw "FFCx Poisson commands do not use packaged LLVM-MinGW clang"
-    }
+
     if ($poissonCommands -notmatch [regex]::Escape("-std=c17")) {
         throw "FFCx Poisson commands do not contain GNU-driver-compatible -std=c17"
     }
@@ -349,11 +245,10 @@ if ($PoissonScript) {
     if ($poissonCommands -notmatch [regex]::Escape("-D__STDC_NO_COMPLEX__")) {
         throw "FFCx Poisson commands do not suppress complex UFCx members for MSVC ABI compatibility"
     }
-    if ($poissonCommands -notmatch "(?im)^.*-c .*\.c.*$") {
-        throw "FFCx Poisson commands do not contain a C compile step"
-    }
-    if ($poissonCommands -notmatch "(?im)^.*-shared .*\.pyd.*$") {
-        throw "FFCx Poisson commands do not contain a shared-extension link step"
+
+    $poissonFfcxCfg = Get-Content (Join-Path $cacheDir "setup.cfg") -Raw
+    if ($poissonFfcxCfg -notmatch "compiler\s*=\s*msvc") {
+        throw "FFCx proof did not retain the deliberately poisoned setup.cfg"
     }
 
     $pydPaths = Get-Content (Join-Path $poissonDiagnostics "pyd-paths.txt") |
@@ -380,16 +275,5 @@ if ($PoissonScript) {
         }
     }
 
-    $poissonDiagnosticText = @(
-        $poissonCommands
-        (Get-Content $poissonLog -Raw)
-        (Get-Content (Join-Path $poissonDiagnostics "ffcx-c17-patch.txt") -Raw)
-    ) -join "`n"
-    foreach ($pattern in $forbiddenPathPatterns) {
-        if ($poissonDiagnosticText -match $pattern) {
-            throw "Host Visual Studio/Windows SDK path leaked into FFCx Poisson diagnostics: $($Matches[0])"
-        }
-    }
-
-    Write-Host "LLVM-MinGW fresh FFCx Poisson JIT proof passed"
+    Write-Host "Hermetic LLVM-MinGW fresh FFCx Poisson helper proof passed"
 }

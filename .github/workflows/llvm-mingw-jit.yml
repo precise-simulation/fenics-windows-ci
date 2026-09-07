@@ -83,9 +83,10 @@ jobs:
         with:
           name: llvm-mingw-runtime-package
           path: |
-            jit-package-output/
+            jit-package-output/win-64/
+            jit-package-output/noarch/
             jit-package-logs/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
   package-jit:

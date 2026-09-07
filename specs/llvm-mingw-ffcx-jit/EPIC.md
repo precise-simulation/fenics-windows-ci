@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** proposed.
+**Status:** in progress — Phase 1 compatibility proof.
 
 This epic replaces the Windows runtime Visual Studio compiler dependency used by FFCx/CFFI JIT with a small, self-contained LLVM-MinGW toolchain. It does not change the compiler used to build PETSc, DOLFINx, Basix, or other native packages.
 
@@ -63,6 +63,12 @@ It should not be exposed or activated as a general-purpose compiler environment 
 | 7 | [Standalone/Nuitka staging](07-standalone-nuitka.md) | Standalone bundle performs fresh JIT with build prefix unavailable | Release gate |
 
 Phases are ordered. A later phase may be prototyped early when useful, but its production change must not bypass the exit gate of an earlier dependency.
+
+### Implementation status
+
+Phase 1 has started with an isolated `windows-2022` CFFI compatibility harness in `.github/workflows/llvm-mingw-jit.yml`. The first slice checksum-pins upstream LLVM-MinGW, sanitizes Visual Studio/Windows SDK activation state, generates GNU import libraries targeting `python3.dll`, compiles and loads a minimal CFFI extension through the `mingw32` setuptools backend, inspects PE imports, and retains diagnostics.
+
+The remaining Phase 1 work is to apply the same mechanism to FFCx, fix the Windows C17 flag selection for the GNU-style driver, run a fresh `scripts/test-poisson.py` JIT, and close any compatibility gaps exposed by the runner.
 
 ## Primary gates
 

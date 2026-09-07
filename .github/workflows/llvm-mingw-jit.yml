@@ -43,7 +43,7 @@ jobs:
             --override-channels --strict-channel-priority
             -c precise-simulation -c conda-forge
             python=${{ matrix.python }}
-            "libblas=*=*openblas"
+            libblas=*=*openblas
             fenics-dolfinx
             cffi
             setuptools

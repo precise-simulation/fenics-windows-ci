@@ -7,6 +7,11 @@ set "PETSC_DIR=%PREFIX%\Library"
 set "PATH=%PREFIX%\bin;%PREFIX%\Library\bin;%PATH%"
 set "MPI_TEST_PATH=%PREFIX%\bin;%PREFIX%\Scripts;%PREFIX%\Library\bin;%SystemRoot%\system32;%SystemRoot%"
 set "MPI_PYTHONPATH=%PREFIX%\Lib\site-packages"
+set "LLVM_READOBJ=%PREFIX%\Library\fenics-jit\bin\llvm-readobj.exe"
+if not exist "%LLVM_READOBJ%" (
+  echo Missing packaged LLVM-MinGW PE inspection tool: %LLVM_READOBJ%
+  exit 1
+)
 pip check
 if errorlevel 1 exit 1
 
@@ -66,7 +71,7 @@ if not defined DOLFINX_EXTENSION (
   echo Missing installed DOLFINx Python extension
   exit 1
 )
-dumpbin /dependents "%DOLFINX_EXTENSION%" > "%TEMP%\dolfinx-extension-dependents.txt"
+"%LLVM_READOBJ%" --coff-imports "%DOLFINX_EXTENSION%" > "%TEMP%\dolfinx-extension-dependents.txt"
 if errorlevel 1 exit 1
 powershell.exe -NoProfile -Command "$t = Get-Content -Raw '%TEMP%\dolfinx-extension-dependents.txt'; if ($t -notmatch '(?i)(?:lib)?dolfinx\.dll') { exit 1 }; if ($t -match '(?i)cygwin1\.dll') { exit 1 }"
 if errorlevel 1 exit 1
@@ -76,7 +81,7 @@ if not defined DOLFINX_DLL (
   echo Missing installed DOLFINx DLL
   exit 1
 )
-dumpbin /dependents "%DOLFINX_DLL%" > "%TEMP%\dolfinx-dependents.txt"
+"%LLVM_READOBJ%" --coff-imports "%DOLFINX_DLL%" > "%TEMP%\dolfinx-dependents.txt"
 if errorlevel 1 exit 1
 powershell.exe -NoProfile -Command "$t = Get-Content -Raw '%TEMP%\dolfinx-dependents.txt'; if ($t -notmatch '(?i)libpetsc\.dll') { exit 1 }; if ($t -match '(?i)cygwin1\.dll') { exit 1 }"
 if errorlevel 1 exit 1

@@ -217,6 +217,7 @@ def _serial_validation(cache_root: Path, diagnostics: Path) -> None:
         domain.topology.create_connectivity(fdim, tdim)
         facets = mesh.exterior_facet_indices(domain.topology)
 
+        print("[phase5] P2 Poisson", flush=True)
         V2 = fem.functionspace(domain, ("Lagrange", 2))
         u2, v2 = ufl.TrialFunction(V2), ufl.TestFunction(V2)
         source = fem.Constant(domain, PETSc.ScalarType(1.25))
@@ -236,6 +237,7 @@ def _serial_validation(cache_root: Path, diagnostics: Path) -> None:
         if not np.all(np.isfinite(uh2.x.array)) or np.linalg.norm(uh2.x.array) == 0:
             raise RuntimeError("P2 Poisson solve returned an invalid solution")
 
+        print("[phase5] vector linear elasticity", flush=True)
         Vv = fem.functionspace(domain, ("Lagrange", 1, (2,)))
         u, v = ufl.TrialFunction(Vv), ufl.TestFunction(Vv)
         mu = fem.Constant(domain, PETSc.ScalarType(2.0))
@@ -253,6 +255,7 @@ def _serial_validation(cache_root: Path, diagnostics: Path) -> None:
         if A.getSize()[0] == 0:
             raise RuntimeError("Elasticity matrix assembly produced an empty matrix")
 
+        print("[phase5] cell/facet integrals and coefficients", flush=True)
         V1 = fem.functionspace(domain, ("Lagrange", 1))
         q = fem.Function(V1)
         q.interpolate(lambda x: x[0] + 2.0 * x[1])
@@ -263,14 +266,18 @@ def _serial_validation(cache_root: Path, diagnostics: Path) -> None:
         if not np.all(np.isfinite(b.array)):
             raise RuntimeError("Cell/facet coefficient assembly produced non-finite values")
 
+        print("[phase5] nonlinear residual and Jacobian", flush=True)
         state = fem.Function(V2)
         state.interpolate(lambda x: 0.1 + x[0] * x[1])
         test2 = ufl.TestFunction(V2)
         direction = ufl.TrialFunction(V2)
+        # Standard semilinear Poisson residual. Keep this representative but
+        # intentionally compact: the previous quasilinear test triggered an
+        # FFCx 0.11 code-generation pathological case before C compilation.
         residual_ufl = (
-            ufl.inner((1.0 + state**2) * ufl.grad(state), ufl.grad(test2)) * ufl.dx
-            + alpha * state * test2 * ufl.dx
-            - alpha * test2 * ufl.ds
+            ufl.inner(ufl.grad(state), ufl.grad(test2)) * ufl.dx
+            + state**3 * test2 * ufl.dx
+            - alpha * test2 * ufl.dx
         )
         jacobian_ufl = ufl.derivative(residual_ufl, state, direction)
         residual = fem.form(residual_ufl, jit_options=jit_options)
@@ -281,6 +288,7 @@ def _serial_validation(cache_root: Path, diagnostics: Path) -> None:
         if not np.all(np.isfinite(rb.array)) or JA.getSize()[0] == 0:
             raise RuntimeError("Nonlinear residual/Jacobian validation failed")
 
+        print("[phase5] fem.Expression", flush=True)
         points = np.array([[0.2, 0.2], [0.6, 0.1]], dtype=domain.geometry.x.dtype)
         expr = fem.Expression(alpha * ufl.grad(state), points, jit_options=jit_options)
         ncells = domain.topology.index_map(tdim).size_local
@@ -290,6 +298,7 @@ def _serial_validation(cache_root: Path, diagnostics: Path) -> None:
 
     _assert_compiler_commands(calls, record, require_compile=True)
 
+    print("[phase5] fresh cache and cache reload", flush=True)
     reuse_cache = cache_root / "cache reload proof"
     shutil.rmtree(reuse_cache, ignore_errors=True)
     reuse_cache.mkdir(parents=True)
@@ -311,6 +320,7 @@ def _serial_validation(cache_root: Path, diagnostics: Path) -> None:
     if reload_calls:
         raise RuntimeError("Cache reload unexpectedly invoked compiler/linker commands: " + "\n".join(reload_calls))
 
+    print("[phase5] PE import and toolchain-free load inspection", flush=True)
     pyds = _inspect_pyds([form_cache, reuse_cache], diagnostics)
     _prove_load_without_toolchain(pyds, diagnostics)
 
@@ -366,6 +376,8 @@ def _mpi_validation(cache_root: Path, diagnostics: Path) -> None:
     if any(item != gathered_config[0] for item in gathered_config[1:]):
         raise RuntimeError(f"MPI ranks selected different JIT configurations: {gathered_config}")
 
+    if comm.rank == 0:
+        print("[phase5] two-rank MPI fresh JIT/cache load", flush=True)
     domain = mesh.create_unit_square(comm, 3, 3)
     V = fem.functionspace(domain, ("Lagrange", 2))
     u, v = ufl.TrialFunction(V), ufl.TestFunction(V)

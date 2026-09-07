@@ -124,6 +124,7 @@ jobs:
 
       - name: Phase 5 functional JIT validation
         shell: pwsh
+        timeout-minutes: 20
         run: scripts/llvm-mingw-jit/run-phase5-functional-validation.ps1
 
       - name: Preview ABI3 on Python 3.15

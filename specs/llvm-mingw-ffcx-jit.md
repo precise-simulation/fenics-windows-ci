@@ -66,15 +66,38 @@ Do not expose or activate it as a general-purpose compiler environment unless re
 
 ## Phase 1: prove LLVM-MinGW compatibility
 
-Start with an unmodified upstream LLVM-MinGW UCRT x86-64 distribution.
+Use the existing GitHub-hosted `windows-2022` runner as the primary implementation and test environment.
 
-The proof must run in a normal Windows process where Visual Studio tools are not available:
+Start with an unmodified upstream LLVM-MinGW UCRT x86-64 distribution. GitHub's hosted Windows runner has Visual Studio installed, so the proof cannot establish that Visual Studio is physically absent from the machine. Instead, the JIT test must run in a deliberately sanitized process that makes MSVC tooling unavailable and proves from the actual commands that only the packaged LLVM-MinGW toolchain was used.
 
-- no VS developer shell;
-- no `cl.exe` or MSVC `link.exe` on `PATH`;
-- no `VCINSTALLDIR` / `VSINSTALLDIR`;
-- no MSYS2 compiler fallback;
-- FFCx cache cleared before the test.
+Before every fresh JIT test:
+
+- do not enter a VS developer shell;
+- remove Visual Studio compiler directories from `PATH`;
+- remove `VSINSTALLDIR`, `VCINSTALLDIR`, `VCToolsInstallDir`, and related activation variables;
+- ensure `cl.exe` and the MSVC `link.exe` are not resolvable from the JIT process;
+- provide only the packaged LLVM-MinGW compiler/linker plus the FEniCS/Python runtime directories on `PATH`;
+- do not provide an MSYS2 compiler fallback;
+- clear the FFCx JIT cache.
+
+A PowerShell test setup should be equivalent in intent to:
+
+```powershell
+$env:PATH = "$jitBin;$prefix;$prefix\Library\bin;$prefix\Scripts;$env:SystemRoot\System32;$env:SystemRoot"
+
+"VSINSTALLDIR", "VCINSTALLDIR", "VCToolsInstallDir" | ForEach-Object {
+    Remove-Item "Env:$_" -ErrorAction Ignore
+}
+```
+
+The test must log the compiler and linker commands and fail if the JIT path invokes or discovers:
+
+- `cl.exe`;
+- MSVC `link.exe`;
+- `vcvarsall.bat`;
+- `vswhere.exe`.
+
+This is stronger than relying on `where.exe` alone: the recorded JIT subprocess commands are the authoritative proof of which compiler and linker were used.
 
 The first acceptance test is the existing:
 
@@ -188,6 +211,8 @@ FFCx JIT compiler: LLVM-MinGW / Clang <version> / x86_64 / UCRT
 
 ## Phase 5: functional test matrix
 
+Run this matrix on the GitHub-hosted `windows-2022` runner under the sanitized JIT environment described above.
+
 Before minimizing the toolchain, the full runtime compiler package must pass at least:
 
 1. existing P1 Poisson solve;
@@ -205,6 +230,8 @@ Before minimizing the toolchain, the full runtime compiler package must pass at 
 
 Generated JIT `.pyd` files should also be inspected for runtime dependencies. They must not require an installed LLVM-MinGW environment or unexpected compiler runtime DLLs.
 
+For each fresh-cache test, retain the verbose compiler/linker log as a CI artifact so accidental fallback to MSVC is diagnosable even after a failure.
+
 ## Phase 6: minimize the toolchain
 
 Only start minimization after the conservative package passes the full test matrix.
@@ -216,6 +243,8 @@ scripts/minimize-jit-toolchain.ps1
 ```
 
 The script must produce a manifest of retained files and record package size after each reduction stage.
+
+Run every reduction stage directly on the GitHub-hosted Windows runner. Upload the size report, retained-file manifest, compiler/linker logs, and final minimized toolchain as workflow artifacts so each reduction can be inspected independently.
 
 ### A. Remove non-x86-64 targets
 
@@ -320,6 +349,8 @@ The existing standalone release process may still use VS2022 to build the Nuitka
 
 Stage the minimized JIT compiler into the standalone bundle explicitly.
 
+Build the Nuitka bundle using the existing Windows runner/build setup, then launch the produced standalone bundle in the same sanitized runtime environment used by the package-level JIT tests. Clear the bundled FFCx cache before launch so the standalone acceptance test must compile a fresh form with the staged LLVM-MinGW toolchain.
+
 Runtime discovery must be relative to the bundle and must not require:
 
 - conda activation;
@@ -345,19 +376,39 @@ application/
 
 ## CI requirements
 
-Add a clean Windows JIT job that deliberately prevents accidental use of Visual Studio.
+Use GitHub-hosted `windows-2022` as the primary implementation and verification environment.
 
-Before running the JIT test, assert that MSVC tools are not available from the test environment and log the compiler actually selected.
+Initially add a dedicated workflow, for example:
+
+```text
+.github/workflows/llvm-mingw-jit.yml
+```
+
+Keep the experimental JIT work separate from the production `stack.yml` and `channel-dep-test.yml` workflows until the fresh Poisson JIT succeeds reliably. Once the runtime package is established, the relevant checks can be folded into the normal package/release gates.
+
+The hosted runner contains Visual Studio, so CI must prove **non-use of MSVC**, not physical absence of Visual Studio. The JIT step must:
+
+- run with a sanitized `PATH` and Visual Studio activation variables removed;
+- explicitly select the packaged LLVM-MinGW Clang/MinGW backend;
+- record the actual compiler and linker subprocess commands;
+- fail if `cl.exe`, MSVC `link.exe`, `vcvarsall.bat`, or `vswhere.exe` are used or discovered by the JIT path.
 
 At minimum the CI gate must:
 
-1. clear the FFCx cache;
-2. verify the selected compiler is the packaged LLVM-MinGW Clang;
-3. run `scripts/test-poisson.py`;
-4. verify a JIT module was created;
-5. inspect its dynamic dependencies;
-6. repeat from the cache;
-7. run the MPI JIT test.
+1. install or stage the pinned LLVM-MinGW UCRT x86-64 toolchain;
+2. create the FEniCS/Python test environment;
+3. sanitize the JIT process environment;
+4. clear the FFCx cache;
+5. verify the selected compiler is the packaged LLVM-MinGW Clang;
+6. run `scripts/test-poisson.py` serially;
+7. verify a fresh JIT module was created;
+8. inspect the generated `.pyd` dynamic dependencies;
+9. retain compiler/linker logs as artifacts;
+10. repeat the solve from the JIT cache;
+11. run the two-rank MPI Poisson test with the same sanitized child environment;
+12. run the broader form test matrix;
+13. run each staged toolchain-minimization pass, recording size and re-running the tests;
+14. build and run the Nuitka standalone bundle under the same sanitized runtime environment.
 
 The final release test should exercise the minimized package, not only the full upstream LLVM-MinGW archive.
 
@@ -365,28 +416,35 @@ The final release test should exercise the minimized package, not only the full 
 
 The work is complete when:
 
-- FFCx/CFFI JIT succeeds on supported Windows without Visual Studio or MSYS2;
+- FFCx/CFFI JIT succeeds on the GitHub-hosted Windows runner with MSVC unavailable to the JIT process and compiler logs proving LLVM-MinGW/LLD were used;
+- the runtime has no dependency on Visual Studio activation, MSYS2, `vcvarsall.bat`, or `vswhere.exe`;
 - DOLFINx/PETSc continue to use the existing build toolchain;
 - the existing Poisson solve and the broader JIT test matrix pass;
 - MPI JIT and cache reuse work;
 - generated `.pyd` files load in the supported CPython runtimes;
-- the standalone/Nuitka bundle can JIT forms on a clean Windows system;
+- generated `.pyd` dependency inspection shows no unexpected compiler runtime dependency;
+- the standalone/Nuitka bundle can perform a fresh JIT under the same sanitized environment;
 - the runtime compiler is packaged independently from the full development compiler stack;
 - the minimized package is generated by a reproducible script;
 - every retained toolchain component has a documented reason;
 - package size before and after minimization is recorded in CI or release metadata.
 
+A one-time test on a genuinely pristine Windows VM with Visual Studio not installed is a useful final release-confidence check, but it is optional and is not a prerequisite for implementation or CI acceptance.
+
 ## Implementation order
 
-1. Prove an upstream LLVM-MinGW UCRT x86-64 archive can build and load a CFFI extension with the packaged CPython.
-2. Run the existing FFCx/DOLFINx Poisson JIT with no MSVC tools visible.
-3. Resolve FFCx compiler-specific flags cleanly.
-4. Add the dedicated runtime compiler package.
-5. Switch `fenics-dolfinx` Windows runtime metadata to the dedicated package.
-6. Add the broader JIT and MPI test matrix.
-7. Add deterministic toolchain minimization.
-8. Measure and remove unnecessary architectures, C++ support, tools, libraries, and symbols.
-9. Stage the minimized toolchain in the Nuitka standalone bundle.
-10. Add a clean-Windows CI/release gate proving there is no Visual Studio runtime dependency.
+1. Add a dedicated GitHub `windows-2022` experimental workflow for LLVM-MinGW JIT.
+2. Download a pinned upstream LLVM-MinGW UCRT x86-64 archive and prove it can build and load a CFFI extension with the packaged CPython.
+3. Add the sanitized JIT environment and compiler/linker command tracing; make accidental MSVC use a hard failure.
+4. Run the existing FFCx/DOLFINx Poisson JIT from an empty cache with only LLVM-MinGW available to the JIT process.
+5. Resolve FFCx compiler-specific flags cleanly.
+6. Add the dedicated runtime compiler package.
+7. Switch `fenics-dolfinx` Windows runtime metadata to the dedicated package.
+8. Add the broader JIT, cache, dependency-inspection, and MPI test matrix.
+9. Add deterministic toolchain minimization and run every reduction stage on the hosted runner.
+10. Measure and remove unnecessary architectures, C++ support, tools, libraries, and symbols.
+11. Stage the minimized toolchain in the Nuitka standalone bundle and force a fresh JIT under the sanitized environment.
+12. Fold the proven checks into the normal package/release CI gates.
+13. Optionally perform a final one-time acceptance test on a Windows VM where Visual Studio is physically absent.
 
-The primary go/no-go point is step 2: a fresh Poisson solve must JIT successfully with LLVM-MinGW while MSVC tools are unavailable.
+The primary go/no-go point is step 4: a fresh Poisson solve must JIT successfully with LLVM-MinGW while the JIT process cannot resolve or invoke MSVC tools.

@@ -60,6 +60,12 @@ Upload size reports, retained-file manifests, compiler/linker logs, and the mini
 
 ## Stage A: remove non-x86-64 targets
 
+**Implementation:** build 1 applies this reduction reproducibly via
+`recipes/fenics-jit-llvm-mingw/minimize-toolchain.ps1`. It removes all
+AArch64, ARM64EC, ARMv7, and i686 driver/tool aliases from the staged `bin`
+tree, asserts that no unsupported target sysroot was staged, and writes a
+before/after removal report. Full Phase 5 validation is pending for this stage.
+
 Remove target-specific files for unsupported architectures, as applicable:
 
 - i686;

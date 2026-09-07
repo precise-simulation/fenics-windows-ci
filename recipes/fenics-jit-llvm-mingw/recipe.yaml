@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 0
+  build: 1
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -38,9 +38,9 @@ about:
   summary: Conservative LLVM-MinGW runtime compiler for FEniCS FFCx/CFFI JIT on Windows
   description: |
     A relocatable x86-64 UCRT LLVM-MinGW compiler/runtime subset dedicated to
-    FEniCS FFCx/CFFI JIT. This first package intentionally keeps a conservative
-    working set; size minimization is handled separately after compatibility is
-    proven.
+    FEniCS FFCx/CFFI JIT. Phase 6 minimization is applied reproducibly during
+    package construction; build 1 removes unsupported-architecture tool aliases
+    while retaining the complete proven x86-64 compiler/sysroot path.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

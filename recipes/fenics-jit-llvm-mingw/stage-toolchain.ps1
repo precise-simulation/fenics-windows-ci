@@ -61,12 +61,18 @@ function Copy-Tree {
     Copy-Item -Recurse -Force $source $target
 }
 
-# Phase 2 deliberately packages the conservative known-working set.
-# Phase 5 will measure and prune individual executables/libraries.
+# Start from the conservative Phase 2 working set, then apply each Phase 6
+# reduction through a deterministic recipe-local minimization script.
 Copy-Tree "bin" "bin"
 Copy-Tree "include" "include"
 Copy-Tree "lib\clang" "lib\clang"
 Copy-Tree "x86_64-w64-mingw32" "x86_64-w64-mingw32"
+
+$minimizer = Join-Path $PSScriptRoot "minimize-toolchain.ps1"
+if (-not (Test-Path $minimizer)) {
+    throw "Phase 6 minimization script missing from recipe: $minimizer"
+}
+& $minimizer -ToolchainRoot $destination -Stage "stage-a"
 
 $runtimeDir = Join-Path $destination "runtime"
 New-Item -ItemType Directory -Force $runtimeDir | Out-Null
@@ -159,6 +165,8 @@ $metadata = [ordered]@{
     lld_version = $lldVersion
     python_import_library_abi = "python3.dll"
     python_import_library_aliases = @("python3", "python312", "python313", "python314")
+    minimization_stage = "stage-a"
+    minimization_report = "minimization-stage-a.json"
     runtime_helper = "runtime/fenics_jit_runtime.py"
 }
 $metadata | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $destination "metadata.json") -Encoding UTF8

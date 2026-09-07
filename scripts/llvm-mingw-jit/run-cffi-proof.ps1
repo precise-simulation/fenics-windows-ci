@@ -33,6 +33,27 @@ foreach ($path in @($python, $clang, $clangxx, $dlltool, $readobj)) {
 Remove-Item -Recurse -Force $workPath -ErrorAction Ignore
 New-Item -ItemType Directory -Force $workPath, $diagnosticsPath | Out-Null
 
+# The currently published fenics-dolfinx still depends on the conda Windows
+# compiler activation package. Hide any compiler/discovery executables that
+# package drops into runtime PATH directories so this Phase 1 proof tests
+# LLVM-MinGW with the old toolchain genuinely unavailable to the JIT process.
+$disabledToolLog = Join-Path $diagnosticsPath "disabled-host-tools.txt"
+$runtimePathDirs = @(
+    (Join-Path $pythonPrefixPath "Library/bin"),
+    (Join-Path $pythonPrefixPath "Scripts"),
+    $pythonPrefixPath
+)
+foreach ($runtimeDir in $runtimePathDirs) {
+    foreach ($toolName in @("cl.exe", "link.exe", "vswhere.exe", "vcvarsall.bat")) {
+        $candidate = Join-Path $runtimeDir $toolName
+        if (Test-Path $candidate) {
+            $disabled = "$candidate.disabled-for-llvm-mingw-jit"
+            Move-Item -Force $candidate $disabled
+            "$candidate -> $disabled" | Add-Content $disabledToolLog
+        }
+    }
+}
+
 # The GitHub runner has Visual Studio and Windows SDKs installed. Replace,
 # rather than extend, PATH and clear activation state before the JIT process.
 $systemRoot = $env:SystemRoot

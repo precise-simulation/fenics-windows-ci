@@ -208,12 +208,6 @@ if ($PoissonScript) {
         throw "FFCx C17 patch failed"
     }
 
-    & $python -c "import dolfinx, ffcx, cffi, setuptools; print('dolfinx=' + dolfinx.__version__); print('ffcx=' + ffcx.__version__); print('cffi=' + cffi.__version__); print('setuptools=' + setuptools.__version__)" 2>&1 |
-        Set-Content (Join-Path $poissonDiagnostics "versions.txt")
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not import the installed FEniCS/JIT stack"
-    }
-
     $poissonProof = Join-Path $PSScriptRoot "ffcx-poisson-proof.py"
     $poissonLog = Join-Path $poissonDiagnostics "poisson-output.txt"
     & $python $poissonProof `

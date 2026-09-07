@@ -144,9 +144,49 @@ jobs:
             -DiagnosticsDir "jit-diagnostics/proof" `
             -PoissonScript "scripts/test-poisson.py"
 
-          $importSource = Get-Content "jit-diagnostics/proof/python-import-library-source.txt" -Raw
-          if ($importSource -notmatch "source=packaged") {
-            throw "JIT proof did not use package-built Python import libraries"
+          $config = Get-Content "jit-diagnostics/proof/runtime-config.json" -Raw | ConvertFrom-Json
+          $expectedLibRoot = [System.IO.Path]::GetFullPath((Join-Path $toolchain "lib/python"))
+          $selectedLibRoot = [System.IO.Path]::GetFullPath([string]$config.python_import_library_dir)
+          if ($selectedLibRoot -ne $expectedLibRoot) {
+            throw "JIT helper did not select package-built Python import libraries: $selectedLibRoot"
+          }
+
+      - name: Verify MPI child runtime configuration
+        if: matrix.python == '3.12'
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/llvm-mingw-jit"
+          $toolchain = Join-Path $prefix "Library/fenics-jit"
+          $python = Join-Path $prefix "python.exe"
+          $mpiexec = Get-Command mpiexec.exe -ErrorAction SilentlyContinue
+          if (-not $mpiexec) {
+            $candidate = Get-ChildItem $prefix -Recurse -Filter mpiexec.exe -File -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if (-not $candidate) { throw "mpiexec.exe not found in FEniCS runtime" }
+            $mpiexecPath = $candidate.FullName
+          } else {
+            $mpiexecPath = $mpiexec.Source
+          }
+
+          $poison = Join-Path $env:RUNNER_TEMP "mpi-jit-poison"
+          $env:VSINSTALLDIR = Join-Path $poison "Microsoft Visual Studio"
+          $env:VCINSTALLDIR = Join-Path $poison "Microsoft Visual Studio/VC"
+          $env:INCLUDE = Join-Path $poison "Windows Kits/Include"
+          $env:LIB = Join-Path $poison "Windows Kits/Lib"
+          $env:CC = "cl.exe"
+          $env:CXX = "cl.exe"
+          $env:LD = "link.exe"
+
+          & $mpiexecPath -n 2 $python `
+            ./scripts/llvm-mingw-jit/mpi-runtime-proof.py `
+            --toolchain-root $toolchain `
+            --python-prefix $prefix `
+            --diagnostics-dir "jit-diagnostics/mpi"
+          if ($LASTEXITCODE -ne 0) { throw "MPI JIT runtime helper proof failed" }
+
+          $summary = Get-Content "jit-diagnostics/mpi/summary.json" -Raw | ConvertFrom-Json
+          if ([int]$summary.ranks -ne 2) {
+            throw "MPI helper proof did not record two ranks"
           }
 
       - name: Upload JIT diagnostics

@@ -6,7 +6,6 @@ import contextlib
 import importlib.util
 import json
 import os
-import shutil
 import subprocess
 import sys
 import sysconfig
@@ -182,19 +181,34 @@ class RuntimeConfig:
                 env.pop(key, None)
 
         system_root = Path(env.get("SystemRoot", r"C:\Windows"))
-        env["PATH"] = os.pathsep.join(
-            _dedupe(
-                [
-                    self.bin_dir,
-                    self.python_prefix,
-                    self.python_prefix / "Scripts",
-                    system_root / "System32",
-                    system_root,
-                ]
-            )
+        ambient_path = [
+            entry
+            for entry in env.get("PATH", "").split(os.pathsep)
+            if entry
+            and "microsoft visual studio" not in entry.lower()
+            and "windows kits" not in entry.lower()
+        ]
+        runtime_paths: list[Path | str] = [
+            self.bin_dir,
+            self.python_prefix,
+            self.python_prefix / "Scripts",
+        ]
+        if self.runtime_dll_dir is not None:
+            runtime_paths.append(self.runtime_dll_dir)
+        runtime_paths.extend(
+            [
+                *ambient_path,
+                system_root / "System32",
+                system_root,
+            ]
         )
-        env["CC"] = self.clang.name
-        env["CXX"] = self.clangxx.name
+        env["PATH"] = os.pathsep.join(_dedupe(runtime_paths))
+
+        # setuptools' MinGW backend shlex-splits CC/CXX. Use an absolute path
+        # with forward slashes so selection does not depend on PATH and native
+        # Windows backslashes cannot be consumed as shell escapes.
+        env["CC"] = self.clang.as_posix()
+        env["CXX"] = self.clangxx.as_posix()
         env["SETUPTOOLS_USE_DISTUTILS"] = "local"
         env["FFCX_CFFI_COMPILER_BACKEND"] = self.backend
         env["FENICS_JIT_ROOT"] = str(self.toolchain_root)
@@ -249,22 +263,19 @@ class RuntimeConfig:
         }
 
     def _verify_path_and_tools(self) -> None:
-        resolved_cc = shutil.which(self.clang.name)
-        if resolved_cc is None or Path(resolved_cc).resolve() != self.clang:
-            raise RuntimeError(f"CC does not resolve to packaged Clang: {resolved_cc}")
+        selected_cc = Path(os.environ["CC"]).resolve()
+        selected_cxx = Path(os.environ["CXX"]).resolve()
+        if selected_cc != self.clang:
+            raise RuntimeError(f"CC is not the packaged Clang driver: {selected_cc}")
+        if selected_cxx != self.clangxx:
+            raise RuntimeError(f"CXX is not the packaged Clang++ driver: {selected_cxx}")
 
-        for forbidden in ("cl.exe", "vswhere.exe", "vcvarsall.bat"):
-            resolved = shutil.which(forbidden)
-            if resolved:
-                raise RuntimeError(f"Forbidden ambient tool is resolvable: {forbidden} -> {resolved}")
-
-        resolved_link = shutil.which("link.exe")
-        if resolved_link is not None:
-            link = Path(resolved_link).resolve()
-            try:
-                link.relative_to(self.bin_dir.resolve())
-            except ValueError as exc:
-                raise RuntimeError(f"Ambient link.exe is resolvable: {link}") from exc
+        # Runtime PATH is retained for conda DLL/MPI provider discovery, but
+        # Visual Studio and host Windows SDK directories themselves are removed.
+        for entry in os.environ.get("PATH", "").split(os.pathsep):
+            lowered = entry.lower()
+            if "microsoft visual studio" in lowered or "windows kits" in lowered:
+                raise RuntimeError(f"Host compiler/SDK directory leaked into JIT PATH: {entry}")
 
     @contextlib.contextmanager
     def activate(

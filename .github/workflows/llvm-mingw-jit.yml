@@ -1,0 +1,78 @@
+name: llvm-mingw-jit
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/llvm-mingw-jit.yml"
+      - "scripts/llvm-mingw-jit/**"
+      - "specs/llvm-mingw-ffcx-jit/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/llvm-mingw-jit.yml"
+      - "scripts/llvm-mingw-jit/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('llvm-mingw-jit-pr-{0}', github.event.pull_request.number) || 'llvm-mingw-jit-main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  cffi-proof:
+    name: CFFI proof (Python ${{ matrix.python }})
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install isolated Python runtime
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: llvm-mingw-jit
+          create-args: >-
+            --override-channels
+            -c conda-forge
+            python=${{ matrix.python }}
+            cffi
+            setuptools
+
+      - name: Download and verify LLVM-MinGW
+        shell: pwsh
+        run: |
+          ./scripts/llvm-mingw-jit/prepare-llvm-mingw.ps1 `
+            -Destination ".jit-toolchain" `
+            -DiagnosticsDir "jit-diagnostics/toolchain"
+
+      - name: Run isolated CFFI compile/load proof
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/llvm-mingw-jit"
+          $toolchain = Join-Path (Get-Location) ".jit-toolchain/llvm-mingw-20260826-ucrt-x86_64"
+          ./scripts/llvm-mingw-jit/run-cffi-proof.ps1 `
+            -PythonPrefix $prefix `
+            -ToolchainRoot $toolchain `
+            -WorkDir "jit-work" `
+            -DiagnosticsDir "jit-diagnostics/proof"
+
+      - name: Upload JIT diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: llvm-mingw-cffi-py${{ matrix.python }}
+          path: |
+            jit-diagnostics/
+            jit-work/setup.cfg
+            jit-work/*.c
+            jit-work/*.pyd
+          if-no-files-found: warn
+          retention-days: 14

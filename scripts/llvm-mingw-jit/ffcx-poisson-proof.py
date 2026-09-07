@@ -62,7 +62,24 @@ def main() -> None:
     compiler = None
 
     with config.activate(diagnostics_dir=diagnostics, verbose=True):
+        import cffi
+        import dolfinx
+        import ffcx
+        import setuptools
         from cffi._shimmed_dist_utils import Distribution
+
+        (diagnostics / "versions.txt").write_text(
+            "\n".join(
+                [
+                    f"dolfinx={dolfinx.__version__}",
+                    f"ffcx={ffcx.__version__}",
+                    f"cffi={cffi.__version__}",
+                    f"setuptools={setuptools.__version__}",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
         dist = Distribution()
         dist.parse_config_files()

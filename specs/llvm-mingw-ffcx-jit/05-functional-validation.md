@@ -1,5 +1,7 @@
 # Phase 5: functional validation
 
+**Status:** implementation in progress — the conservative functional matrix is wired into the single `stack` workflow and awaits GitHub runner validation.
+
 ## Objective
 
 Demonstrate that the conservative packaged LLVM-MinGW JIT path covers representative FFCx/DOLFINx runtime compilation, cache behavior, MPI behavior, supported CPython versions, and non-trivial paths.
@@ -54,13 +56,13 @@ The two-rank test must prove:
 
 ## Tasks
 
-1. Add representative form tests that are not already covered.
-2. Add fresh-cache and cache-reload modes.
-3. Add two-rank MPI JIT coverage.
-4. Matrix the workflow over CPython 3.12-3.14.
-5. Add paths-containing-spaces coverage.
-6. Add PE dependency inspection.
-7. Upload JIT logs and dependency reports as CI artifacts.
+1. [x] Add representative P2 Poisson, vector elasticity, cell/facet, coefficient/Constant, nonlinear residual/Jacobian, and `fem.Expression` tests.
+2. [x] Add fresh-cache and cache-reload modes with compiler subprocess accounting.
+3. [x] Add two-rank MPI JIT coverage proving rank-0 compilation and non-root cache load.
+4. [x] Matrix the validation over CPython 3.12-3.14.
+5. [x] Install each consumer environment and place each JIT cache below paths containing spaces.
+6. [x] Inspect every generated JIT `.pyd` with packaged `llvm-readobj`, including stable Python DLL and compiler-runtime checks.
+7. [x] Retain compiler commands, package provenance, cache summaries, MPI reports, and PE reports below `build-logs/phase5`.
 
 ## Exit criteria
 

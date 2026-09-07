@@ -1,5 +1,7 @@
 # Phase 4: switch the DOLFINx runtime dependency
 
+**Status:** complete — stack run #155 (34105011298) validates the normal Windows package build and Python 3.12-3.14 consumer JIT path.
+
 ## Objective
 
 After the deterministic runtime helper is established in Phase 3, replace the Windows `fenics-dolfinx` runtime dependency that currently brings in the generic C compiler with the dedicated LLVM-MinGW JIT package.
@@ -34,17 +36,17 @@ The installed Windows runtime must perform FFCx JIT without conda compiler activ
 
 ## Tasks
 
-1. Add `fenics-jit-llvm-mingw` to the Windows `fenics-dolfinx` runtime requirements.
-2. Remove the generic Windows runtime C compiler dependency.
-3. Add explicit runtime `setuptools`.
-4. Add any verified CFFI/setuptools compatibility constraint needed by the JIT adapter.
-5. Build `fenics-dolfinx` through the normal repository stack workflow.
-6. Verify solved runtime metadata contains the dedicated JIT package and no unintended full compiler stack.
-7. Run fresh Poisson JIT on CPython 3.12, 3.13, and 3.14.
+1. [x] Add `fenics-jit-llvm-mingw` to the Windows `fenics-dolfinx` runtime requirements.
+2. [x] Remove the generic Windows runtime C compiler dependency.
+3. [x] Add explicit runtime `setuptools`.
+4. [x] Keep version-sensitive CFFI/FFCx adaptation behind the packaged runtime helper.
+5. [x] Build `fenics-dolfinx` through the normal repository stack workflow.
+6. [x] Verify solved runtime metadata contains the dedicated JIT package and no unintended full compiler stack.
+7. [x] Run fresh Poisson JIT on CPython 3.12, 3.13, and 3.14.
 
 ## Exit criteria
 
-Phase 3 is complete when:
+Phase 4 is complete when:
 
 - `fenics-dolfinx` runtime metadata no longer pulls the generic Windows compiler dependency;
 - `fenics-jit-llvm-mingw`, `cffi`, and `setuptools` are explicit runtime inputs;

@@ -77,11 +77,13 @@ jobs:
         run: |
           python -m py_compile scripts/check_versions.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m py_compile scripts/llvm-mingw-jit/phase5-functional-validation.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s scripts -p "test_*.py"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $parseErrors = @()
-          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+          Get-ChildItem scripts -Recurse -Filter *.ps1 | ForEach-Object {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
@@ -117,6 +119,10 @@ jobs:
       - name: Test ABI3 on supported Python versions
         shell: pwsh
         run: scripts/test-python-abi3.ps1
+
+      - name: Phase 5 functional JIT validation
+        shell: pwsh
+        run: scripts/llvm-mingw-jit/run-phase5-functional-validation.ps1
 
       - name: Preview ABI3 on Python 3.15
         shell: pwsh

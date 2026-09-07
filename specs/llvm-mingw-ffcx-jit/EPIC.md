@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** in progress — Phases 1-3 complete; Phase 4 DOLFINx runtime metadata switch is next.
+**Status:** in progress — Phases 1-4 complete; Phase 5 functional validation is in progress.
 
 This epic replaces the Windows runtime Visual Studio compiler dependency used by FFCx/CFFI JIT with a small, self-contained LLVM-MinGW toolchain. It does not change the compiler used to build PETSc, DOLFINx, Basix, or other native packages.
 
@@ -66,7 +66,7 @@ Phases are ordered. A later phase may be prototyped early when useful, but its p
 
 ### Implementation status
 
-Phases 1, 2, and 3 are complete.
+Phases 1, 2, 3, and 4 are complete. Phase 5 validation is implemented and awaiting the full stack CI gate.
 
 Phase 1 proved fresh CFFI and FFCx Poisson JIT on CPython 3.12-3.14 with the
 setuptools `mingw32` backend, LLVM-MinGW Clang/LLD, Stable-ABI
@@ -88,10 +88,15 @@ CPython 3.12-3.14, and a two-rank MPI probe confirms identical JIT
 configuration across child processes. Dedicated workflow run #44
 (`34094463578`) is green.
 
-Phase 4 may now switch the Windows `fenics-dolfinx` runtime metadata from the
-general compiler dependency to `fenics-jit-llvm-mingw` plus an explicit
-runtime setuptools/distutils provider, while keeping the native package build
-toolchain on VS2022.
+Phase 4 switched the Windows `fenics-dolfinx` runtime metadata from the
+general compiler dependency to `fenics-jit-llvm-mingw` plus explicit
+`setuptools`, while leaving the native VS2022 package build toolchain unchanged.
+Stack run #155 (`34105011298`) is green on the normal package and Python
+3.12-3.14 consumer path.
+
+Phase 5 adds broad generated-form coverage, deterministic fresh/cache-reload
+checks, two-rank MPI compile/cache semantics, paths containing spaces, and PE
+dependency inspection before minimization begins.
 
 ## Primary gates
 

@@ -230,6 +230,22 @@ def _match_family(relative: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatch(lowered, pattern.lower()) for pattern in patterns)
 
 
+def _depfile_dependencies(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    text = text.replace("\\\r\n", " ").replace("\\\n", " ")
+    separator = text.find(": ")
+    if separator < 0:
+        return []
+    body = text[separator + 2 :]
+    sentinel = "\0"
+    body = body.replace("\\ ", sentinel)
+    return [
+        token.replace(sentinel, " ").replace("\\#", "#")
+        for token in body.split()
+        if token
+    ]
+
+
 def _header_report(phase5_root: Path, output_dir: Path, size: dict[str, object]) -> dict[str, object]:
     retained = {
         str(item["path"]).lower(): item
@@ -240,26 +256,21 @@ def _header_report(phase5_root: Path, output_dir: Path, size: dict[str, object])
         path: item for path, item in retained.items() if str(item["category"]) == "root_headers"
     }
 
+    # FFCx-generated C directly includes Python/FFCx headers outside this
+    # packaged toolchain. Toolchain headers therefore enter through those
+    # headers or compiler builtins and are correctly classified as transitive.
     direct: set[str] = set()
     transitive: set[str] = set()
-    trace_files = sorted(phase5_root.rglob("*-header-trace.txt"))
-    for trace in trace_files:
-        for line in trace.read_text(encoding="utf-8", errors="replace").splitlines():
-            match = re.match(r"^\s*(\.+)\s+(.+?)\s*$", line)
-            if not match:
-                continue
-            relative = _toolchain_relative(match.group(2))
+    depfiles = sorted(phase5_root.rglob("*.d"))
+    for depfile in depfiles:
+        for raw in _depfile_dependencies(depfile):
+            relative = _toolchain_relative(raw)
             if relative is None:
                 continue
             key = relative.lower()
-            if key not in retained:
-                continue
-            if len(match.group(1)) == 1:
-                direct.add(key)
-            else:
+            if key in retained:
                 transitive.add(key)
 
-    transitive.difference_update(direct)
     observed = direct | transitive
 
     safety = []
@@ -307,7 +318,8 @@ def _header_report(phase5_root: Path, output_dir: Path, size: dict[str, object])
     observed_rows = direct_rows + transitive_rows
 
     report = {
-        "compile_trace_count": len(trace_files),
+        "compile_trace_count": len(depfiles),
+        "trace_format": "clang -MD/-MF Make dependency files",
         "observed_header_count": len(observed),
         "observed_header_bytes": sum(int(item["bytes"]) for item in observed_rows),
         "direct_observed_count": len(direct_rows),
@@ -350,7 +362,7 @@ def _library_report(phase5_root: Path, output_dir: Path, size: dict[str, object]
         if str(item["category"]) == "target_static_import_libraries"
         and str(item["path"]).lower().endswith(".a")
     ]
-    traces = sorted(phase5_root.rglob("*-linker-trace.txt"))
+    traces = sorted(phase5_root.rglob("*.map"))
     usage: Counter[str] = Counter()
 
     for trace in traces:
@@ -403,6 +415,7 @@ def _library_report(phase5_root: Path, output_dir: Path, size: dict[str, object]
 
     report = {
         "link_trace_count": len(traces),
+        "trace_format": "LLD -Map link maps",
         "target_archive_count": len(rows),
         "usage_summary": [
             {

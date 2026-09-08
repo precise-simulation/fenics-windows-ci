@@ -12,7 +12,11 @@ $measurementScript = Join-Path $PSScriptRoot "report-minimization-measurements.p
 New-Item -ItemType Directory -Force $logRoot | Out-Null
 Remove-Item -Recurse -Force $measurementRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $measurementRoot | Out-Null
+$traceRoot = Join-Path $logRoot "closure traces"
+Remove-Item -Recurse -Force $traceRoot -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $traceRoot | Out-Null
 $env:FENICS_JIT_MEASURE_CLOSURE = "1"
+$env:FENICS_JIT_MEASURE_DIR = $traceRoot
 
 if (-not (Test-Path $script)) {
     throw "Phase 5 Python validation script missing: $script"
@@ -115,6 +119,7 @@ foreach ($pythonVersion in @("3.12.*", "3.13.*", "3.14.*")) {
             "-env", "PYTHONPATH", $pythonPath,
             "-env", "FENICS_JIT_VERBOSE", "1",
             "-env", "FENICS_JIT_MEASURE_CLOSURE", "1",
+            "-env", "FENICS_JIT_MEASURE_DIR", $traceRoot,
             $python, $script,
             "--mode", "mpi",
             "--cache-dir", $mpiCache,

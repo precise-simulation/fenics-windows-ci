@@ -344,6 +344,35 @@ class RuntimeConfig:
                 ]
                 if "-D__STDC_NO_COMPLEX__" not in normalized_args:
                     normalized_args.append("-D__STDC_NO_COMPLEX__")
+
+                # Optional CI-only minimization measurements. Inject them here,
+                # where every FFCx CFFI build passes, instead of monkey-patching
+                # setuptools' subprocess implementation.
+                measure = os.getenv("FENICS_JIT_MEASURE_CLOSURE", "").lower() in {
+                    "1", "true", "yes", "on"
+                }
+                measure_root = os.getenv("FENICS_JIT_MEASURE_DIR")
+                if measure and measure_root:
+                    safe_module = "".join(
+                        ch if ch.isalnum() or ch in "._-" else "_"
+                        for ch in module_name
+                    )
+                    trace_dir = (
+                        Path(measure_root).resolve()
+                        / f"py{sys.version_info.major}{sys.version_info.minor}"
+                    )
+                    trace_dir.mkdir(parents=True, exist_ok=True)
+
+                    depfile = trace_dir / f"{safe_module}.d"
+                    normalized_args.extend(
+                        ["-MD", "-MF", depfile.as_posix()]
+                    )
+
+                    link_args = list(kwargs.get("extra_link_args") or [])
+                    mapfile = trace_dir / f"{safe_module}.map"
+                    link_args.append(f"-Wl,-Map,{mapfile.as_posix()}")
+                    kwargs["extra_link_args"] = link_args
+
                 kwargs["extra_compile_args"] = normalized_args
                 return original_set_source(
                     ffi_self, module_name, source, *args, **kwargs

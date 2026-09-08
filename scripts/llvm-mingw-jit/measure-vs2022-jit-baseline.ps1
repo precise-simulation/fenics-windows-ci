@@ -107,13 +107,15 @@ if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
     throw "vswhere.exe not found: $vswhere"
 }
 
-$installationPath = (
-    & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath |
-        Select-Object -First 1
-).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($installationPath)) {
-    throw "Could not locate VS2022 with Microsoft.VisualStudio.Component.VC.Tols.x86.x64"
+$installationCandidates = @(
+    & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+)
+$vswhereSucceeded = $?
+$installationPath = [string]($installationCandidates | Select-Object -First 1)
+if (-not $vswhereSucceeded -or [string]::IsNullOrWhiteSpace($installationPath)) {
+    throw "Could not locate VS2022 with Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
 }
+$installationPath = $installationPath.Trim()
 
 $vcvarsall = Join-Path $installationPath "VC\Auxiliary\Build\vcvarsall.bat"
 if (-not (Test-Path -LiteralPath $vcvarsall -PathType Leaf)) {
@@ -122,7 +124,8 @@ if (-not (Test-Path -LiteralPath $vcvarsall -PathType Leaf)) {
 
 $activationCommand = 'call "' + $vcvarsall + '" x64 >nul && set'
 $activationLines = & $env:ComSpec /d /s /c $activationCommand
-if ($LASTEXITCODE -ne 0) {
+$activationSucceeded = $?
+if (-not $activationSucceeded) {
     throw "VS2022 x64 vcvarsall activation failed"
 }
 
@@ -182,7 +185,7 @@ foreach ($variableName in @("INCLUDE", "LIB")) {
 }
 Add-UniqueExistingRoot $activatedRoots $activatedSeen "vc-x64-tools" (Join-Path $vcToolsDir "bin\Hostx64\x64") "compiler/linker tool directory"
 Add-UniqueExistingRoot $activatedRoots $activatedSeen "sdk-x64-tools" (Join-Path $windowsSdkDir "bin\$windowsSdkVersion\x64") "selected Windows SDK x64 tool directory"
-$activatedSearchClosure = Measure-RootSet $activatedRoots.ToArray()
+$activatedSearchClosure = Measure-RootSet ($activatedRoots.ToArray())
 
 $prerequisiteRoots = @(
     New-Root "versioned-msvc-toolset" $vcToolsDir "complete installed versioned MSVC toolset; contextual upper prerequisite"

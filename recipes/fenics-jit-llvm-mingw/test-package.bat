@@ -18,7 +18,7 @@ if not exist "%JIT_ROOT%\lib\python\libpython313.a" exit /b 1
 if not exist "%JIT_ROOT%\lib\python\libpython314.a" exit /b 1
 if not exist "%JIT_ROOT%\manifest.csv" exit /b 1
 if not exist "%JIT_ROOT%\metadata.json" exit /b 1
-if not exist "%JIT_ROOT%\minimization-stage-c.json" exit /b 1
+if not exist "%JIT_ROOT%\minimization-stage-d.json" exit /b 1
 if not exist "%JIT_ROOT%\runtime\fenics_jit_runtime.py" exit /b 1
 
 powershell.exe -NoProfile -Command "$files = @(Get-ChildItem -LiteralPath '%JIT_BIN%' -File); $bad = @($files.Where({$_.Name -match '^(?:aarch64|arm64ec|armv7|i686)-w64-mingw32(?:uwp)?(?:-|$)'})); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
@@ -29,6 +29,12 @@ if errorlevel 1 exit /b 1
 
 for %%f in (clang-23.exe ld.lld.exe llvm-readobj.exe llvm-dlltool.exe) do if not exist "%JIT_BIN%\%%f" exit /b 1
 for %%f in (clangd.exe clang-tidy.exe lldb.exe lldb-server.exe llvm-objdump.exe llvm-profdata.exe) do if exist "%JIT_BIN%\%%f" exit /b 1
+
+set "CLANG_RUNTIME=%JIT_ROOT%\lib\clang\23\lib"
+if exist "%CLANG_RUNTIME%\linux" exit /b 1
+if not exist "%CLANG_RUNTIME%\windows\libclang_rt.builtins-x86_64.a" exit /b 1
+powershell.exe -NoProfile -Command "$files = @(Get-ChildItem -LiteralPath '%CLANG_RUNTIME%\windows' -Recurse -File); if ($files.Count -ne 1 -or $files[0].Name -ne 'libclang_rt.builtins-x86_64.a') { $files.FullName; exit 1 }"
+if errorlevel 1 exit /b 1
 
 "%CLANG%" --version
 if errorlevel 1 exit /b 1

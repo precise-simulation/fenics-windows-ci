@@ -121,8 +121,10 @@ JIT/package validation: `x86_64-w64-mingw32-clang.exe`, `clang-23.exe`,
 executables are removed reproducibly. LLDB-only `liblldb`, Python/FFI DLLs,
 and the root OpenMP runtime are also removed because the retained executable
 dependency graph does not reference them. Shared LLVM/Clang/libc++/libunwind
-DLLs needed by the retained compiler tools remain. Full Phase 5 validation is
-pending for Stage C.
+DLLs needed by the retained compiler tools remain. Stack run #165
+(`34172969848`) passed the complete Phase 5 gate. Stage C removed **93 files /
+53.55 MiB** on top of Stages A-B; the package is now **385.94 MiB installed /
+68.63 MiB compressed**.
 
 Use observed JIT invocations plus `clang -###` to identify actual requirements.
 
@@ -153,6 +155,14 @@ Removal candidates, when proven unused:
 Do not remove tools based only on name.
 
 ## Stage D: minimize target libraries conservatively
+
+**Implementation:** build 4 first prunes the compiler resource-runtime side
+without touching the conservative mingw-w64/UCRT import-library set. It removes
+the complete Clang Linux runtime tree and every Windows Clang sanitizer,
+profiling, fuzzer, ORC, and unsupported-architecture archive, retaining only
+`lib/clang/23/lib/windows/libclang_rt.builtins-x86_64.a`. Run #165 showed
+these resource-runtime trees account for roughly **85 MiB** before this stage.
+Full Phase 5 validation is pending for Stage D.
 
 Candidates:
 

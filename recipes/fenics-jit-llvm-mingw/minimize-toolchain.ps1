@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$ToolchainRoot,
-    [ValidateSet("stage-a", "stage-b", "stage-c")][string]$Stage = "stage-c"
+    [ValidateSet("stage-a", "stage-b", "stage-c", "stage-d")][string]$Stage = "stage-d"
 )
 
 Set-StrictMode -Version Latest
@@ -235,40 +235,93 @@ function Invoke-StageC {
     }
 }
 
+
+function Invoke-StageD {
+    $clangRuntimeRoot = Join-Path $root "lib\clang\23\lib"
+    $linuxRuntime = Join-Path $clangRuntimeRoot "linux"
+    $windowsRuntime = Join-Path $clangRuntimeRoot "windows"
+
+    # This package targets x86-64 Windows only. Linux compiler runtimes and
+    # Windows sanitizer/profiling/fuzzer/unsupported-architecture runtimes are
+    # not part of ordinary FFCx C compilation. Keep only the compiler-rt
+    # builtins archive used by the x86-64 Windows Clang driver.
+    Remove-PayloadTree -Path $linuxRuntime -RemovalStage "stage-d" -Group "non-windows-clang-runtime"
+
+    if (-not (Test-Path -LiteralPath $windowsRuntime -PathType Container)) {
+        throw "Clang Windows runtime directory missing: $windowsRuntime"
+    }
+
+    $requiredBuiltins = "libclang_rt.builtins-x86_64.a"
+    foreach ($file in @(Get-ChildItem -LiteralPath $windowsRuntime -Recurse -File | Sort-Object FullName)) {
+        if ($file.Name -ne $requiredBuiltins) {
+            Remove-PayloadFile -File $file -RemovalStage "stage-d" -Group "unused-clang-runtime"
+        }
+    }
+
+    if (Test-Path -LiteralPath $linuxRuntime) {
+        throw "Linux Clang runtime tree remains after Stage D: $linuxRuntime"
+    }
+
+    $builtins = Join-Path $windowsRuntime $requiredBuiltins
+    if (-not (Test-Path -LiteralPath $builtins -PathType Leaf)) {
+        throw "Required x86-64 compiler-rt builtins missing after Stage D: $builtins"
+    }
+
+    $remaining = @(Get-ChildItem -LiteralPath $windowsRuntime -Recurse -File)
+    if ($remaining.Count -ne 1 -or $remaining[0].Name -ne $requiredBuiltins) {
+        throw "Unexpected Clang Windows runtimes remain after Stage D: $($remaining.FullName -join ', ')"
+    }
+}
+
 $before = Get-PayloadStats
+
 Invoke-StageA
 $afterStageA = Get-PayloadStats
 
-if ($Stage -in @("stage-b", "stage-c")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d")) {
     Invoke-StageB
 }
 $afterStageB = Get-PayloadStats
 
-if ($Stage -eq "stage-c") {
+if ($Stage -in @("stage-c", "stage-d")) {
     Invoke-StageC
+}
+$afterStageC = Get-PayloadStats
+
+if ($Stage -eq "stage-d") {
+    Invoke-StageD
 }
 $after = Get-PayloadStats
 
-$removedBytes = ($removed | Measure-Object bytes -Sum).Sum
-if ($null -eq $removedBytes) { $removedBytes = 0 }
 $stageARemoved = @($removed | Where-Object { $_.stage -eq "stage-a" })
 $stageBRemoved = @($removed | Where-Object { $_.stage -eq "stage-b" })
 $stageCRemoved = @($removed | Where-Object { $_.stage -eq "stage-c" })
-$stageARemovedBytes = ($stageARemoved | Measure-Object bytes -Sum).Sum
-$stageBRemovedBytes = ($stageBRemoved | Measure-Object bytes -Sum).Sum
-$stageCRemovedBytes = ($stageCRemoved | Measure-Object bytes -Sum).Sum
-if ($null -eq $stageARemovedBytes) { $stageARemovedBytes = 0 }
-if ($null -eq $stageBRemovedBytes) { $stageBRemovedBytes = 0 }
-if ($null -eq $stageCRemovedBytes) { $stageCRemovedBytes = 0 }
+$stageDRemoved = @($removed | Where-Object { $_.stage -eq "stage-d" })
+
+function Get-RemovedBytes {
+    param([object[]]$Items)
+    $value = ($Items | Measure-Object bytes -Sum).Sum
+    if ($null -eq $value) { return [int64]0 }
+    return [int64]$value
+}
+
+$stageARemovedBytes = Get-RemovedBytes $stageARemoved
+$stageBRemovedBytes = Get-RemovedBytes $stageBRemoved
+$stageCRemovedBytes = Get-RemovedBytes $stageCRemoved
+$stageDRemovedBytes = Get-RemovedBytes $stageDRemoved
+$removedBytes = Get-RemovedBytes $removed
 
 if ($stageARemoved.Count -eq 0) {
     throw "Stage A removed no unsupported target aliases; upstream layout may have changed"
 }
-if ($Stage -in @("stage-b", "stage-c") -and $stageBRemoved.Count -eq 0) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d") -and $stageBRemoved.Count -eq 0) {
     throw "Stage B removed no C++ payload; upstream layout may have changed"
 }
-if ($Stage -eq "stage-c" -and $stageCRemoved.Count -eq 0) {
+if ($Stage -in @("stage-c", "stage-d") -and $stageCRemoved.Count -eq 0) {
     throw "Stage C removed no unused LLVM tools; upstream layout may have changed"
+}
+if ($Stage -eq "stage-d" -and $stageDRemoved.Count -eq 0) {
+    throw "Stage D removed no unused Clang runtimes; upstream layout may have changed"
 }
 
 $report = [ordered]@{
@@ -279,6 +332,8 @@ $report = [ordered]@{
     after_stage_a_bytes = $afterStageA.bytes
     after_stage_b_file_count = $afterStageB.file_count
     after_stage_b_bytes = $afterStageB.bytes
+    after_stage_c_file_count = $afterStageC.file_count
+    after_stage_c_bytes = $afterStageC.bytes
     after_file_count = $after.file_count
     after_bytes = $after.bytes
     removed_file_count = $removed.Count
@@ -289,6 +344,8 @@ $report = [ordered]@{
     stage_b_removed_bytes = [int64]$stageBRemovedBytes
     stage_c_removed_file_count = $stageCRemoved.Count
     stage_c_removed_bytes = [int64]$stageCRemovedBytes
+    stage_d_removed_file_count = $stageDRemoved.Count
+    stage_d_removed_bytes = [int64]$stageDRemovedBytes
     removed = $removed
 }
 $reportPath = Join-Path $root "minimization-$Stage.json"
@@ -297,19 +354,26 @@ $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encodi
 Write-Host "LLVM-MinGW minimization $Stage"
 Write-Host "  Stage A removed files: $($stageARemoved.Count)"
 Write-Host "  Stage A removed MiB: $([math]::Round($stageARemovedBytes / 1MB, 2))"
-if ($Stage -in @("stage-b", "stage-c")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d")) {
     Write-Host "  Stage B removed files: $($stageBRemoved.Count)"
     Write-Host "  Stage B removed MiB: $([math]::Round($stageBRemovedBytes / 1MB, 2))"
 }
-if ($Stage -eq "stage-c") {
+if ($Stage -in @("stage-c", "stage-d")) {
     Write-Host "  Stage C removed files: $($stageCRemoved.Count)"
     Write-Host "  Stage C removed MiB: $([math]::Round($stageCRemovedBytes / 1MB, 2))"
+}
+if ($Stage -eq "stage-d") {
+    Write-Host "  Stage D removed files: $($stageDRemoved.Count)"
+    Write-Host "  Stage D removed MiB: $([math]::Round($stageDRemovedBytes / 1MB, 2))"
 }
 Write-Host "  cumulative removed files: $($removed.Count)"
 Write-Host "  cumulative removed MiB: $([math]::Round($removedBytes / 1MB, 2))"
 Write-Host "  payload MiB before: $([math]::Round($before.bytes / 1MB, 2))"
 Write-Host "  payload MiB after Stage A: $([math]::Round($afterStageA.bytes / 1MB, 2))"
-if ($Stage -in @("stage-b", "stage-c")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d")) {
     Write-Host "  payload MiB after Stage B: $([math]::Round($afterStageB.bytes / 1MB, 2))"
+}
+if ($Stage -in @("stage-c", "stage-d")) {
+    Write-Host "  payload MiB after Stage C: $([math]::Round($afterStageC.bytes / 1MB, 2))"
 }
 Write-Host "  payload MiB after: $([math]::Round($after.bytes / 1MB, 2))"

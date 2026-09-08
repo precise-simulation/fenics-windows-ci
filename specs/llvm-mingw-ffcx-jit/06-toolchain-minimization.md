@@ -162,7 +162,9 @@ the complete Clang Linux runtime tree and every Windows Clang sanitizer,
 profiling, fuzzer, ORC, and unsupported-architecture archive, retaining only
 `lib/clang/23/lib/windows/libclang_rt.builtins-x86_64.a`. Run #165 showed
 these resource-runtime trees account for roughly **85 MiB** before this stage.
-Full Phase 5 validation is pending for Stage D.
+Stack run #166 (`34175304551`) passed the complete Phase 5 gate. Stage D
+removed **118 files / 84.92 MiB**; the package is now **301.02 MiB installed /
+56.70 MiB compressed**.
 
 Candidates:
 
@@ -175,6 +177,12 @@ Candidates:
 Keep UCRT/mingw-w64 C headers and import libraries conservative unless size measurements show a compelling benefit. Future FFCx-generated C may exercise standard-library functions absent from a minimal Poisson case.
 
 ## Stage E: strip shipped binaries
+
+**Implementation:** build 5 temporarily retains `llvm-strip.exe` during
+minimization, applies `llvm-strip --strip-debug` to the retained PE
+executables and DLLs in the compiler and x86-64 target runtime `bin` trees,
+records per-file before/after sizes, verifies no file grows, and then removes
+`llvm-strip.exe` from the package. Full Phase 5 validation is pending.
 
 Strip compiler/linker binaries during package construction where safe.
 

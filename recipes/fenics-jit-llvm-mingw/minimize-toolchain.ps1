@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$ToolchainRoot,
-    [ValidateSet("stage-a", "stage-b", "stage-c", "stage-d")][string]$Stage = "stage-d"
+    [ValidateSet("stage-a", "stage-b", "stage-c", "stage-d", "stage-e")][string]$Stage = "stage-e"
 )
 
 Set-StrictMode -Version Latest
@@ -187,6 +187,10 @@ function Invoke-StageC {
         "llvm-readobj.exe",
         "llvm-dlltool.exe"
     )
+    if ($Stage -eq "stage-e") {
+        # Build-only: Stage E uses llvm-strip and removes it before packaging.
+        $keepExecutables += "llvm-strip.exe"
+    }
     $keepSet = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::OrdinalIgnoreCase
     )
@@ -273,23 +277,80 @@ function Invoke-StageD {
     }
 }
 
+
+$stripped = @()
+
+function Invoke-StageE {
+    $bin = Join-Path $root "bin"
+    $targetBin = Join-Path $root "x86_64-w64-mingw32\bin"
+    $strip = Join-Path $bin "llvm-strip.exe"
+    if (-not (Test-Path -LiteralPath $strip -PathType Leaf)) {
+        throw "Build-only llvm-strip missing before Stage E: $strip"
+    }
+
+    $targets = @()
+    foreach ($dir in @($bin, $targetBin)) {
+        if (Test-Path -LiteralPath $dir -PathType Container) {
+            $targets += @(
+                Get-ChildItem -LiteralPath $dir -File |
+                    Where-Object {
+                        ($_.Extension -ieq ".exe" -or $_.Extension -ieq ".dll") -and
+                        $_.FullName -ne $strip
+                    }
+            )
+        }
+    }
+
+    foreach ($file in @($targets | Sort-Object FullName -Unique)) {
+        $beforeBytes = [int64]$file.Length
+        & $strip --strip-debug $file.FullName
+        if ($LASTEXITCODE -ne 0) {
+            throw "llvm-strip --strip-debug failed for $($file.FullName)"
+        }
+        $afterFile = Get-Item -LiteralPath $file.FullName
+        $afterBytes = [int64]$afterFile.Length
+        if ($afterBytes -gt $beforeBytes) {
+            throw "Stripping increased file size for $($file.FullName): $beforeBytes -> $afterBytes"
+        }
+        $relative = $file.FullName.Substring($root.Length).TrimStart("\").Replace("\", "/")
+        $script:stripped += [pscustomobject]@{
+            path = $relative
+            before_bytes = $beforeBytes
+            after_bytes = $afterBytes
+            saved_bytes = [int64]($beforeBytes - $afterBytes)
+        }
+    }
+
+    # llvm-strip is required only while constructing Stage E.
+    Remove-PayloadFile -File (Get-Item -LiteralPath $strip) -RemovalStage "stage-e" -Group "build-only-strip-tool"
+
+    if (Test-Path -LiteralPath $strip) {
+        throw "Build-only llvm-strip remains after Stage E: $strip"
+    }
+}
+
 $before = Get-PayloadStats
 
 Invoke-StageA
 $afterStageA = Get-PayloadStats
 
-if ($Stage -in @("stage-b", "stage-c", "stage-d")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e")) {
     Invoke-StageB
 }
 $afterStageB = Get-PayloadStats
 
-if ($Stage -in @("stage-c", "stage-d")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e")) {
     Invoke-StageC
 }
 $afterStageC = Get-PayloadStats
 
-if ($Stage -eq "stage-d") {
+if ($Stage -in @("stage-d", "stage-e")) {
     Invoke-StageD
+}
+$afterStageD = Get-PayloadStats
+
+if ($Stage -eq "stage-e") {
+    Invoke-StageE
 }
 $after = Get-PayloadStats
 
@@ -297,6 +358,7 @@ $stageARemoved = @($removed | Where-Object { $_.stage -eq "stage-a" })
 $stageBRemoved = @($removed | Where-Object { $_.stage -eq "stage-b" })
 $stageCRemoved = @($removed | Where-Object { $_.stage -eq "stage-c" })
 $stageDRemoved = @($removed | Where-Object { $_.stage -eq "stage-d" })
+$stageERemoved = @($removed | Where-Object { $_.stage -eq "stage-e" })
 
 function Get-RemovedBytes {
     param([object[]]$Items)
@@ -309,19 +371,28 @@ $stageARemovedBytes = Get-RemovedBytes $stageARemoved
 $stageBRemovedBytes = Get-RemovedBytes $stageBRemoved
 $stageCRemovedBytes = Get-RemovedBytes $stageCRemoved
 $stageDRemovedBytes = Get-RemovedBytes $stageDRemoved
+$stageERemovedBytes = Get-RemovedBytes $stageERemoved
 $removedBytes = Get-RemovedBytes $removed
+$strippedBytesSaved = Get-RemovedBytes @(
+    $stripped | ForEach-Object {
+        [pscustomobject]@{ bytes = [int64]$_.saved_bytes }
+    }
+)
 
 if ($stageARemoved.Count -eq 0) {
     throw "Stage A removed no unsupported target aliases; upstream layout may have changed"
 }
-if ($Stage -in @("stage-b", "stage-c", "stage-d") -and $stageBRemoved.Count -eq 0) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e") -and $stageBRemoved.Count -eq 0) {
     throw "Stage B removed no C++ payload; upstream layout may have changed"
 }
-if ($Stage -in @("stage-c", "stage-d") -and $stageCRemoved.Count -eq 0) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e") -and $stageCRemoved.Count -eq 0) {
     throw "Stage C removed no unused LLVM tools; upstream layout may have changed"
 }
-if ($Stage -eq "stage-d" -and $stageDRemoved.Count -eq 0) {
+if ($Stage -in @("stage-d", "stage-e") -and $stageDRemoved.Count -eq 0) {
     throw "Stage D removed no unused Clang runtimes; upstream layout may have changed"
+}
+if ($Stage -eq "stage-e" -and $stageERemoved.Count -eq 0) {
+    throw "Stage E did not remove its build-only stripping tool"
 }
 
 $report = [ordered]@{
@@ -334,6 +405,8 @@ $report = [ordered]@{
     after_stage_b_bytes = $afterStageB.bytes
     after_stage_c_file_count = $afterStageC.file_count
     after_stage_c_bytes = $afterStageC.bytes
+    after_stage_d_file_count = $afterStageD.file_count
+    after_stage_d_bytes = $afterStageD.bytes
     after_file_count = $after.file_count
     after_bytes = $after.bytes
     removed_file_count = $removed.Count
@@ -346,6 +419,11 @@ $report = [ordered]@{
     stage_c_removed_bytes = [int64]$stageCRemovedBytes
     stage_d_removed_file_count = $stageDRemoved.Count
     stage_d_removed_bytes = [int64]$stageDRemovedBytes
+    stage_e_removed_file_count = $stageERemoved.Count
+    stage_e_removed_bytes = [int64]$stageERemovedBytes
+    stage_e_stripped_file_count = $stripped.Count
+    stage_e_stripped_bytes_saved = [int64]$strippedBytesSaved
+    stripped = $stripped
     removed = $removed
 }
 $reportPath = Join-Path $root "minimization-$Stage.json"
@@ -354,26 +432,34 @@ $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encodi
 Write-Host "LLVM-MinGW minimization $Stage"
 Write-Host "  Stage A removed files: $($stageARemoved.Count)"
 Write-Host "  Stage A removed MiB: $([math]::Round($stageARemovedBytes / 1MB, 2))"
-if ($Stage -in @("stage-b", "stage-c", "stage-d")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e")) {
     Write-Host "  Stage B removed files: $($stageBRemoved.Count)"
     Write-Host "  Stage B removed MiB: $([math]::Round($stageBRemovedBytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-c", "stage-d")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e")) {
     Write-Host "  Stage C removed files: $($stageCRemoved.Count)"
     Write-Host "  Stage C removed MiB: $([math]::Round($stageCRemovedBytes / 1MB, 2))"
 }
-if ($Stage -eq "stage-d") {
+if ($Stage -in @("stage-d", "stage-e")) {
     Write-Host "  Stage D removed files: $($stageDRemoved.Count)"
     Write-Host "  Stage D removed MiB: $([math]::Round($stageDRemovedBytes / 1MB, 2))"
+}
+if ($Stage -eq "stage-e") {
+    Write-Host "  Stage E stripped files: $($stripped.Count)"
+    Write-Host "  Stage E stripped MiB saved: $([math]::Round($strippedBytesSaved / 1MB, 2))"
+    Write-Host "  Stage E removed build-only MiB: $([math]::Round($stageERemovedBytes / 1MB, 2))"
 }
 Write-Host "  cumulative removed files: $($removed.Count)"
 Write-Host "  cumulative removed MiB: $([math]::Round($removedBytes / 1MB, 2))"
 Write-Host "  payload MiB before: $([math]::Round($before.bytes / 1MB, 2))"
 Write-Host "  payload MiB after Stage A: $([math]::Round($afterStageA.bytes / 1MB, 2))"
-if ($Stage -in @("stage-b", "stage-c", "stage-d")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e")) {
     Write-Host "  payload MiB after Stage B: $([math]::Round($afterStageB.bytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-c", "stage-d")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e")) {
     Write-Host "  payload MiB after Stage C: $([math]::Round($afterStageC.bytes / 1MB, 2))"
+}
+if ($Stage -in @("stage-d", "stage-e")) {
+    Write-Host "  payload MiB after Stage D: $([math]::Round($afterStageD.bytes / 1MB, 2))"
 }
 Write-Host "  payload MiB after: $([math]::Round($after.bytes / 1MB, 2))"

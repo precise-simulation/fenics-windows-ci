@@ -482,7 +482,7 @@ if ($Stage -in @("stage-e", "stage-f", "stage-g", "stage-h")) {
 }
 $afterStageE = Get-PayloadStats
 
-if ($Stage -in @("stage-f", "stage-g")) {
+if ($Stage -in @("stage-f", "stage-g", "stage-h")) {
     Invoke-StageF
 }
 $afterStageF = Get-PayloadStats
@@ -543,7 +543,7 @@ if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g", "stage-h") -and $st
 if ($Stage -in @("stage-e", "stage-f", "stage-g", "stage-h") -and $stageERemoved.Count -eq 0) {
     throw "Stage E did not remove its build-only stripping tool"
 }
-if ($Stage -in @("stage-f", "stage-g") -and $stageFRemoved.Count -eq 0) {
+if ($Stage -in @("stage-f", "stage-g", "stage-h") -and $stageFRemoved.Count -eq 0) {
     throw "Stage F removed no measured-unobserved mshtml* headers"
 }
 if ($Stage -in @("stage-g", "stage-h") -and $stageGRemoved.Count -eq 0) {
@@ -619,7 +619,7 @@ if ($Stage -in @("stage-e", "stage-f", "stage-g", "stage-h")) {
     Write-Host "  Stage E stripped MiB saved: $([math]::Round($strippedBytesSaved / 1MB, 2))"
     Write-Host "  Stage E removed build-only MiB: $([math]::Round($stageERemovedBytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-f", "stage-g")) {
+if ($Stage -in @("stage-f", "stage-g", "stage-h")) {
     Write-Host "  Stage F removed files: $($stageFRemoved.Count)"
     Write-Host "  Stage F removed MiB: $([math]::Round($stageFRemovedBytes / 1MB, 2))"
 }

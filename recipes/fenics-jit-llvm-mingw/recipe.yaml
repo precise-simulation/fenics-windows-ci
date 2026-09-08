@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 7
+  build: 8
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -41,8 +41,9 @@ about:
     FEniCS FFCx/CFFI JIT. Phase 6 minimization is applied reproducibly during
     package construction; build 5 strips debug information from retained PE
     compiler/runtime binaries, build 6 prunes the measured-unobserved legacy
-    mshtml* Windows header family, and build 7 additionally prunes the measured-
-    unobserved Direct3D/DXGI header family.
+    mshtml* Windows header family, build 7 prunes the measured-unobserved
+    Direct3D/DXGI header family, and build 8 additionally prunes the measured-
+    unobserved Direct2D/DirectWrite header family.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

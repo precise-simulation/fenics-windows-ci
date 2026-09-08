@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$ToolchainRoot,
-    [ValidateSet("stage-a", "stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g")][string]$Stage = "stage-g"
+    [ValidateSet("stage-a", "stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h")][string]$Stage = "stage-h"
 )
 
 Set-StrictMode -Version Latest
@@ -187,7 +187,7 @@ function Invoke-StageC {
         "llvm-readobj.exe",
         "llvm-dlltool.exe"
     )
-    if ($Stage -in @("stage-e", "stage-f", "stage-g")) {
+    if ($Stage -in @("stage-e", "stage-f", "stage-g", "stage-h")) {
         # Build-only: Stage E uses llvm-strip and removes it before packaging.
         $keepExecutables += "llvm-strip.exe"
     }
@@ -421,27 +421,63 @@ function Invoke-StageG {
     }
 }
 
+function Invoke-StageH {
+    $include = Join-Path $root "include"
+    if (-not (Test-Path -LiteralPath $include -PathType Container)) {
+        throw "LLVM-MinGW root include directory missing: $include"
+    }
+
+    # Run #179 requalified Stage G and measured this entire Direct2D/DirectWrite
+    # family as unobserved across the 27 Phase 5 dependency closures.
+    $matches = @(
+        Get-ChildItem -LiteralPath $include -File |
+            Where-Object {
+                $_.Name -like "d2d*" -or
+                $_.Name -like "dwrite*"
+            } |
+            Sort-Object Name
+    )
+    if ($matches.Count -eq 0) {
+        throw "Stage H found no Direct2D/DirectWrite headers; upstream layout may have changed"
+    }
+
+    foreach ($file in $matches) {
+        Remove-PayloadFile -File $file -RemovalStage "stage-h" -Group "unobserved-direct2d-directwrite-headers"
+    }
+
+    $remaining = @(
+        Get-ChildItem -LiteralPath $include -File |
+            Where-Object {
+                $_.Name -like "d2d*" -or
+                $_.Name -like "dwrite*"
+            }
+    )
+    if ($remaining.Count -ne 0) {
+        throw "Stage H Direct2D/DirectWrite headers remain: $($remaining.Name -join ', ')"
+    }
+}
+
 $before = Get-PayloadStats
 
 Invoke-StageA
 $afterStageA = Get-PayloadStats
 
-if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Invoke-StageB
 }
 $afterStageB = Get-PayloadStats
 
-if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Invoke-StageC
 }
 $afterStageC = Get-PayloadStats
 
-if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Invoke-StageD
 }
 $afterStageD = Get-PayloadStats
 
-if ($Stage -in @("stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-e", "stage-f", "stage-g", "stage-h")) {
     Invoke-StageE
 }
 $afterStageE = Get-PayloadStats
@@ -451,8 +487,13 @@ if ($Stage -in @("stage-f", "stage-g")) {
 }
 $afterStageF = Get-PayloadStats
 
-if ($Stage -eq "stage-g") {
+if ($Stage -in @("stage-g", "stage-h")) {
     Invoke-StageG
+}
+$afterStageG = Get-PayloadStats
+
+if ($Stage -eq "stage-h") {
+    Invoke-StageH
 }
 $after = Get-PayloadStats
 
@@ -463,6 +504,7 @@ $stageDRemoved = @($removed | Where-Object { $_.stage -eq "stage-d" })
 $stageERemoved = @($removed | Where-Object { $_.stage -eq "stage-e" })
 $stageFRemoved = @($removed | Where-Object { $_.stage -eq "stage-f" })
 $stageGRemoved = @($removed | Where-Object { $_.stage -eq "stage-g" })
+$stageHRemoved = @($removed | Where-Object { $_.stage -eq "stage-h" })
 
 function Get-RemovedBytes {
     param([object[]]$Items)
@@ -478,6 +520,7 @@ $stageDRemovedBytes = Get-RemovedBytes $stageDRemoved
 $stageERemovedBytes = Get-RemovedBytes $stageERemoved
 $stageFRemovedBytes = Get-RemovedBytes $stageFRemoved
 $stageGRemovedBytes = Get-RemovedBytes $stageGRemoved
+$stageHRemovedBytes = Get-RemovedBytes $stageHRemoved
 $removedBytes = Get-RemovedBytes $removed
 $strippedBytesSaved = Get-RemovedBytes @(
     $stripped | ForEach-Object {
@@ -488,23 +531,26 @@ $strippedBytesSaved = Get-RemovedBytes @(
 if ($stageARemoved.Count -eq 0) {
     throw "Stage A removed no unsupported target aliases; upstream layout may have changed"
 }
-if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g") -and $stageBRemoved.Count -eq 0) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h") -and $stageBRemoved.Count -eq 0) {
     throw "Stage B removed no C++ payload; upstream layout may have changed"
 }
-if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g") -and $stageCRemoved.Count -eq 0) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h") -and $stageCRemoved.Count -eq 0) {
     throw "Stage C removed no unused LLVM tools; upstream layout may have changed"
 }
-if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g") -and $stageDRemoved.Count -eq 0) {
+if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g", "stage-h") -and $stageDRemoved.Count -eq 0) {
     throw "Stage D removed no unused Clang runtimes; upstream layout may have changed"
 }
-if ($Stage -in @("stage-e", "stage-f", "stage-g") -and $stageERemoved.Count -eq 0) {
+if ($Stage -in @("stage-e", "stage-f", "stage-g", "stage-h") -and $stageERemoved.Count -eq 0) {
     throw "Stage E did not remove its build-only stripping tool"
 }
 if ($Stage -in @("stage-f", "stage-g") -and $stageFRemoved.Count -eq 0) {
     throw "Stage F removed no measured-unobserved mshtml* headers"
 }
-if ($Stage -eq "stage-g" -and $stageGRemoved.Count -eq 0) {
+if ($Stage -in @("stage-g", "stage-h") -and $stageGRemoved.Count -eq 0) {
     throw "Stage G removed no measured-unobserved Direct3D/DXGI headers"
+}
+if ($Stage -eq "stage-h" -and $stageHRemoved.Count -eq 0) {
+    throw "Stage H removed no measured-unobserved Direct2D/DirectWrite headers"
 }
 
 $report = [ordered]@{
@@ -523,6 +569,8 @@ $report = [ordered]@{
     after_stage_e_bytes = $afterStageE.bytes
     after_stage_f_file_count = $afterStageF.file_count
     after_stage_f_bytes = $afterStageF.bytes
+    after_stage_g_file_count = $afterStageG.file_count
+    after_stage_g_bytes = $afterStageG.bytes
     after_file_count = $after.file_count
     after_bytes = $after.bytes
     removed_file_count = $removed.Count
@@ -543,6 +591,8 @@ $report = [ordered]@{
     stage_f_removed_bytes = [int64]$stageFRemovedBytes
     stage_g_removed_file_count = $stageGRemoved.Count
     stage_g_removed_bytes = [int64]$stageGRemovedBytes
+    stage_h_removed_file_count = $stageHRemoved.Count
+    stage_h_removed_bytes = [int64]$stageHRemovedBytes
     stripped = $stripped
     removed = $removed
 }
@@ -552,19 +602,19 @@ $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encodi
 Write-Host "LLVM-MinGW minimization $Stage"
 Write-Host "  Stage A removed files: $($stageARemoved.Count)"
 Write-Host "  Stage A removed MiB: $([math]::Round($stageARemovedBytes / 1MB, 2))"
-if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Write-Host "  Stage B removed files: $($stageBRemoved.Count)"
     Write-Host "  Stage B removed MiB: $([math]::Round($stageBRemovedBytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Write-Host "  Stage C removed files: $($stageCRemoved.Count)"
     Write-Host "  Stage C removed MiB: $([math]::Round($stageCRemovedBytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Write-Host "  Stage D removed files: $($stageDRemoved.Count)"
     Write-Host "  Stage D removed MiB: $([math]::Round($stageDRemovedBytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-e", "stage-f", "stage-g", "stage-h")) {
     Write-Host "  Stage E stripped files: $($stripped.Count)"
     Write-Host "  Stage E stripped MiB saved: $([math]::Round($strippedBytesSaved / 1MB, 2))"
     Write-Host "  Stage E removed build-only MiB: $([math]::Round($stageERemovedBytes / 1MB, 2))"
@@ -573,21 +623,25 @@ if ($Stage -in @("stage-f", "stage-g")) {
     Write-Host "  Stage F removed files: $($stageFRemoved.Count)"
     Write-Host "  Stage F removed MiB: $([math]::Round($stageFRemovedBytes / 1MB, 2))"
 }
-if ($Stage -eq "stage-g") {
+if ($Stage -in @("stage-g", "stage-h")) {
     Write-Host "  Stage G removed files: $($stageGRemoved.Count)"
     Write-Host "  Stage G removed MiB: $([math]::Round($stageGRemovedBytes / 1MB, 2))"
+}
+if ($Stage -eq "stage-h") {
+    Write-Host "  Stage H removed files: $($stageHRemoved.Count)"
+    Write-Host "  Stage H removed MiB: $([math]::Round($stageHRemovedBytes / 1MB, 2))"
 }
 Write-Host "  cumulative removed files: $($removed.Count)"
 Write-Host "  cumulative removed MiB: $([math]::Round($removedBytes / 1MB, 2))"
 Write-Host "  payload MiB before: $([math]::Round($before.bytes / 1MB, 2))"
 Write-Host "  payload MiB after Stage A: $([math]::Round($afterStageA.bytes / 1MB, 2))"
-if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Write-Host "  payload MiB after Stage B: $([math]::Round($afterStageB.bytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Write-Host "  payload MiB after Stage C: $([math]::Round($afterStageC.bytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g")) {
+if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g", "stage-h")) {
     Write-Host "  payload MiB after Stage D: $([math]::Round($afterStageD.bytes / 1MB, 2))"
 }
 Write-Host "  payload MiB after: $([math]::Round($after.bytes / 1MB, 2))"

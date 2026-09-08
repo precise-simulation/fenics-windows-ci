@@ -56,13 +56,45 @@ def _measurement_enabled() -> bool:
     return os.getenv("FENICS_JIT_MEASURE_CLOSURE", "").lower() in {"1", "true", "yes", "on"}
 
 
+def _render_command(cmd: object) -> str:
+    if isinstance(cmd, (list, tuple)):
+        return subprocess.list2cmdline([str(part) for part in cmd])
+    return str(cmd)
+
+
 def _is_packaged_clang_command(cmd: object) -> bool:
-    if not isinstance(cmd, (list, tuple)) or not cmd:
-        return False
-    return Path(str(cmd[0])).name.lower() in {
-        "x86_64-w64-mingw32-clang.exe",
-        "clang-23.exe",
-    }
+    if isinstance(cmd, (list, tuple)):
+        if not cmd:
+            return False
+        executable = Path(str(cmd[0])).name.lower()
+        return executable in {
+            "x86_64-w64-mingw32-clang.exe",
+            "clang-23.exe",
+        }
+
+    text = str(cmd).lower().replace("\\", "/")
+    return bool(
+        re.search(
+            r'(?:^|[/"\\\s])(?:x86_64-w64-mingw32-clang|clang-23)\.exe(?:["\s]|$)',
+            text,
+        )
+    )
+
+
+def _has_command_token(rendered: str, token: str) -> bool:
+    return bool(
+        re.search(
+            rf'(?i)(?:^|\s){re.escape(token)}(?=$|\s)',
+            rendered,
+        )
+    )
+
+
+def _append_command_args(cmd: object, extra: list[str]) -> object:
+    if isinstance(cmd, (list, tuple)):
+        return [str(part) for part in cmd] + extra
+    suffix = subprocess.list2cmdline(extra)
+    return f"{cmd} {suffix}"
 
 
 def _decode_subprocess_output(value: object) -> str:
@@ -87,28 +119,28 @@ def _record_check_calls(path: Path):
 
     def logged(cmd, *args, **kwargs):
         nonlocal call_index
-        instrumented = list(cmd) if isinstance(cmd, (list, tuple)) else cmd
+        instrumented = cmd
         trace_kind = None
         trace_path = None
+        original_rendered = _render_command(cmd)
 
-        if measurement and _is_packaged_clang_command(cmd) and isinstance(instrumented, list):
+        if measurement and _is_packaged_clang_command(cmd):
             call_index += 1
-            instrumented = [str(part) for part in instrumented]
             stem = f"{path.stem}-{call_index:03d}"
-            if "-c" in instrumented:
+            if _has_command_token(original_rendered, "-c"):
                 trace_kind = "header"
                 depfile = trace_root / f"{stem}.d"
                 trace_path = trace_root / f"{stem}-header-trace.txt"
-                instrumented.extend(["-H", "-MD", "-MF", str(depfile)])
-            elif "-shared" in instrumented:
+                instrumented = _append_command_args(
+                    cmd,
+                    ["-H", "-MD", "-MF", str(depfile)],
+                )
+            elif _has_command_token(original_rendered, "-shared"):
                 trace_kind = "linker"
                 trace_path = trace_root / f"{stem}-linker-trace.txt"
-                instrumented.append("-Wl,--trace")
+                instrumented = _append_command_args(cmd, ["-Wl,--trace"])
 
-        if isinstance(instrumented, list):
-            rendered = subprocess.list2cmdline([str(part) for part in instrumented])
-        else:
-            rendered = str(instrumented)
+        rendered = _render_command(instrumented)
         calls.append(rendered)
         with path.open("a", encoding="utf-8") as stream:
             stream.write(rendered + "\n")

@@ -451,6 +451,15 @@ def build_closure_report(phase5_root: Path, output_dir: Path) -> None:
     headers = _header_report(phase5_root, output_dir, size)
     libraries = _library_report(phase5_root, output_dir, size)
 
+    if headers["compile_trace_count"] == 0:
+        raise RuntimeError(
+            "Phase 5 header closure measurement produced zero compiler traces"
+        )
+    if libraries["link_trace_count"] == 0:
+        raise RuntimeError(
+            "Phase 5 library closure measurement produced zero linker traces"
+        )
+
     summary = {
         "measurement_only": True,
         "phase5_root": str(phase5_root.resolve()),

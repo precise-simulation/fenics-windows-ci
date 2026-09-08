@@ -72,6 +72,22 @@ HEADER_CANDIDATE_FAMILIES = {
         "include/windows.ui*",
         "include/windows.web*",
     ),
+    "winrt_applicationmodel": ("include/windows.applicationmodel*",),
+    "winrt_data": ("include/windows.data*",),
+    "winrt_devices": ("include/windows.devices*",),
+    "winrt_foundation": ("include/windows.foundation*",),
+    "winrt_gaming": ("include/windows.gaming*",),
+    "winrt_globalization": ("include/windows.globalization*",),
+    "winrt_graphics": ("include/windows.graphics*",),
+    "winrt_management": ("include/windows.management*",),
+    "winrt_media": ("include/windows.media*",),
+    "winrt_networking": ("include/windows.networking*",),
+    "winrt_security": ("include/windows.security*",),
+    "winrt_services": ("include/windows.services*",),
+    "winrt_storage": ("include/windows.storage*",),
+    "winrt_system": ("include/windows.system*",),
+    "winrt_ui": ("include/windows.ui*",),
+    "winrt_web": ("include/windows.web*",),
 }
 
 LIBRARY_SAFETY_SET = {

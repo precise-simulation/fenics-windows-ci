@@ -79,6 +79,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m py_compile scripts/llvm-mingw-jit/phase5-functional-validation.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m py_compile scripts/llvm-mingw-jit/report-minimization-measurements.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s scripts -p "test_*.py"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

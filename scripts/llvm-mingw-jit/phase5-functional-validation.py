@@ -52,29 +52,98 @@ def _poison_compiler_environment(root: Path) -> None:
     )
 
 
+def _measurement_enabled() -> bool:
+    return os.getenv("FENICS_JIT_MEASURE_CLOSURE", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _is_packaged_clang_command(cmd: object) -> bool:
+    if not isinstance(cmd, (list, tuple)) or not cmd:
+        return False
+    return Path(str(cmd[0])).name.lower() in {
+        "x86_64-w64-mingw32-clang.exe",
+        "clang-23.exe",
+    }
+
+
+def _decode_subprocess_output(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return str(value)
+
+
 @contextlib.contextmanager
 def _record_check_calls(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("", encoding="utf-8")
     calls: list[str] = []
     original = subprocess.check_call
+    measurement = _measurement_enabled()
+    trace_root = path.parent / "closure traces"
+    if measurement:
+        trace_root.mkdir(parents=True, exist_ok=True)
+    call_index = 0
 
     def logged(cmd, *args, **kwargs):
-        if isinstance(cmd, (list, tuple)):
-            rendered = subprocess.list2cmdline([str(part) for part in cmd])
+        nonlocal call_index
+        instrumented = list(cmd) if isinstance(cmd, (list, tuple)) else cmd
+        trace_kind = None
+        trace_path = None
+
+        if measurement and _is_packaged_clang_command(cmd) and isinstance(instrumented, list):
+            call_index += 1
+            instrumented = [str(part) for part in instrumented]
+            stem = f"{path.stem}-{call_index:03d}"
+            if "-c" in instrumented:
+                trace_kind = "header"
+                depfile = trace_root / f"{stem}.d"
+                trace_path = trace_root / f"{stem}-header-trace.txt"
+                instrumented.extend(["-H", "-MD", "-MF", str(depfile)])
+            elif "-shared" in instrumented:
+                trace_kind = "linker"
+                trace_path = trace_root / f"{stem}-linker-trace.txt"
+                instrumented.append("-Wl,--trace")
+
+        if isinstance(instrumented, list):
+            rendered = subprocess.list2cmdline([str(part) for part in instrumented])
         else:
-            rendered = str(cmd)
+            rendered = str(instrumented)
         calls.append(rendered)
         with path.open("a", encoding="utf-8") as stream:
             stream.write(rendered + "\n")
-        return original(cmd, *args, **kwargs)
+
+        if trace_kind is None or args:
+            return original(instrumented, *args, **kwargs)
+
+        run_kwargs = dict(kwargs)
+        run_kwargs.setdefault("stdout", subprocess.PIPE)
+        run_kwargs.setdefault("stderr", subprocess.PIPE)
+        run_kwargs.setdefault("text", True)
+        result = subprocess.run(instrumented, check=False, **run_kwargs)
+        stdout = _decode_subprocess_output(result.stdout)
+        stderr = _decode_subprocess_output(result.stderr)
+        assert trace_path is not None
+        trace_path.write_text(stdout + stderr, encoding="utf-8")
+
+        if result.returncode:
+            if stdout:
+                sys.stdout.write(stdout)
+            if stderr:
+                sys.stderr.write(stderr)
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                instrumented,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
+        return 0
 
     subprocess.check_call = logged
     try:
         yield calls
     finally:
         subprocess.check_call = original
-
 
 def _load_runtime():
     runtime_path = Path(sys.prefix) / "Library" / "fenics-jit" / "runtime" / "fenics_jit_runtime.py"

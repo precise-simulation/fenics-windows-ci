@@ -6,11 +6,19 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path (Split-Path $PSScriptRoot)
 $output = Join-Path $root "output"
 $logRoot = Join-Path $root "build-logs\phase5"
+$measurementRoot = Join-Path $root "build-logs\phase6-minimization"
 $script = Join-Path $PSScriptRoot "phase5-functional-validation.py"
+$measurementScript = Join-Path $PSScriptRoot "report-minimization-measurements.py"
 New-Item -ItemType Directory -Force $logRoot | Out-Null
+Remove-Item -Recurse -Force $measurementRoot -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $measurementRoot | Out-Null
+$env:FENICS_JIT_MEASURE_CLOSURE = "1"
 
 if (-not (Test-Path $script)) {
     throw "Phase 5 Python validation script missing: $script"
+}
+if (-not (Test-Path $measurementScript)) {
+    throw "Minimization measurement script missing: $measurementScript"
 }
 
 $channels = @()
@@ -72,6 +80,15 @@ foreach ($pythonVersion in @("3.12.*", "3.13.*", "3.14.*")) {
             }
         }
 
+        $sizeReport = Join-Path $measurementRoot "retained-size-report.json"
+        if (-not (Test-Path $sizeReport)) {
+            $toolchainRoot = Join-Path $prefix "Library\fenics-jit"
+            & python $measurementScript --toolchain-root $toolchainRoot --output-dir $measurementRoot
+            if ($LASTEXITCODE -ne 0) {
+                throw "Retained LLVM-MinGW size measurement failed"
+            }
+        }
+
         Invoke-Micromamba -Arguments @(
             "run", "-p", $prefix, "python", $script,
             "--mode", "serial",
@@ -97,6 +114,7 @@ foreach ($pythonVersion in @("3.12.*", "3.13.*", "3.14.*")) {
             "-env", "PATH", $mpiPath,
             "-env", "PYTHONPATH", $pythonPath,
             "-env", "FENICS_JIT_VERBOSE", "1",
+            "-env", "FENICS_JIT_MEASURE_CLOSURE", "1",
             $python, $script,
             "--mode", "mpi",
             "--cache-dir", $mpiCache,
@@ -115,5 +133,11 @@ foreach ($pythonVersion in @("3.12.*", "3.13.*", "3.14.*")) {
         }
     }
 }
+
+& python $measurementScript --phase5-root $logRoot --output-dir $measurementRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "Phase 5 minimization closure aggregation failed"
+}
+Get-Content (Join-Path $measurementRoot "closure-summary.json")
 
 Write-Host "Phase 5 functional matrix passed on Python 3.12-3.14"

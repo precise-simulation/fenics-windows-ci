@@ -72,7 +72,7 @@ $minimizer = Join-Path $PSScriptRoot "minimize-toolchain.ps1"
 if (-not (Test-Path $minimizer)) {
     throw "Phase 6 minimization script missing from recipe: $minimizer"
 }
-& $minimizer -ToolchainRoot $destination -Stage "stage-f"
+& $minimizer -ToolchainRoot $destination -Stage "stage-g"
 
 $runtimeDir = Join-Path $destination "runtime"
 New-Item -ItemType Directory -Force $runtimeDir | Out-Null
@@ -165,8 +165,8 @@ $metadata = [ordered]@{
     lld_version = $lldVersion
     python_import_library_abi = "python3.dll"
     python_import_library_aliases = @("python3", "python312", "python313", "python314")
-    minimization_stage = "stage-f"
-    minimization_report = "minimization-stage-f.json"
+    minimization_stage = "stage-g"
+    minimization_report = "minimization-stage-g.json"
     runtime_helper = "runtime/fenics_jit_runtime.py"
 }
 $metadata | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $destination "metadata.json") -Encoding UTF8

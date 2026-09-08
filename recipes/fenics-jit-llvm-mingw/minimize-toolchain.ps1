@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$ToolchainRoot,
-    [ValidateSet("stage-a", "stage-b", "stage-c", "stage-d", "stage-e", "stage-f")][string]$Stage = "stage-f"
+    [ValidateSet("stage-a", "stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g")][string]$Stage = "stage-g"
 )
 
 Set-StrictMode -Version Latest
@@ -187,7 +187,7 @@ function Invoke-StageC {
         "llvm-readobj.exe",
         "llvm-dlltool.exe"
     )
-    if ($Stage -in @("stage-e", "stage-f")) {
+    if ($Stage -in @("stage-e", "stage-f", "stage-g")) {
         # Build-only: Stage E uses llvm-strip and removes it before packaging.
         $keepExecutables += "llvm-strip.exe"
     }
@@ -383,33 +383,76 @@ function Invoke-StageF {
     }
 }
 
+function Invoke-StageG {
+    $include = Join-Path $root "include"
+    if (-not (Test-Path -LiteralPath $include -PathType Container)) {
+        throw "LLVM-MinGW root include directory missing: $include"
+    }
+
+    # Run #178 requalified Stage F and measured this entire Direct3D/DXGI
+    # family as unobserved across the 27 Phase 5 dependency closures.
+    $matches = @(
+        Get-ChildItem -LiteralPath $include -File |
+            Where-Object {
+                $_.Name -like "d3d*" -or
+                $_.Name -like "dxgi*" -or
+                $_.Name -like "dxcore*"
+            } |
+            Sort-Object Name
+    )
+    if ($matches.Count -eq 0) {
+        throw "Stage G found no Direct3D/DXGI headers; upstream layout may have changed"
+    }
+
+    foreach ($file in $matches) {
+        Remove-PayloadFile -File $file -RemovalStage "stage-g" -Group "unobserved-direct3d-dxgi-headers"
+    }
+
+    $remaining = @(
+        Get-ChildItem -LiteralPath $include -File |
+            Where-Object {
+                $_.Name -like "d3d*" -or
+                $_.Name -like "dxgi*" -or
+                $_.Name -like "dxcore*"
+            }
+    )
+    if ($remaining.Count -ne 0) {
+        throw "Stage G Direct3D/DXGI headers remain: $($remaining.Name -join ', ')"
+    }
+}
+
 $before = Get-PayloadStats
 
 Invoke-StageA
 $afterStageA = Get-PayloadStats
 
-if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
     Invoke-StageB
 }
 $afterStageB = Get-PayloadStats
 
-if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
     Invoke-StageC
 }
 $afterStageC = Get-PayloadStats
 
-if ($Stage -in @("stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g")) {
     Invoke-StageD
 }
 $afterStageD = Get-PayloadStats
 
-if ($Stage -in @("stage-e", "stage-f")) {
+if ($Stage -in @("stage-e", "stage-f", "stage-g")) {
     Invoke-StageE
 }
 $afterStageE = Get-PayloadStats
 
-if ($Stage -eq "stage-f") {
+if ($Stage -in @("stage-f", "stage-g")) {
     Invoke-StageF
+}
+$afterStageF = Get-PayloadStats
+
+if ($Stage -eq "stage-g") {
+    Invoke-StageG
 }
 $after = Get-PayloadStats
 
@@ -419,6 +462,7 @@ $stageCRemoved = @($removed | Where-Object { $_.stage -eq "stage-c" })
 $stageDRemoved = @($removed | Where-Object { $_.stage -eq "stage-d" })
 $stageERemoved = @($removed | Where-Object { $_.stage -eq "stage-e" })
 $stageFRemoved = @($removed | Where-Object { $_.stage -eq "stage-f" })
+$stageGRemoved = @($removed | Where-Object { $_.stage -eq "stage-g" })
 
 function Get-RemovedBytes {
     param([object[]]$Items)
@@ -433,6 +477,7 @@ $stageCRemovedBytes = Get-RemovedBytes $stageCRemoved
 $stageDRemovedBytes = Get-RemovedBytes $stageDRemoved
 $stageERemovedBytes = Get-RemovedBytes $stageERemoved
 $stageFRemovedBytes = Get-RemovedBytes $stageFRemoved
+$stageGRemovedBytes = Get-RemovedBytes $stageGRemoved
 $removedBytes = Get-RemovedBytes $removed
 $strippedBytesSaved = Get-RemovedBytes @(
     $stripped | ForEach-Object {
@@ -443,20 +488,23 @@ $strippedBytesSaved = Get-RemovedBytes @(
 if ($stageARemoved.Count -eq 0) {
     throw "Stage A removed no unsupported target aliases; upstream layout may have changed"
 }
-if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f") -and $stageBRemoved.Count -eq 0) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g") -and $stageBRemoved.Count -eq 0) {
     throw "Stage B removed no C++ payload; upstream layout may have changed"
 }
-if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f") -and $stageCRemoved.Count -eq 0) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g") -and $stageCRemoved.Count -eq 0) {
     throw "Stage C removed no unused LLVM tools; upstream layout may have changed"
 }
-if ($Stage -in @("stage-d", "stage-e", "stage-f") -and $stageDRemoved.Count -eq 0) {
+if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g") -and $stageDRemoved.Count -eq 0) {
     throw "Stage D removed no unused Clang runtimes; upstream layout may have changed"
 }
-if ($Stage -in @("stage-e", "stage-f") -and $stageERemoved.Count -eq 0) {
+if ($Stage -in @("stage-e", "stage-f", "stage-g") -and $stageERemoved.Count -eq 0) {
     throw "Stage E did not remove its build-only stripping tool"
 }
-if ($Stage -eq "stage-f" -and $stageFRemoved.Count -eq 0) {
+if ($Stage -in @("stage-f", "stage-g") -and $stageFRemoved.Count -eq 0) {
     throw "Stage F removed no measured-unobserved mshtml* headers"
+}
+if ($Stage -eq "stage-g" -and $stageGRemoved.Count -eq 0) {
+    throw "Stage G removed no measured-unobserved Direct3D/DXGI headers"
 }
 
 $report = [ordered]@{
@@ -473,6 +521,8 @@ $report = [ordered]@{
     after_stage_d_bytes = $afterStageD.bytes
     after_stage_e_file_count = $afterStageE.file_count
     after_stage_e_bytes = $afterStageE.bytes
+    after_stage_f_file_count = $afterStageF.file_count
+    after_stage_f_bytes = $afterStageF.bytes
     after_file_count = $after.file_count
     after_bytes = $after.bytes
     removed_file_count = $removed.Count
@@ -491,6 +541,8 @@ $report = [ordered]@{
     stage_e_stripped_bytes_saved = [int64]$strippedBytesSaved
     stage_f_removed_file_count = $stageFRemoved.Count
     stage_f_removed_bytes = [int64]$stageFRemovedBytes
+    stage_g_removed_file_count = $stageGRemoved.Count
+    stage_g_removed_bytes = [int64]$stageGRemovedBytes
     stripped = $stripped
     removed = $removed
 }
@@ -500,38 +552,42 @@ $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encodi
 Write-Host "LLVM-MinGW minimization $Stage"
 Write-Host "  Stage A removed files: $($stageARemoved.Count)"
 Write-Host "  Stage A removed MiB: $([math]::Round($stageARemovedBytes / 1MB, 2))"
-if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
     Write-Host "  Stage B removed files: $($stageBRemoved.Count)"
     Write-Host "  Stage B removed MiB: $([math]::Round($stageBRemovedBytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
     Write-Host "  Stage C removed files: $($stageCRemoved.Count)"
     Write-Host "  Stage C removed MiB: $([math]::Round($stageCRemovedBytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g")) {
     Write-Host "  Stage D removed files: $($stageDRemoved.Count)"
     Write-Host "  Stage D removed MiB: $([math]::Round($stageDRemovedBytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-e", "stage-f")) {
+if ($Stage -in @("stage-e", "stage-f", "stage-g")) {
     Write-Host "  Stage E stripped files: $($stripped.Count)"
     Write-Host "  Stage E stripped MiB saved: $([math]::Round($strippedBytesSaved / 1MB, 2))"
     Write-Host "  Stage E removed build-only MiB: $([math]::Round($stageERemovedBytes / 1MB, 2))"
 }
-if ($Stage -eq "stage-f") {
+if ($Stage -in @("stage-f", "stage-g")) {
     Write-Host "  Stage F removed files: $($stageFRemoved.Count)"
     Write-Host "  Stage F removed MiB: $([math]::Round($stageFRemovedBytes / 1MB, 2))"
+}
+if ($Stage -eq "stage-g") {
+    Write-Host "  Stage G removed files: $($stageGRemoved.Count)"
+    Write-Host "  Stage G removed MiB: $([math]::Round($stageGRemovedBytes / 1MB, 2))"
 }
 Write-Host "  cumulative removed files: $($removed.Count)"
 Write-Host "  cumulative removed MiB: $([math]::Round($removedBytes / 1MB, 2))"
 Write-Host "  payload MiB before: $([math]::Round($before.bytes / 1MB, 2))"
 Write-Host "  payload MiB after Stage A: $([math]::Round($afterStageA.bytes / 1MB, 2))"
-if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-b", "stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
     Write-Host "  payload MiB after Stage B: $([math]::Round($afterStageB.bytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-c", "stage-d", "stage-e", "stage-f", "stage-g")) {
     Write-Host "  payload MiB after Stage C: $([math]::Round($afterStageC.bytes / 1MB, 2))"
 }
-if ($Stage -in @("stage-d", "stage-e", "stage-f")) {
+if ($Stage -in @("stage-d", "stage-e", "stage-f", "stage-g")) {
     Write-Host "  payload MiB after Stage D: $([math]::Round($afterStageD.bytes / 1MB, 2))"
 }
 Write-Host "  payload MiB after: $([math]::Round($after.bytes / 1MB, 2))"

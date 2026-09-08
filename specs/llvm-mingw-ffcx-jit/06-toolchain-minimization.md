@@ -16,7 +16,30 @@ Phase 5 stack run #160 (`34125754984`) records the conservative LLVM-MinGW packa
 - conda package installed content: **466.91 MiB**;
 - compressed `.conda` artifact: **86.91 MiB**.
 
-The previous Windows runtime compiler dependency closure baseline and standalone-bundle increment still need to be measured before evaluating the 50% gate.
+The previous Windows runtime compiler was not self-contained: on Windows,
+`${{ compiler("c") }}` resolved to the small `vs2022_win-64` activation
+package, which locates and activates an externally installed Visual Studio
+2022/Windows SDK toolchain. Therefore the conda activation package size is not
+a valid denominator for the 50% gate.
+
+`scripts/llvm-mingw-jit/measure-vs2022-jit-baseline.ps1` now measures the
+external compiler prerequisite on the same `windows-2022` runner. It records:
+
+- a deliberately conservative **x64 C JIT lower bound** consisting of the
+  VS2022 x64 compiler/linker bin tree, MSVC headers and x64 libraries, VC
+  activation files, and the selected Windows SDK x64 tools, UCRT/shared/UM
+  headers, and UCRT/UM x64 libraries;
+- the broader activated `INCLUDE`/`LIB` search closure for comparison;
+- the complete versioned MSVC toolset plus selected Windows SDK version roots
+  as contextual installed-prerequisite data.
+
+The 50% decision will use the conservative x64 C JIT lower bound where
+possible, not the broader Visual Studio installation. External Visual Studio
+download/compressed bytes are not meaningfully attributable on the pre-baked
+GitHub runner, so they are reported as not measurable rather than substituting
+the tiny conda activation package. The exact standalone bundle delta remains a
+Phase 7 measurement; the Phase 6 toolchain-only staged contribution is recorded
+below.
 
 Before removing files, record:
 
@@ -179,10 +202,19 @@ Keep UCRT/mingw-w64 C headers and import libraries conservative unless size meas
 ## Stage E: strip shipped binaries
 
 **Implementation:** build 5 temporarily retains `llvm-strip.exe` during
-minimization, applies `llvm-strip --strip-debug` to the retained PE
-executables and DLLs in the compiler and x86-64 target runtime `bin` trees,
-records per-file before/after sizes, verifies no file grows, and then removes
-`llvm-strip.exe` from the package. Full Phase 5 validation is pending.
+minimization, copies the stripping tool plus its required local DLLs to a
+temporary directory so Windows does not lock shipped DLLs while they are being
+rewritten, applies `llvm-strip --strip-debug` to retained PE executables and
+DLLs in the compiler and x86-64 target runtime `bin` trees, records per-file
+before/after sizes, verifies no file grows, and removes `llvm-strip.exe` from
+the package.
+
+Stack run #168 (`34182210924`) passed the complete Phase 5 matrix and the
+Python 3.15 preview. Stage E stripped **14 files / 2.38 MiB**, and removal of
+the build-only `llvm-strip.exe` accounts for another **0.18 MiB**. The
+minimized payload is **296.20 MiB** before post-minimization staging additions;
+the final staged package payload is **297.52 MiB**. The finished package is
+**298.65 MiB installed / 56.00 MiB compressed**.
 
 Strip compiler/linker binaries during package construction where safe.
 

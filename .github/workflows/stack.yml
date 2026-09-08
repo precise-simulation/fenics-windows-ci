@@ -84,7 +84,7 @@ jobs:
 
           $parseErrors = @()
           $parseTargets = @(Get-ChildItem scripts -Filter *.ps1)
-          $parseTargets += Get-Item scripts/llvm-mingw-jit/run-phase5-functional-validation.ps1
+          $parseTargets += @(Get-ChildItem scripts/llvm-mingw-jit -Filter *.ps1)
           $parseTargets | ForEach-Object {
             $tokens = $null
             $errors = $null
@@ -117,6 +117,10 @@ jobs:
       - name: Build changed stages
         shell: pwsh
         run: scripts/build-stack.ps1 -PlanFile plan.json
+
+      - name: Measure previous VS2022 JIT baseline
+        shell: pwsh
+        run: scripts/llvm-mingw-jit/measure-vs2022-jit-baseline.ps1 -OutputPath build-logs/vs2022-jit-baseline.json
 
       - name: Test ABI3 on supported Python versions
         shell: pwsh

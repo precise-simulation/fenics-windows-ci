@@ -485,6 +485,7 @@ def build_closure_report(phase5_root: Path, output_dir: Path) -> None:
             "root_total_mib": round(int(headers["root_header_total_bytes"]) / MIB, 3),
             "unobserved_root_count": headers["unobserved_root_header_count"],
             "unobserved_root_mib": round(int(headers["unobserved_root_header_bytes"]) / MIB, 3),
+            "candidate_unrelated_families": headers["candidate_unrelated_families"],
         },
         "libraries": {
             "link_trace_count": libraries["link_trace_count"],

@@ -93,8 +93,10 @@ smoke test: plain x86-64 Clang C shared-library links pass `-lunwind`, so
 `x86_64-w64-mingw32/lib/libunwind.a` is required and is retained. Separately,
 the LLVM executables themselves depend on the root `bin/libc++.dll` and
 `bin/libunwind.dll`; these are compiler-tool runtime dependencies rather than
-generated-FFCx C++ support and are also retained. Full Phase 5 validation is
-pending for the corrected Stage B.
+generated-FFCx C++ support and are also retained. Stack run #164
+(`34136483104`) passed the complete Phase 5 gate. Corrected Stage B removed
+**1708 files / 19.35 MiB** on top of Stage A; the package is now **439.49 MiB
+installed / 83.98 MiB compressed**.
 
 FFCx JIT generates C only.
 
@@ -112,6 +114,15 @@ Retain compiler-rt builtins required by generated C.
 Run the full validation matrix.
 
 ## Stage C: remove unused LLVM tools
+
+**Implementation:** build 3 keeps only the executable path required by current
+JIT/package validation: `x86_64-w64-mingw32-clang.exe`, `clang-23.exe`,
+`ld.lld.exe`, `llvm-readobj.exe`, and `llvm-dlltool.exe`. Other
+executables are removed reproducibly. LLDB-only `liblldb`, Python/FFI DLLs,
+and the root OpenMP runtime are also removed because the retained executable
+dependency graph does not reference them. Shared LLVM/Clang/libc++/libunwind
+DLLs needed by the retained compiler tools remain. Full Phase 5 validation is
+pending for Stage C.
 
 Use observed JIT invocations plus `clang -###` to identify actual requirements.
 

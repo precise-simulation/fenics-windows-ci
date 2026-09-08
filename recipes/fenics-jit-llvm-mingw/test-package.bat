@@ -18,7 +18,7 @@ if not exist "%JIT_ROOT%\lib\python\libpython313.a" exit /b 1
 if not exist "%JIT_ROOT%\lib\python\libpython314.a" exit /b 1
 if not exist "%JIT_ROOT%\manifest.csv" exit /b 1
 if not exist "%JIT_ROOT%\metadata.json" exit /b 1
-if not exist "%JIT_ROOT%\minimization-stage-b.json" exit /b 1
+if not exist "%JIT_ROOT%\minimization-stage-c.json" exit /b 1
 if not exist "%JIT_ROOT%\runtime\fenics_jit_runtime.py" exit /b 1
 
 powershell.exe -NoProfile -Command "$files = @(Get-ChildItem -LiteralPath '%JIT_BIN%' -File); $bad = @($files.Where({$_.Name -match '^(?:aarch64|arm64ec|armv7|i686)-w64-mingw32(?:uwp)?(?:-|$)'})); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
@@ -26,6 +26,9 @@ if errorlevel 1 exit /b 1
 
 powershell.exe -NoProfile -Command "$bad = @(); foreach ($p in @('%JIT_ROOT%\include\c++','%JIT_ROOT%\include\libunwind.h','%JIT_ROOT%\include\libunwind.modulemap')) { if (Test-Path -LiteralPath $p) { $bad += $p } }; $drivers = @(); foreach ($f in @(Get-ChildItem -LiteralPath '%JIT_BIN%' -File)) { if ($f.Name -match '^(?:(?:c|g|clang)\+\+|x86_64-w64-mingw32(?:uwp)?-(?:c|g|clang)\+\+)(?:\.exe)?$') { $drivers += $f } }; $runtime = @(); foreach ($d in @('%JIT_ROOT%\x86_64-w64-mingw32\bin','%JIT_TARGET_LIB%')) { if (Test-Path -LiteralPath $d) { foreach ($f in @(Get-ChildItem -LiteralPath $d -File)) { if ($f.Name -match '^libc\+\+' -or ($f.Name -match '^libunwind' -and $f.Name -ne 'libunwind.a')) { $runtime += $f } } } }; if ($bad.Count -ne 0 -or $drivers.Count -ne 0 -or $runtime.Count -ne 0) { $bad; $drivers.FullName; $runtime.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
+
+for %%f in (clang-23.exe ld.lld.exe llvm-readobj.exe llvm-dlltool.exe) do if not exist "%JIT_BIN%\%%f" exit /b 1
+for %%f in (clangd.exe clang-tidy.exe lldb.exe lldb-server.exe llvm-objdump.exe llvm-profdata.exe) do if exist "%JIT_BIN%\%%f" exit /b 1
 
 "%CLANG%" --version
 if errorlevel 1 exit /b 1

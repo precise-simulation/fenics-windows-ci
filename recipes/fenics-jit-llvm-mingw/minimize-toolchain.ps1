@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$ToolchainRoot,
-    [ValidateSet("stage-a", "stage-b")][string]$Stage = "stage-b"
+    [ValidateSet("stage-a", "stage-b", "stage-c")][string]$Stage = "stage-c"
 )
 
 Set-StrictMode -Version Latest
@@ -170,12 +170,82 @@ function Invoke-StageB {
     }
 }
 
+
+function Invoke-StageC {
+    $bin = Join-Path $root "bin"
+    if (-not (Test-Path -LiteralPath $bin -PathType Container)) {
+        throw "LLVM-MinGW bin directory missing: $bin"
+    }
+
+    # Retain only executables observed or required by package construction and
+    # Phase 5: the target Clang driver/front-end, LLD, PE inspection, and GNU
+    # import-library generation. Clang uses its integrated assembler.
+    $keepExecutables = @(
+        "x86_64-w64-mingw32-clang.exe",
+        "clang-23.exe",
+        "ld.lld.exe",
+        "llvm-readobj.exe",
+        "llvm-dlltool.exe"
+    )
+    $keepSet = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($name in $keepExecutables) { [void]$keepSet.Add($name) }
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $bin -File | Sort-Object Name)) {
+        if ($file.Extension -ieq ".exe" -and -not $keepSet.Contains($file.Name)) {
+            Remove-PayloadFile -File $file -RemovalStage "stage-c" -Group "unused-executable"
+        }
+    }
+
+    # These DLLs are only required by tools removed above. The retained Clang,
+    # LLD, readobj, and dlltool dependency graph does not reference them.
+    foreach ($name in @(
+        "liblldb.dll",
+        "libpython3.14.dll",
+        "libpython3.dll",
+        "libffi-8.dll",
+        "libomp.dll"
+    )) {
+        $path = Join-Path $bin $name
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Remove-PayloadFile -File (Get-Item -LiteralPath $path) -RemovalStage "stage-c" -Group "unused-tool-runtime"
+        }
+    }
+
+    foreach ($name in $keepExecutables) {
+        $path = Join-Path $bin $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Required Stage C executable missing: $path"
+        }
+    }
+    foreach ($name in @("libLLVM-23.dll", "libclang-cpp.dll", "libc++.dll", "libunwind.dll")) {
+        $path = Join-Path $bin $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Required LLVM tool runtime missing after Stage C: $path"
+        }
+    }
+
+    $unexpectedExecutables = @(
+        Get-ChildItem -LiteralPath $bin -File |
+            Where-Object { $_.Extension -ieq ".exe" -and -not $keepSet.Contains($_.Name) }
+    )
+    if ($unexpectedExecutables.Count -ne 0) {
+        throw "Unexpected executables remain after Stage C: $($unexpectedExecutables.Name -join ', ')"
+    }
+}
+
 $before = Get-PayloadStats
 Invoke-StageA
 $afterStageA = Get-PayloadStats
 
-if ($Stage -eq "stage-b") {
+if ($Stage -in @("stage-b", "stage-c")) {
     Invoke-StageB
+}
+$afterStageB = Get-PayloadStats
+
+if ($Stage -eq "stage-c") {
+    Invoke-StageC
 }
 $after = Get-PayloadStats
 
@@ -183,16 +253,22 @@ $removedBytes = ($removed | Measure-Object bytes -Sum).Sum
 if ($null -eq $removedBytes) { $removedBytes = 0 }
 $stageARemoved = @($removed | Where-Object { $_.stage -eq "stage-a" })
 $stageBRemoved = @($removed | Where-Object { $_.stage -eq "stage-b" })
+$stageCRemoved = @($removed | Where-Object { $_.stage -eq "stage-c" })
 $stageARemovedBytes = ($stageARemoved | Measure-Object bytes -Sum).Sum
 $stageBRemovedBytes = ($stageBRemoved | Measure-Object bytes -Sum).Sum
+$stageCRemovedBytes = ($stageCRemoved | Measure-Object bytes -Sum).Sum
 if ($null -eq $stageARemovedBytes) { $stageARemovedBytes = 0 }
 if ($null -eq $stageBRemovedBytes) { $stageBRemovedBytes = 0 }
+if ($null -eq $stageCRemovedBytes) { $stageCRemovedBytes = 0 }
 
 if ($stageARemoved.Count -eq 0) {
     throw "Stage A removed no unsupported target aliases; upstream layout may have changed"
 }
-if ($Stage -eq "stage-b" -and $stageBRemoved.Count -eq 0) {
+if ($Stage -in @("stage-b", "stage-c") -and $stageBRemoved.Count -eq 0) {
     throw "Stage B removed no C++ payload; upstream layout may have changed"
+}
+if ($Stage -eq "stage-c" -and $stageCRemoved.Count -eq 0) {
+    throw "Stage C removed no unused LLVM tools; upstream layout may have changed"
 }
 
 $report = [ordered]@{
@@ -201,6 +277,8 @@ $report = [ordered]@{
     before_bytes = $before.bytes
     after_stage_a_file_count = $afterStageA.file_count
     after_stage_a_bytes = $afterStageA.bytes
+    after_stage_b_file_count = $afterStageB.file_count
+    after_stage_b_bytes = $afterStageB.bytes
     after_file_count = $after.file_count
     after_bytes = $after.bytes
     removed_file_count = $removed.Count
@@ -209,6 +287,8 @@ $report = [ordered]@{
     stage_a_removed_bytes = [int64]$stageARemovedBytes
     stage_b_removed_file_count = $stageBRemoved.Count
     stage_b_removed_bytes = [int64]$stageBRemovedBytes
+    stage_c_removed_file_count = $stageCRemoved.Count
+    stage_c_removed_bytes = [int64]$stageCRemovedBytes
     removed = $removed
 }
 $reportPath = Join-Path $root "minimization-$Stage.json"
@@ -217,12 +297,19 @@ $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encodi
 Write-Host "LLVM-MinGW minimization $Stage"
 Write-Host "  Stage A removed files: $($stageARemoved.Count)"
 Write-Host "  Stage A removed MiB: $([math]::Round($stageARemovedBytes / 1MB, 2))"
-if ($Stage -eq "stage-b") {
+if ($Stage -in @("stage-b", "stage-c")) {
     Write-Host "  Stage B removed files: $($stageBRemoved.Count)"
     Write-Host "  Stage B removed MiB: $([math]::Round($stageBRemovedBytes / 1MB, 2))"
+}
+if ($Stage -eq "stage-c") {
+    Write-Host "  Stage C removed files: $($stageCRemoved.Count)"
+    Write-Host "  Stage C removed MiB: $([math]::Round($stageCRemovedBytes / 1MB, 2))"
 }
 Write-Host "  cumulative removed files: $($removed.Count)"
 Write-Host "  cumulative removed MiB: $([math]::Round($removedBytes / 1MB, 2))"
 Write-Host "  payload MiB before: $([math]::Round($before.bytes / 1MB, 2))"
 Write-Host "  payload MiB after Stage A: $([math]::Round($afterStageA.bytes / 1MB, 2))"
+if ($Stage -in @("stage-b", "stage-c")) {
+    Write-Host "  payload MiB after Stage B: $([math]::Round($afterStageB.bytes / 1MB, 2))"
+}
 Write-Host "  payload MiB after: $([math]::Round($after.bytes / 1MB, 2))"

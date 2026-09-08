@@ -288,37 +288,59 @@ function Invoke-StageE {
         throw "Build-only llvm-strip missing before Stage E: $strip"
     }
 
-    $targets = @()
-    foreach ($dir in @($bin, $targetBin)) {
-        if (Test-Path -LiteralPath $dir -PathType Container) {
-            $targets += @(
-                Get-ChildItem -LiteralPath $dir -File |
-                    Where-Object {
-                        ($_.Extension -ieq ".exe" -or $_.Extension -ieq ".dll") -and
-                        $_.FullName -ne $strip
-                    }
-            )
-        }
+    # llvm-strip links against DLLs in the same bin directory. Running it in
+    # place locks those DLLs on Windows, which prevents llvm-strip from
+    # rewriting them. Copy the tool and its complete local DLL set outside the
+    # staged payload so every staged PE file remains writable.
+    $stripRunnerRoot = Join-Path ([IO.Path]::GetTempPath()) ("fenics-jit-llvm-strip-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $stripRunnerRoot | Out-Null
+    $stripRunner = Join-Path $stripRunnerRoot "llvm-strip.exe"
+    Copy-Item -LiteralPath $strip -Destination $stripRunner
+    foreach ($dll in @(Get-ChildItem -LiteralPath $bin -File | Where-Object { $_.Extension -ieq ".dll" })) {
+        Copy-Item -LiteralPath $dll.FullName -Destination (Join-Path $stripRunnerRoot $dll.Name)
     }
 
-    foreach ($file in @($targets | Sort-Object FullName -Unique)) {
-        $beforeBytes = [int64]$file.Length
-        & $strip --strip-debug $file.FullName
+    try {
+        & $stripRunner --version | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            throw "llvm-strip --strip-debug failed for $($file.FullName)"
+            throw "Temporary llvm-strip runner failed to start from $stripRunnerRoot"
         }
-        $afterFile = Get-Item -LiteralPath $file.FullName
-        $afterBytes = [int64]$afterFile.Length
-        if ($afterBytes -gt $beforeBytes) {
-            throw "Stripping increased file size for $($file.FullName): $beforeBytes -> $afterBytes"
+
+        $targets = @()
+        foreach ($dir in @($bin, $targetBin)) {
+            if (Test-Path -LiteralPath $dir -PathType Container) {
+                $targets += @(
+                    Get-ChildItem -LiteralPath $dir -File |
+                        Where-Object {
+                            ($_.Extension -ieq ".exe" -or $_.Extension -ieq ".dll") -and
+                            $_.FullName -ne $strip
+                        }
+                )
+            }
         }
-        $relative = $file.FullName.Substring($root.Length).TrimStart("\").Replace("\", "/")
-        $script:stripped += [pscustomobject]@{
-            path = $relative
-            before_bytes = $beforeBytes
-            after_bytes = $afterBytes
-            saved_bytes = [int64]($beforeBytes - $afterBytes)
+
+        foreach ($file in @($targets | Sort-Object FullName -Unique)) {
+            $beforeBytes = [int64]$file.Length
+            & $stripRunner --strip-debug $file.FullName
+            if ($LASTEXITCODE -ne 0) {
+                throw "llvm-strip --strip-debug failed for $($file.FullName)"
+            }
+            $afterFile = Get-Item -LiteralPath $file.FullName
+            $afterBytes = [int64]$afterFile.Length
+            if ($afterBytes -gt $beforeBytes) {
+                throw "Stripping increased file size for $($file.FullName): $beforeBytes -> $afterBytes"
+            }
+            $relative = $file.FullName.Substring($root.Length).TrimStart("\").Replace("\", "/")
+            $script:stripped += [pscustomobject]@{
+                path = $relative
+                before_bytes = $beforeBytes
+                after_bytes = $afterBytes
+                saved_bytes = [int64]($beforeBytes - $afterBytes)
+            }
         }
+    }
+    finally {
+        Remove-Item -LiteralPath $stripRunnerRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     # llvm-strip is required only while constructing Stage E.

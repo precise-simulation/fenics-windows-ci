@@ -158,7 +158,7 @@ $jitLowerBoundRoots = @(
     New-Root "sdk-ucrt-headers" (Join-Path $ucrtSdkDir "Include\$ucrtVersion\ucrt") "UCRT headers"
     New-Root "sdk-shared-headers" (Join-Path $windowsSdkDir "Include\$windowsSdkVersion\shared") "Windows shared headers"
     New-Root "sdk-um-headers" (Join-Path $windowsSdkDir "Include\$windowsSdkVersion\um") "Windows user-mode headers"
-    New-Root "sdk-ucrt-x64-libraries" (Join-Path $ucrtSdkDir "Lib\$ucrtVersion\ucrt\x64") "UCRT"x64 import libraries"
+    New-Root "sdk-ucrt-x64-libraries" (Join-Path $ucrtSdkDir "Lib\$ucrtVersion\ucrt\x64") "UCRT x64 import libraries"
     New-Root "sdk-um-x64-libraries" (Join-Path $windowsSdkDir "Lib\$windowsSdkVersion\um\x64") "Windows user-mode x64 import libraries"
 )
 $jitLowerBound = Measure-RootSet $jitLowerBoundRoots

@@ -174,6 +174,25 @@ $metadata | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $destination "metad
 $payloadFiles = @(Get-ChildItem $destination -Recurse -File | Sort-Object FullName)
 $payloadBytes = ($payloadFiles | Measure-Object Length -Sum).Sum
 if ($null -eq $payloadBytes) { $payloadBytes = 0 }
+$payloadBytes = [int64]$payloadBytes
+
+$phase6GateBytes = $null
+$phase6GateStatus = "not-evaluated"
+if ($env:PHASE6_VS2022_JIT_GATE_BYTES) {
+    try {
+        $phase6GateBytes = [int64]$env:PHASE6_VS2022_JIT_GATE_BYTES
+    } catch {
+        throw "Invalid PHASE6_VS2022_JIT_GATE_BYTES: $($env:PHASE6_VS2022_JIT_GATE_BYTES)"
+    }
+    if ($phase6GateBytes -le 0) {
+        throw "PHASE6_VS2022_JIT_GATE_BYTES must be positive"
+    }
+    if ($payloadBytes -gt $phase6GateBytes) {
+        throw "Phase 6 size gate failed: staged payload $payloadBytes bytes exceeds 50% ceiling $phase6GateBytes bytes"
+    }
+    $phase6GateStatus = "passed"
+    Write-Host "Phase 6 size gate passed: staged payload $([math]::Round($payloadBytes / 1MB, 2)) MiB <= $([math]::Round($phase6GateBytes / 1MB, 2)) MiB"
+}
 
 $manifest = foreach ($file in $payloadFiles) {
     $relative = $file.FullName.Substring($destination.Length).TrimStart("\")
@@ -185,11 +204,17 @@ $manifest = foreach ($file in $payloadFiles) {
 }
 $manifest | ConvertTo-Csv -NoTypeInformation | Set-Content (Join-Path $destination "manifest.csv") -Encoding UTF8
 
-@(
+$sizeLines = @(
     "payload_file_count=$($payloadFiles.Count)"
     "payload_bytes=$payloadBytes"
     "payload_mib=$([math]::Round($payloadBytes / 1MB, 2))"
-) | Set-Content (Join-Path $destination "size.txt") -Encoding Ascii
+    "phase6_size_gate_status=$phase6GateStatus"
+)
+if ($null -ne $phase6GateBytes) {
+    $sizeLines += "phase6_size_gate_bytes=$phase6GateBytes"
+    $sizeLines += "phase6_size_gate_mib=$([math]::Round($phase6GateBytes / 1MB, 2))"
+}
+$sizeLines | Set-Content (Join-Path $destination "size.txt") -Encoding Ascii
 
 Write-Host "Staged fenics-jit-llvm-mingw $version"
 Write-Host "  root: $destination"

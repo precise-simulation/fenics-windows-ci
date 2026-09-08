@@ -1,6 +1,6 @@
 # Phase 6: minimize the toolchain
 
-**Status:** in progress — Phase 5 is green; the conservative package baseline is recorded before reproducible pruning begins.
+**Status:** complete — reproducible minimization and the measured 50% size gate are green in stack run #171 (`34186723562`).
 
 ## Objective
 
@@ -33,13 +33,28 @@ external compiler prerequisite on the same `windows-2022` runner. It records:
 - the complete versioned MSVC toolset plus selected Windows SDK version roots
   as contextual installed-prerequisite data.
 
-The 50% decision will use the conservative x64 C JIT lower bound where
-possible, not the broader Visual Studio installation. External Visual Studio
-download/compressed bytes are not meaningfully attributable on the pre-baked
-GitHub runner, so they are reported as not measurable rather than substituting
-the tiny conda activation package. The exact standalone bundle delta remains a
-Phase 7 measurement; the Phase 6 toolchain-only staged contribution is recorded
-below.
+The 50% decision uses the conservative x64 C JIT lower bound, not the broader
+Visual Studio installation. External Visual Studio download/compressed bytes
+are not meaningfully attributable on the pre-baked GitHub runner, so they are
+reported as not measurable rather than substituting the tiny conda activation
+package. The exact standalone bundle delta remains a Phase 7 measurement.
+
+Stack run #171 (`34186723562`) measured:
+
+- x64 C JIT lower bound: **1297.04 MiB**;
+- activated `INCLUDE`/`LIB` closure: **2011.46 MiB**;
+- broader installed prerequisite context: **13592.70 MiB**;
+- 50% lower-bound gate ceiling: **648.52 MiB**.
+
+The minimized LLVM-MinGW staged compiler payload is **297.52 MiB**, or
+**22.94%** of the conservative lower bound. The packaged installed size reported
+by rattler-build is **298.65 MiB**, or **23.03%** of that lower bound. Both are
+well below the required 50% ceiling.
+
+CI measures the VS2022 lower bound before package construction, exports the
+resulting gate threshold, and the staging recipe fails if the staged runtime
+compiler payload exceeds it. This keeps the size gate executable rather than
+documentation-only.
 
 Before removing files, record:
 
@@ -232,3 +247,10 @@ Phase 6 is complete when:
 - the minimized package passes the full Phase 5 matrix;
 - generated `.pyd` dependency inspection remains clean;
 - the final installed footprint meets the 50% size gate.
+
+All exit criteria are satisfied. Stack #171 passed the complete Phase 5 matrix,
+Python 3.15 preview, and the measured size gate. Further mingw-w64/UCRT
+import-library pruning is intentionally not pursued: the current package already
+uses only about 23% of the conservative old-runtime lower bound, while broader
+C library coverage reduces the risk that future FFCx-generated forms require an
+import library absent from the test matrix.

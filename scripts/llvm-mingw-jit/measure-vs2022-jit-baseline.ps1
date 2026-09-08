@@ -217,6 +217,7 @@ $report = [ordered]@{
         conda_activation_package = "Reported separately when needed; it is activation metadata and is not a self-contained compiler footprint."
         compressed_download = "Not attributable from the pre-baked GitHub runner image; do not substitute conda activation-package bytes."
         standalone_delta = "Exact standalone JIT delta is measured in Phase 7; Phase 6 records the staged toolchain contribution."
+        ci_gate_export = "When GITHUB_ENV is available, export the measured lower-bound and 50% gate bytes for the subsequent package-staging step."
     }
     jit_lower_bound = $jitLowerBound
     activated_search_closure = $activatedSearchClosure
@@ -229,6 +230,13 @@ if ($outputDirectory) {
     New-Item -ItemType Directory -Force $outputDirectory | Out-Null
 }
 $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+
+if ($env:GITHUB_ENV) {
+    "PHASE6_VS2022_JIT_LOWER_BOUND_BYTES=$($jitLowerBound.unique_bytes)" |
+        Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+    "PHASE6_VS2022_JIT_GATE_BYTES=$($report.fifty_percent_gate_bytes)" |
+        Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+}
 
 Write-Host "VS2022 JIT baseline"
 Write-Host "  Visual Studio: $installationPath"

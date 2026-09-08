@@ -114,13 +114,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Content plan.json
 
-      - name: Build changed stages
-        shell: pwsh
-        run: scripts/build-stack.ps1 -PlanFile plan.json
-
       - name: Measure previous VS2022 JIT baseline
         shell: pwsh
         run: scripts/llvm-mingw-jit/measure-vs2022-jit-baseline.ps1 -OutputPath build-logs/vs2022-jit-baseline.json
+
+      - name: Build changed stages
+        shell: pwsh
+        run: scripts/build-stack.ps1 -PlanFile plan.json
 
       - name: Test ABI3 on supported Python versions
         shell: pwsh

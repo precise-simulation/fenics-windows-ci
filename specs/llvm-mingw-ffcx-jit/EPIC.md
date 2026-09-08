@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** in progress — Phases 1-5 complete; Phase 6 toolchain minimization is next.
+**Status:** in progress — Phases 1-6 complete; Phase 7 standalone/Nuitka staging is next.
 
 This epic replaces the Windows runtime Visual Studio compiler dependency used by FFCx/CFFI JIT with a small, self-contained LLVM-MinGW toolchain. It does not change the compiler used to build PETSc, DOLFINx, Basix, or other native packages.
 
@@ -66,7 +66,7 @@ Phases are ordered. A later phase may be prototyped early when useful, but its p
 
 ### Implementation status
 
-Phases 1, 2, 3, 4, and 5 are complete. Phase 6 toolchain minimization is next.
+Phases 1, 2, 3, 4, 5, and 6 are complete. Phase 7 standalone/Nuitka staging is next.
 
 Phase 1 proved fresh CFFI and FFCx Poisson JIT on CPython 3.12-3.14 with the
 setuptools `mingw32` backend, LLVM-MinGW Clang/LLD, Stable-ABI
@@ -98,6 +98,15 @@ Phase 5 added broad generated-form coverage, deterministic fresh/cache-reload
 checks, two-rank MPI compile/cache semantics, paths containing spaces, and PE
 dependency inspection. Stack run #160 (`34125754984`) passed the complete
 functional gate on CPython 3.12-3.14; the Python 3.15 preview step also passed.
+
+Phase 6 reproducibly removed unsupported targets, unused C++ support, auxiliary
+LLVM tools, non-Windows/unused compiler runtimes, and debug data from shipped PE
+binaries. Stack run #171 (`34186723562`) passed the complete Phase 5 matrix
+and Python 3.15 preview after minimization. The final package is **298.65 MiB
+installed / 56.00 MiB compressed**. The same run measured a conservative
+VS2022 x64 C JIT lower bound of **1297.04 MiB**, making the installed
+LLVM-MinGW package **23.03%** of the previous external compiler prerequisite
+lower bound and comfortably satisfying the 50% size gate.
 
 ## Primary gates
 

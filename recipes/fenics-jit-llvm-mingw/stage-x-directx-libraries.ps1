@@ -19,7 +19,7 @@ $matches = @(
     Get-ChildItem -LiteralPath $targetLib -File |
         Where-Object {
             $name = $_.Name
-            ($patterns | Where-Object { $name -like $_ }).Count -gt 0
+            @($patterns | Where-Object { $name -like $_ }).Count -gt 0
         } |
         Sort-Object Name
 )
@@ -52,7 +52,7 @@ $remaining = @(
     Get-ChildItem -LiteralPath $targetLib -File |
         Where-Object {
             $name = $_.Name
-            ($patterns | Where-Object { $name -like $_ }).Count -gt 0
+            @($patterns | Where-Object { $name -like $_ }).Count -gt 0
         }
 )
 if ($remaining.Count -ne 0) {

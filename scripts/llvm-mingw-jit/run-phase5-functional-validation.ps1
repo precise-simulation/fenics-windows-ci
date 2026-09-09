@@ -9,6 +9,7 @@ $logRoot = Join-Path $root "build-logs\phase5"
 $measurementRoot = Join-Path $root "build-logs\phase6-minimization"
 $script = Join-Path $PSScriptRoot "phase5-functional-validation.py"
 $measurementScript = Join-Path $PSScriptRoot "report-minimization-measurements.py"
+$archiveMeasurementScript = Join-Path $PSScriptRoot "report-lld-archive-usage.py"
 New-Item -ItemType Directory -Force $logRoot | Out-Null
 Remove-Item -Recurse -Force $measurementRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $measurementRoot | Out-Null
@@ -23,6 +24,9 @@ if (-not (Test-Path $script)) {
 }
 if (-not (Test-Path $measurementScript)) {
     throw "Minimization measurement script missing: $measurementScript"
+}
+if (-not (Test-Path $archiveMeasurementScript)) {
+    throw "LLD archive measurement script missing: $archiveMeasurementScript"
 }
 
 $channels = @()
@@ -144,5 +148,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "Phase 5 minimization closure aggregation failed"
 }
 Get-Content (Join-Path $measurementRoot "closure-summary.json")
+
+& python $archiveMeasurementScript --phase5-root $logRoot --retained-size-report (Join-Path $measurementRoot "retained-size-report.json") --output-dir $measurementRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "LLD archive usage measurement failed"
+}
+Get-Content (Join-Path $measurementRoot "library-usage-v2.json")
 
 Write-Host "Phase 5 functional matrix passed on Python 3.12-3.14"

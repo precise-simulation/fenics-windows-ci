@@ -29,4 +29,7 @@ if errorlevel 1 exit /b %errorlevel%
 %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%RECIPE_DIR%\stage-o-windows-graphics.ps1"
 if errorlevel 1 exit /b %errorlevel%
 
+%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%RECIPE_DIR%\stage-p-windows-gaming.ps1"
+if errorlevel 1 exit /b %errorlevel%
+
 exit /b 0

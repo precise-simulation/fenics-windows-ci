@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 12
+  build: 13
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -46,8 +46,10 @@ about:
     Direct2D/DirectWrite header family, build 9 prunes the measured-unobserved
     UI Automation header family, build 10 prunes the measured-unobserved
     Windows Runtime UI header subfamily, build 11 prunes the measured-unobserved
-    Windows Runtime Devices header subfamily, and build 12 additionally prunes
-    the measured-unobserved Windows Runtime ApplicationModel header subfamily.
+    Windows Runtime Devices header subfamily, build 12 prunes the measured-
+    unobserved Windows Runtime ApplicationModel header subfamily, and build 13
+    additionally prunes the measured-unobserved Windows Runtime Media header
+    subfamily.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

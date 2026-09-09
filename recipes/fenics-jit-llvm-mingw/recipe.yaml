@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 22
+  build: 23
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -57,9 +57,10 @@ about:
     Windows Runtime Security header subfamily, build 19 prunes the measured-
     unobserved Windows Runtime Networking header subfamily, build 20 prunes the
     measured-unobserved Windows Runtime Data header subfamily, build 21 prunes
-    the measured-unobserved Windows Runtime System header subfamily, and build
-    22 additionally prunes the measured-unobserved Windows Runtime Globalization
-    header subfamily.
+    the measured-unobserved Windows Runtime System header subfamily, build 22
+    prunes the measured-unobserved Windows Runtime Globalization header
+    subfamily, and build 23 additionally prunes the measured-unobserved Windows
+    Runtime Management header subfamily.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

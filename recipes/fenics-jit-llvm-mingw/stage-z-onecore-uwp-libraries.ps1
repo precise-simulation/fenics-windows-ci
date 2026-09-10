@@ -10,8 +10,9 @@ if (-not (Test-Path -LiteralPath $targetLib -PathType Container)) {
 }
 
 # Run #202 requalified Stage Y across all 27 Phase 5 link traces. The exact
-# OneCore/UWP/WindowsApp import-library family below was unobserved in every
-# trace: 5 files / 11.058 MiB. Keep generic desktop Win32, MinGW/UCRT startup,
+# Exact five-file OneCore/UWP/WindowsApp import-library candidate below was
+# unobserved in every trace: 5 files / 7.909 MiB. Keep generic desktop Win32,
+# MinGW/UCRT startup,
 # and runtime archives intact.
 $names = @(
     "libonecore.a",
@@ -33,7 +34,7 @@ if ($matches.Count -ne 5) {
     throw "Stage Z expected 5 OneCore/UWP archives from run #202 evidence, found $($matches.Count)"
 }
 
-$expectedBytes = [int64]11595462
+$expectedBytes = [int64]8293528
 $actualBytes = [int64](($matches | Measure-Object Length -Sum).Sum)
 if ($actualBytes -ne $expectedBytes) {
     throw "Stage Z expected $expectedBytes bytes from run #202 evidence, found $actualBytes; refusing changed candidate set"

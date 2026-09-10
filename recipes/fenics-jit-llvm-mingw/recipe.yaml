@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 33
+  build: 34
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -73,8 +73,10 @@ about:
     (sapi*) root header family, build 30 prunes the exact measured-unobserved
     OpenGL include/GL header family, build 31 prunes the exact measured-
     unobserved Windows DDK include/ddk header family, build 32 prunes the exact
-    measured-unobserved MSXML root header/IDL family, and build 33 prunes the
-    exact measured-unobserved Media Foundation mf* root header/IDL family.
+    measured-unobserved MSXML root header/IDL family, build 33 prunes the exact
+    measured-unobserved Media Foundation mf* root header/IDL family, and build
+    34 prunes the exact measured-unobserved Windows Media SDK wmsdk* root
+    header/IDL family.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

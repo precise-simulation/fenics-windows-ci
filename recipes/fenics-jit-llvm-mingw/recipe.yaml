@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 24
+  build: 25
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -60,8 +60,11 @@ about:
     the measured-unobserved Windows Runtime System header subfamily, build 22
     prunes the measured-unobserved Windows Runtime Globalization header
     subfamily, build 23 prunes the measured-unobserved Windows Runtime
-    Management header subfamily, and build 24 additionally prunes the measured-
-    unobserved Direct3D/DXGI/Direct2D/DirectWrite target import libraries.
+    Management header subfamily, build 24 additionally prunes the measured-
+    unobserved Direct3D/DXGI/Direct2D/DirectWrite target import libraries, and
+    build 25 prunes the measured-unobserved versioned legacy MSVC target import
+    libraries while preserving generic MSVCRT, MinGW, UCRT, and startup/runtime
+    archives.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

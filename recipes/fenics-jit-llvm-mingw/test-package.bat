@@ -27,8 +27,9 @@ if not exist "%JIT_ROOT%\minimization-stage-ag.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-ah.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-ai.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-aj.json" exit /b 1
+if not exist "%JIT_ROOT%\minimization-stage-ak.json" exit /b 1
 if not exist "%JIT_ROOT%\runtime\fenics_jit_runtime.py" exit /b 1
-powershell.exe -NoProfile -Command "$meta = Get-Content -LiteralPath '%JIT_ROOT%\metadata.json' -Raw | ConvertFrom-Json; if ([string]$meta.minimization_stage -ne 'stage-aj' -or [string]$meta.minimization_report -ne 'minimization-stage-aj.json' -or [string]$meta.library_minimization_stage -ne 'stage-ab') { exit 1 }"
+powershell.exe -NoProfile -Command "$meta = Get-Content -LiteralPath '%JIT_ROOT%\metadata.json' -Raw | ConvertFrom-Json; if ([string]$meta.minimization_stage -ne 'stage-ak' -or [string]$meta.minimization_report -ne 'minimization-stage-ak.json' -or [string]$meta.library_minimization_stage -ne 'stage-ab') { exit 1 }"
 if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -like 'mshtml*' }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
@@ -80,6 +81,8 @@ if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$names = @('wmp.h','wmp.idl','wmpids.h','wmprealestate.h','wmprealestate.idl','wmpservices.h','wmpservices.idl'); $bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -in $names }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$names = @('windows.perception.h','windows.perception.idl','windows.perception.spatial.h','windows.perception.spatial.idl','windows.perception.spatial.surfaces.h','windows.perception.spatial.surfaces.idl'); $bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -in $names }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
+if errorlevel 1 exit /b 1
+powershell.exe -NoProfile -Command "$names = @('strmif.h','strmif.idl'); $bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -in $names }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
 
 powershell.exe -NoProfile -Command "$files = @(Get-ChildItem -LiteralPath '%JIT_BIN%' -File); $bad = @($files.Where({$_.Name -match '^(?:aarch64|arm64ec|armv7|i686)-w64-mingw32(?:uwp)?(?:-|$)'})); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"

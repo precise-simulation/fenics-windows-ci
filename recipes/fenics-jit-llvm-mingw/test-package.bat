@@ -19,8 +19,9 @@ if not exist "%JIT_ROOT%\lib\python\libpython314.a" exit /b 1
 if not exist "%JIT_ROOT%\manifest.csv" exit /b 1
 if not exist "%JIT_ROOT%\metadata.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-w.json" exit /b 1
+if not exist "%JIT_ROOT%\minimization-stage-ac.json" exit /b 1
 if not exist "%JIT_ROOT%\runtime\fenics_jit_runtime.py" exit /b 1
-powershell.exe -NoProfile -Command "$meta = Get-Content -LiteralPath '%JIT_ROOT%\metadata.json' -Raw | ConvertFrom-Json; if ([string]$meta.minimization_stage -ne 'stage-w' -or [string]$meta.minimization_report -ne 'minimization-stage-w.json') { exit 1 }"
+powershell.exe -NoProfile -Command "$meta = Get-Content -LiteralPath '%JIT_ROOT%\metadata.json' -Raw | ConvertFrom-Json; if ([string]$meta.minimization_stage -ne 'stage-ac' -or [string]$meta.minimization_report -ne 'minimization-stage-ac.json' -or [string]$meta.library_minimization_stage -ne 'stage-ab') { exit 1 }"
 if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -like 'mshtml*' }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
@@ -57,6 +58,8 @@ if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -like 'windows.globalization*' }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -like 'windows.management*' }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
+if errorlevel 1 exit /b 1
+powershell.exe -NoProfile -Command "$names = @('sapi.h','sapi51.h','sapi51.idl','sapi53.h','sapi53.idl','sapi54.h','sapi54.idl'); $bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -in $names }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
 
 powershell.exe -NoProfile -Command "$files = @(Get-ChildItem -LiteralPath '%JIT_BIN%' -File); $bad = @($files.Where({$_.Name -match '^(?:aarch64|arm64ec|armv7|i686)-w64-mingw32(?:uwp)?(?:-|$)'})); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"

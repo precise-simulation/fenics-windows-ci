@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 28
+  build: 29
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -67,9 +67,10 @@ about:
     archives, and build 26 prunes the measured-unobserved OneCore/UWP/WindowsApp
     target import-library family while preserving desktop Win32 and runtime
     archives, build 27 prunes the remaining measured-unobserved Nano Server
-    and Windows Core Headless target import libraries, and build 28 prunes the
+    and Windows Core Headless target import libraries, build 28 prunes the
     measured-unobserved Media Foundation and UI Automation target import
-    libraries.
+    libraries, and build 29 prunes the exact measured-unobserved Speech API
+    (sapi*) root header family.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

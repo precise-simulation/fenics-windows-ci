@@ -6,27 +6,42 @@
 
 Turn the Phase 1 prototype into the production TinyCC CFFI/setuptools backend through the narrowest maintainable integration while preserving the existing hermetic runtime setup model.
 
-The preferred design is an owned temporary `build_ext` specialization that directly instantiates a private TinyCC compiler implementation. Do not use global compiler configuration, do not pretend TinyCC is MinGW GCC/Clang, and do not depend on the claim that importing a compiler subclass can be temporarily registered/unregistered.
+The preferred design is an owned temporary `build_ext` specialization whose `build_extension()` validates the CFFI `Extension` metadata and invokes TinyCC directly from generated C source to the final `.pyd`. Do not use global compiler configuration, do not pretend TinyCC is MinGW GCC/Clang, and do not build a general-purpose distutils `CCompiler` abstraction unless qualification proves the direct path is insufficient.
 
 Phase 2 completes the production adapter before Phase 3 packages it as `fenics-jit-tinycc`.
+
+## Why direct build_ext is preferred
+
+CFFI's current out-of-line build path creates a temporary `Distribution`, runs its `build_ext` command, then consumes the command output path. FFCx supplies generated C source and does not require a reusable Windows object-file API.
+
+Therefore the production path should be:
+
+```text
+CFFI Extension
+  -> TinyCCBuildExt.build_extension(ext)
+  -> validate/translate extension metadata
+  -> tcc -shared <generated sources> <approved definitions> ... -o <module.pyd>
+  -> record get_outputs()/diagnostics
+```
+
+This deliberately avoids TinyCC's Windows `-c` ELF intermediates. If a future qualified CFFI/setuptools combination demonstrably requires the normal compiler-object split, introduce the smallest private compiler object needed at that time; do not pre-commit the architecture to a broader compiler API.
 
 ## Adapter responsibilities
 
 Implement only the subset required by CFFI `build_ext`:
 
+- determine the exact extension output path expected by setuptools/CFFI;
 - create output directories deterministically;
-- compile generated `.c` sources with TinyCC;
-- pass include directories and preprocessor definitions;
-- use TCC-owned intermediate objects only where the CFFI/build_ext contract requires them;
-- link those sources/objects into `.pyd` with `tcc -shared`;
+- consume generated `.c` sources directly;
+- pass approved include directories and preprocessor definitions;
+- invoke `tcc -shared` to produce the final `.pyd`;
 - include `python3.def` and any explicitly qualified system-import inputs;
-- propagate supported extra compile/link flags;
-- reject unsupported flags and unsupported binary inputs with a clear error;
+- translate supported compile/link flags;
+- reject unsupported flags, source types, libraries, library directories, and binary inputs with a clear error;
+- preserve the extension output/reporting contract (`get_outputs()` and expected file placement);
 - emit full command diagnostics when requested.
 
 TinyCC's Windows `-c` path emits ELF objects. The adapter must not expose those intermediates as general-purpose Windows object files or imply normal COFF interchange compatibility.
-
-The adapter must not expose a general-purpose cross-compiler surface unless CFFI actually requires it.
 
 ## Integration point
 
@@ -35,11 +50,12 @@ Extend the runtime-helper pattern currently used for LLVM-MinGW. Phase 4 will su
 For the current CFFI/setuptools model:
 
 1. install an owned temporary `build_ext` command class for the CFFI `Distribution`;
-2. have that command instantiate `TinyCCCompiler` directly rather than calling `new_compiler("tinycc")`;
-3. provide only the include/library/definition inputs approved for the TinyCC backend;
-4. restore all replaced command/distribution/process state when activation exits.
+2. override `build_extension()` to validate the `Extension` and invoke TinyCC directly;
+3. override/supply output-path bookkeeping required by CFFI/setuptools;
+4. provide only include/library/definition inputs approved for the TinyCC backend;
+5. restore all replaced command/distribution/process state when activation exits.
 
-If direct instantiation cannot be made compatible with a qualified setuptools version, a fallback may expose `compiler_type = "tinycc"` for `new_compiler()`, but the design must acknowledge that imported compiler subclasses remain discoverable process-wide. In that fallback, selection and configuration — not class existence — must be the process-local property.
+Only if this path cannot satisfy a qualified setuptools/CFFI version may the adapter introduce a private compiler implementation or `new_compiler()` integration. Any fallback must acknowledge that imported compiler subclasses can remain discoverable process-wide; selection and configuration, not class existence, must be the process-local property.
 
 The owned `build_ext` layer must:
 
@@ -47,8 +63,8 @@ The owned `build_ext` layer must:
 - reject a versioned Python library if one arrives through extension metadata;
 - prevent default Windows `libs`/`PCbuild`/MSVC/Windows-SDK library-directory injection from participating in the TinyCC link, retaining only explicitly approved roots;
 - keep the extension export-symbol behavior needed for `PyInit_<module>`;
-- define/pass `Py_NO_LINK_LIB` only where the active CPython headers support it;
-- independently verify that no CPython header-driven Python dependency appears on every supported version, including versions where `Py_NO_LINK_LIB` is unavailable;
+- record `_MSC_VER`, `Py_LIMITED_API`, and `Py_NO_LINK_LIB` behavior for the active CPython headers;
+- recognize that CPython pragma autolinking is `_MSC_VER`-conditioned, so command/import inspection is the authoritative Python-link check;
 - pass the Stable-ABI `python3.def` explicitly to TinyCC.
 
 Avoid:
@@ -83,13 +99,13 @@ Add tests for:
 
 ## CFFI/setuptools compatibility contract
 
-CFFI's `_shimmed_dist_utils.Distribution` and setuptools' vendored distutils/compiler implementation are version-sensitive integration points. Treat them as qualified dependencies rather than assumed stable APIs.
+CFFI's `_shimmed_dist_utils.Distribution` and setuptools' vendored distutils/build_ext implementation are version-sensitive integration points. Treat them as qualified dependencies rather than assumed stable APIs.
 
 Tests must record the `cffi` and `setuptools` versions and prove for every supported pair that:
 
 - CFFI creates the expected temporary `Distribution` path used by the runtime helper;
 - the owned TinyCC `build_ext` command is actually used;
-- the owned command directly creates the TinyCC compiler implementation, or the explicitly qualified fallback discovery path is used;
+- its `build_extension()` receives the generated CFFI `Extension` and produces the output path consumed by CFFI;
 - no alternate compiler/backend is selected;
 - Stable-ABI library suppression remains effective;
 - activation locking/restoration remains correct.
@@ -105,7 +121,7 @@ Examples:
 - `-std:c17` -> the verified TinyCC C11/default mode selected by Phase 1; do not imply TinyCC has a native C17 mode;
 - retain `-D__STDC_NO_COMPLEX__` initially;
 - require `-mms-bitfields` for Windows unless Phase 1's ABI record explicitly proves that no supported cross-compiler ABI surface requires MS bitfield layout;
-- add `-DPy_NO_LINK_LIB` only where the active CPython headers support it;
+- add `-DPy_NO_LINK_LIB` only where the active CPython headers support it and record whether `_MSC_VER` makes pragma autolinking relevant;
 - convert include/define options directly;
 - reject LLVM/GNU linker-map or dependency-generation flags that TinyCC does not support unless an equivalent is implemented;
 - keep optimization settings explicit rather than relying on ambient defaults;
@@ -113,25 +129,28 @@ Examples:
 
 Do not silently discard flags that affect ABI, packing/bitfields, visibility, symbol export, standard semantics, optimization, Python-library selection, CRT selection, or PE hardening.
 
+The adapter must also preserve the Phase-1 `long double` contract: no incompatible `long double` representation may cross into MSVC/UCRT-built UFCx/DOLFINx interfaces.
+
 ## Object/library input contract
 
-TinyCC's Windows object model is not a normal MSVC/MinGW COFF interchange surface. The adapter must have a narrow allowlist.
+TinyCC's Windows object model is not a normal MSVC/MinGW COFF interchange surface. Direct source-to-PYD compilation is the default, and the adapter must have a narrow allowlist.
 
 Allowed inputs:
 
 - generated C sources;
-- TCC-owned intermediate objects/archives created by the same qualified backend where required;
 - explicitly packaged/approved `.def` imports such as `python3.def` and qualified system definitions;
-- approved Windows system-DLL resolution only if Phase 1 selected that policy.
+- approved Windows system-DLL resolution only if Phase 1 selected that policy;
+- TCC-owned intermediate objects/archives only if a qualified fallback path proves they are necessary.
 
 Reject before invoking TinyCC:
 
 - MSVC `.lib` libraries;
 - foreign `.obj`/`.o` files;
 - arbitrary `.a` archives;
-- `extra_objects` unless they are explicitly tagged/verified as TCC-owned inputs;
+- `extra_objects` unless a qualified fallback explicitly owns and verifies them;
 - arbitrary `cffi_libraries` names that are not mapped to an approved import mechanism;
-- host SDK/Python/MSVC library directories.
+- host SDK/Python/MSVC library directories;
+- non-C source files not explicitly supported by the backend.
 
 Diagnostics must identify the rejected source of the input so future FFCx/CFFI changes fail clearly rather than producing confusing linker behavior.
 
@@ -158,9 +177,17 @@ Python API imports must come from packaged `python3.def`. The TinyCC link comman
 
 ## CRT and PE properties
 
-The adapter must make the Phase-1-qualified CRT and PE-hardening choices explicit rather than relying on TinyCC defaults that can change with an upstream update.
+The adapter must make the Phase-1-qualified CRT and fixed x64 PE-hardening choices explicit rather than relying on TinyCC defaults that can change with an upstream update.
 
-Use supported TinyCC linker controls for dynamic base, high-entropy VA, and NX compatibility when those controls satisfied Phase 1. A source patch is backend identity only if Phase 1 demonstrated that supported controls were insufficient.
+Use supported TinyCC linker controls and require the Phase-1 baseline:
+
+- `DYNAMIC_BASE`;
+- `HIGH_ENTROPY_VA`;
+- `NX_COMPAT`;
+- usable base relocations;
+- qualified x64 unwind/exception metadata.
+
+A source patch is backend identity only if Phase 1 demonstrated that supported controls were insufficient.
 
 Per JIT, verify/record as applicable:
 
@@ -169,45 +196,53 @@ Per JIT, verify/record as applicable:
 - `DllCharacteristics` mitigation bits;
 - relocation/unwind metadata presence expected by the qualified backend.
 
-Any backend source patch/configuration required for those properties is part of the pinned TinyCC backend identity.
+Any backend source patch/configuration required for those properties is part of the pinned TinyCC backend identity and therefore part of the backend cache identity.
+
+## Backend cache identity contribution
+
+The adapter/package metadata must expose a deterministic identity contribution covering compiler and binary-generation policy, including compiler revision/patch set, adapter cache-schema version, CRT model, ABI flags, Python-link policy, and PE hardening/link policy.
+
+Phase 4 combines this with the backend name to select a physical FFCx cache root **before** FFCx cache lookup. Do not attempt to solve cache isolation solely inside `build_extension()`; by then FFCx may already have loaded a cached module.
 
 ## Diagnostics
 
 Capture per JIT:
 
 - TinyCC exact revision/version and local patch identity;
+- backend cache identity;
 - `cffi` and `setuptools` versions;
-- selected owned build_ext/compiler implementation;
+- selected owned build_ext implementation;
 - activation owner/backend and lock/nesting diagnostics when verbose mode is enabled;
-- full compile and link command lines;
-- include and approved definition/library search roots;
+- full TinyCC command line;
+- source files and approved include/definition/library search roots;
 - `.def` files used;
-- whether `Py_NO_LINK_LIB` was available/used;
-- effective bitfield/packing policy;
+- `_MSC_VER`, `Py_LIMITED_API`, and `Py_NO_LINK_LIB` state;
+- effective bitfield/packing and `long double` policy;
 - approved system-library policy and resolved imports;
 - generated `.pyd` import/export table and mitigation characteristics;
 - compiler exit output;
 - adapter-selected standard/optimization/hardening flags;
-- backend-specific cache root supplied by the shared runtime.
+- backend-specific physical cache root supplied by the shared runtime.
 
 CI diagnostics should make it impossible to confuse a TinyCC build with LLVM-MinGW/MSVC fallback, to miss an implicit `pythonXY` link input, to miss a foreign binary input, or to miss an activation-state race.
 
 ## Tasks
 
-1. Implement the production private TinyCC compiler class/implementation.
-2. Implement the temporary owned `build_ext` specialization that directly instantiates it.
+1. Implement the production private TinyCC `build_ext` command with direct source-to-PYD `build_extension()`.
+2. Implement deterministic output-path/reporting behavior expected by CFFI/setuptools.
 3. Implement the process-wide reentrant activation lock and nested/conflicting-backend semantics.
 4. Implement compile/link option translation for the Phase-1-qualified TinyCC language and Windows ABI mode, including `-mms-bitfields` policy.
 5. Implement deterministic `.def` handling for Python imports and, if needed, extension exports.
 6. Implement the Phase-1-qualified system-library-resolution policy.
-7. Implement the strict object/library allowlist and negative tests.
+7. Implement the strict source/object/library allowlist and negative tests.
 8. Add tests for paths with spaces and non-default temporary directories.
 9. Add negative tests proving unsupported important flags and versioned Python libraries fail loudly.
 10. Add concurrency/nesting/restoration tests for same-backend and conflicting-backend activation.
 11. Add CFFI/setuptools compatibility tests for the package-supported version range.
-12. Add diagnostics plus PE/CRT/import verification hooks.
+12. Add diagnostics plus PE/CRT/import/cache-identity verification hooks.
 13. Ensure runtime activation restores all temporary Distribution/build_ext/CFFI/environment state after JIT success or failure.
+14. Only if the direct build_ext path fails a demonstrated CFFI requirement, document that evidence and introduce the smallest private compiler fallback necessary.
 
 ## Exit criteria
 
-Phase 2 passes when unmodified CFFI/FFCx callers can compile through the TinyCC backend without global configuration; the owned build_ext/compiler path is selected deterministically for the declared CFFI/setuptools versions; temporary process-global state is serialized and restoration-safe; the Windows bitfield/packing, Python-link, CRT, PE-hardening, system-library, and object-input contracts from Phase 1 are explicit; no host compiler, implicit versioned Python library, or unsupported foreign binary input can be selected accidentally; and the adapter is small enough to review as a dedicated FEniCS Windows integration layer.
+Phase 2 passes when unmodified CFFI/FFCx callers compile through the direct TinyCC build_ext path without global compiler configuration; the owned command is selected deterministically for the declared CFFI/setuptools versions; temporary process-global state is serialized and restoration-safe; the Windows bitfield/packing/`long double`, Python-link, CRT, fixed PE-hardening, system-library, object-input, and backend-cache-identity contracts from Phase 1 are explicit; no host compiler, implicit versioned Python library, or unsupported foreign binary input can be selected accidentally; and the adapter remains a narrow FEniCS Windows integration layer rather than a general-purpose TinyCC distutils backend.

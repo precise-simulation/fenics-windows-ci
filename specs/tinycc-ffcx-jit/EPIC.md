@@ -21,7 +21,7 @@ containing only what FFCx/CFFI needs to create Windows `.pyd` modules at runtime
 - x86-64 Windows `tcc.exe`;
 - minimal TinyCC runtime/include support;
 - required Windows import-definition files (`.def`), including a Stable-ABI `python3.dll` definition;
-- an owned TinyCC setuptools/CFFI compiler adapter;
+- an owned TinyCC CFFI/build_ext adapter;
 - backend metadata and diagnostics support.
 
 This is a dedicated FFCx JIT backend, not a general-purpose conda compiler environment.
@@ -43,7 +43,18 @@ fenics-jit-tinycc
   Library/fenics-jit/backends/tinycc/...
 ```
 
-`fenics-jit-runtime` owns backend selection, shared environment sanitization, Python/FFCx discovery, cache-root selection, diagnostics lifecycle, activation serialization, and MPI propagation. Each compiler package owns only compiler-specific payload and backend code beneath its own non-overlapping directory.
+`fenics-jit-runtime` owns backend selection, shared environment sanitization, Python/FFCx discovery, cache-root selection, diagnostics lifecycle, activation serialization, and MPI propagation. It must have **no dependency on either compiler backend**. Each compiler package owns only compiler-specific payload and backend code beneath its own non-overlapping directory.
+
+The default installation dependency shape is conceptually:
+
+```text
+fenics-dolfinx
+  -> fenics-jit-runtime
+  -> fenics-jit-llvm-mingw   # separate default-backend dependency, not a dependency of fenics-jit-runtime
+
+fenics-jit-tinycc
+  -> fenics-jit-runtime
+```
 
 Until that split is implemented, Phase 1-3 TinyCC experiments may use a private prototype/helper from the experiment tree, but `fenics-jit-tinycc` must not install a second copy of the production `Library/fenics-jit/runtime/fenics_jit_runtime.py` path already owned by LLVM-MinGW.
 
@@ -51,16 +62,17 @@ The existing DOLFINx Windows bootstrap is updated in Phase 4 to load the uniquel
 
 ## Architecture
 
-TinyCC is not a drop-in executable replacement for `x86_64-w64-mingw32-clang` under setuptools' `mingw32` backend. The Windows port can emit DLLs directly with `tcc -shared`, but it uses its own compile/link model, ELF intermediate objects on the Windows `-c` path, runtime, and Windows `.def` import definitions. Use an owned TinyCC compiler adapter plus the smallest required CFFI `build_ext` integration rather than pretending TinyCC is GCC/Clang.
+TinyCC is not a drop-in executable replacement for `x86_64-w64-mingw32-clang` under setuptools' `mingw32` backend. The Windows port can emit DLLs directly with `tcc -shared`, but it uses its own compile/link model, ELF intermediate objects on the Windows `-c` path, runtime, and Windows `.def` import definitions.
+
+The preferred production integration is therefore the narrowest CFFI-compatible path: an owned `build_ext` specialization whose `build_extension()` validates the CFFI `Extension` metadata and directly invokes TinyCC from generated C source to the final `.pyd`. Do not introduce a general-purpose distutils `CCompiler` implementation unless Phase 1/2 evidence shows CFFI actually requires one. This avoids exposing TinyCC ELF intermediates as a Windows object interchange surface.
 
 ```text
 UFL
   -> FFCx generated C
   -> CFFI generated wrapper C
   -> shared Windows JIT runtime selector
-  -> owned TinyCC build_ext/compiler adapter
-  -> tcc.exe compile/link
-  -> JIT .pyd
+  -> owned TinyCC build_ext adapter
+  -> tcc -shared generated.c ... -o module.pyd
   -> DOLFINx
 ```
 
@@ -71,24 +83,58 @@ FENICS_JIT_COMPILER=llvm-mingw   # current reference/default
 FENICS_JIT_COMPILER=tinycc       # experimental
 ```
 
+## Backend cache identity
+
+LLVM-MinGW and TinyCC artifacts must never share a physical FFCx/CFFI cache namespace, and successive incompatible builds of the same backend must not share one either.
+
+The shared runtime must derive a stable immutable `backend-cache-id` before FFCx performs its first cache lookup. The identity must change whenever generated binary compatibility can change, including at least:
+
+- compiler revision and local patch set;
+- backend adapter/cache-schema version;
+- CRT model;
+- ABI-affecting flags such as `-mms-bitfields`;
+- language/optimization policy where it can affect generated compatibility;
+- Python-link/import-definition policy;
+- PE hardening/link configuration.
+
+Use a physical namespace conceptually like:
+
+```text
+<cache>/ffcx/llvm-mingw/<backend-cache-id>/...
+<cache>/ffcx/tinycc/<backend-cache-id>/...
+```
+
+Do not rely on the FFCx source/module hash to encode backend identity because FFCx performs cache lookup before the later CFFI/compiler activation path.
+
 ## Main risks
 
 1. **C language coverage** — current TinyCC development builds expose C11/gnu11 as their newest explicit language mode, while FFCx 0.11 requests C17. Prove the exact pinned TinyCC revision against the actual CFFI/FFCx generated-source corpus. Any actually required unsupported C17 semantics are a Phase 1 stop condition; do not broadly rewrite generated source.
-2. **Windows ABI compatibility** — TCC-generated x86-64 PE code must interoperate with MSVC-built CPython/DOLFINx. TinyCC defaults to its non-MS/PCC bitfield layout unless `-mms-bitfields` is selected, so the Windows backend must either use `-mms-bitfields` or prove that no cross-compiler ABI structure contains bitfields. Compare UFCx layout/calling-convention probes with the working LLVM-MinGW path, including packing/bitfield cases. Preserve `__STDC_NO_COMPLEX__` unless a stronger ABI proof permits otherwise, and explicitly cover `long double` size/alignment and any representation crossing the compiler boundary.
-3. **Python linking** — use a package-built `python3.def` targeting Stable-ABI `python3.dll`; explicitly suppress setuptools' native-Windows versioned `pythonXY` library selection and verify absence of CPython header-driven library autolinking. `Py_NO_LINK_LIB` is an additional defense only on CPython versions whose headers support it; command capture and PE import inspection are authoritative on every supported version.
+2. **Windows ABI compatibility** — TCC-generated x86-64 PE code must interoperate with MSVC-built CPython/DOLFINx. TinyCC defaults to its non-MS/PCC bitfield layout unless `-mms-bitfields` is selected, so the Windows backend must either use `-mms-bitfields` or prove that no cross-compiler ABI structure contains bitfields. Current x86-64 TinyCC also uses a 16-byte/16-aligned `long double`, unlike the MSVC Windows model; any `long double` representation crossing the TinyCC/MSVC-UFCx boundary is therefore a Phase-1 stop condition unless an exact compatible representation is independently proven.
+3. **Python linking** — use a package-built `python3.def` targeting Stable-ABI `python3.dll`; explicitly suppress setuptools' native-Windows versioned `pythonXY` library selection. CPython pragma autolinking is `_MSC_VER`-conditioned and `Py_NO_LINK_LIB` is only an additional defense where supported; command capture and final PE imports are authoritative. Record `_MSC_VER`, `Py_LIMITED_API`, and `Py_NO_LINK_LIB` behavior for each supported interpreter.
 4. **CRT boundary** — current upstream TinyCC Win64 links `msvcrt.dll` by default, while the qualified LLVM-MinGW runtime is UCRT-based. Phase 1 must either establish a qualified UCRT-compatible TinyCC configuration or explicitly prove the mixed-CRT boundary safe for all generated wrapper/kernel interactions before production-adapter work proceeds.
-5. **PE hardening** — do not accept loadability alone. Current TinyCC exposes PE linker controls for dynamic base, high-entropy VA, and NX compatibility even though x86-64 defaults may be zero. First qualify explicit linker options and inspect the emitted image; require a narrowly scoped source patch only if supported options cannot produce the agreed mitigation, relocation, and x64-unwind baseline.
+5. **PE hardening/unwind** — the minimum x64 acceptance baseline is explicit: `DYNAMIC_BASE`, `HIGH_ENTROPY_VA`, and `NX_COMPAT` must be set; usable base relocation metadata must be present for ASLR; and x64 unwind/exception metadata for generated functions must satisfy the qualified Windows contract. Current TinyCC exposes PE linker controls for these mitigation bits even though x86-64 defaults may be zero. First qualify supported options and inspect the emitted image; use a narrowly scoped source patch only if supported options are insufficient.
 6. **Generated-code performance** — TinyCC should compile very quickly, but its generated code may be slower. Kernel/assembly execution must be benchmarked against LLVM-MinGW before any default switch.
-7. **Setuptools/CFFI integration** — own compiler selection in-process; do not depend on global config or masquerade as the `mingw32` backend. Prefer an owned `build_ext` that directly instantiates the TinyCC compiler instead of relying on temporary registration through `new_compiler("tinycc")`, because imported compiler subclasses remain process-discoverable in modern setuptools. Treat CFFI's `_shimmed_dist_utils` and setuptools integration as a versioned boundary with explicit runtime dependencies and compatibility tests.
+7. **Setuptools/CFFI integration** — own compiler selection in-process; do not depend on global config or masquerade as the `mingw32` backend. Prefer direct `build_ext.build_extension()` source-to-PYD compilation. Treat CFFI's `_shimmed_dist_utils` and setuptools integration as a versioned boundary with explicit runtime dependencies and compatibility tests.
 8. **Process-global activation state** — current CFFI integration requires temporary process-global state such as environment variables and CFFI/setuptools hooks. Serialize activation with a process-wide reentrant lock, define nested activation semantics, and reject conflicting nested backend activation rather than permitting cross-thread/compiler state races.
-9. **Object/library incompatibility** — TinyCC's Windows `-c` path emits ELF objects, not normal MSVC/MinGW COFF objects. The adapter must explicitly reject foreign `.obj`/`.o`/`.lib`/archives and unsupported `extra_objects`/`cffi_libraries` rather than silently attempting to link them. Packaged `.def` imports and TCC-owned objects/archives are the explicit allowed path.
+9. **Object/library incompatibility** — TinyCC's Windows `-c` path emits ELF objects, not normal MSVC/MinGW COFF objects. The adapter must explicitly reject foreign `.obj`/`.o`/`.lib`/archives and unsupported `extra_objects`/`cffi_libraries`. Direct source-to-PYD compilation is preferred specifically to avoid depending on object interchange.
 10. **System-library provenance** — native TinyCC can search the Windows system directory for DLLs. The backend must make this policy explicit: normal Windows system DLL resolution may be an approved operating-system input, but host SDK import libraries, arbitrary ambient library directories, and compiler-development inputs are not. Record resulting imports and approved search roots in diagnostics.
-11. **Cache identity** — LLVM-MinGW and TinyCC artifacts must never share a physical FFCx/CFFI cache namespace. Backend-specific cache roots are mandatory and must be chosen before FFCx performs its cache lookup, not only inside the later CFFI compiler activation.
+11. **Cache identity** — backend-specific physical roots and immutable backend-cache identities are mandatory and must be chosen before FFCx performs cache lookup.
 12. **Licensing** — TinyCC is LGPL-2.1; ship required notices/license material and satisfy source/modification distribution obligations before release.
 
 ## Upstream baseline
 
 Do not assume the 2017 `0.9.27` Windows binary is the best baseline. The current TinyCC development branch has recent Win64/PE work. Phase 1 should pin an exact upstream development commit and checksum, while also recording whether the latest formal release passes the same proof. No moving branch/tag is acceptable in a reproducible package.
+
+## LLVM-MinGW reference baseline
+
+Use the immutable qualified Stage AW result merged through PR #9 as the comparison baseline:
+
+- qualification run: stack #231 (`34580520920`);
+- staged JIT payload: **215.19 MiB**;
+- packaged installed content: **216.43 MiB**;
+- compressed `.conda`: **51.34 MiB**.
+
+Any future change of reference must name the exact replacement package/recipe identity and qualification run; do not silently compare TinyCC against a moving LLVM-MinGW branch state.
 
 ## Phases
 
@@ -96,10 +142,10 @@ Do not assume the 2017 `0.9.27` Windows binary is the best baseline. The current
 | --- | --- | --- | --- |
 | 1 | [Compatibility proof](01-compatibility-proof.md) | Minimal CFFI + fresh FFCx Poisson JIT works with only TinyCC | Functional/ABI/security go-no-go |
 | 2 | [CFFI compiler adapter](02-cffi-adapter.md) | Production TinyCC backend integrates hermetically with CFFI/setuptools | Integration/concurrency gate |
-| 3 | [Runtime package](03-runtime-package.md) | Reproducible backend-only `fenics-jit-tinycc` package | Package/reproducibility gate |
-| 4 | [Runtime integration](04-runtime-integration.md) | Single-owner shared runtime plus side-by-side backend selection | Isolation/ownership gate |
+| 3 | [Runtime package](03-runtime-package.md) | Reproducible backend-only `fenics-jit-tinycc` package | Package/reproducibility + early footprint gate |
+| 4 | [Runtime integration](04-runtime-integration.md) | Single-owner shared runtime plus side-by-side backend selection | Isolation/ownership/cache-identity gate |
 | 5 | [Functional validation](05-functional-validation.md) | Existing broad JIT matrix passes under TinyCC | Coverage gate |
-| 6 | [Size and performance comparison](06-size-performance-comparison.md) | TinyCC tradeoffs measured against LLVM-MinGW | Decision gate |
+| 6 | [Size and performance comparison](06-size-performance-comparison.md) | TinyCC tradeoffs measured against LLVM-MinGW | Final size/performance decision gate |
 | 7 | [Standalone and release decision](07-standalone-release-decision.md) | Standalone proof plus explicit fallback/default/no-ship decision | Release gate |
 
 Phases are ordered. Phase 1 may use a deliberately narrow prototype, but the production adapter is completed and qualified in Phase 2 before the reproducible package is finalized in Phase 3. No runtime metadata/default switch may bypass an earlier gate.
@@ -115,31 +161,24 @@ Stop if the following cannot be made reliable with a small maintainable adapter 
 - no Visual Studio, host Windows SDK compiler inputs, GCC, Clang, or external linker participates;
 - generated `.pyd` imports the intended `python3.dll` Stable ABI;
 - no TinyCC link command requests `python312`, `python313`, `python314`, or another minor-version Python library, and no resulting PE imports a minor-version Python DLL;
-- `Py_NO_LINK_LIB` is used where supported, while older supported headers are qualified by command/import inspection rather than assuming that macro exists;
-- UFCx ABI probes, including packing/bitfield behavior and `long double`/alignment coverage where relevant, match the MSVC/LLVM-MinGW consumer contract;
+- CPython preprocessor/link behavior (`_MSC_VER`, `Py_LIMITED_API`, `Py_NO_LINK_LIB`) is recorded, but command/import inspection remains authoritative;
+- UFCx ABI probes, including packing/bitfield behavior, match the MSVC/LLVM-MinGW consumer contract;
+- no `long double` representation crosses a compiler boundary unless exact compatibility has been independently demonstrated;
 - `-mms-bitfields` is used by default for the Windows backend unless Phase 1 proves it unnecessary for every cross-compiler ABI surface;
 - the generated C corpus does not require unsupported compiler semantics;
-- the CRT boundary is explicitly qualified, with current TinyCC's default `msvcrt.dll` use treated as a known issue rather than a hypothetical possibility;
-- PE hardening first uses qualified TinyCC linker options for dynamic base/high-entropy VA/NX, with source patching only if those controls prove insufficient;
-- resulting PE modules satisfy the required Windows mitigation/unwind/relocation checks;
+- the CRT boundary is explicitly qualified;
+- generated x64 PE modules have `DYNAMIC_BASE`, `HIGH_ENTROPY_VA`, and `NX_COMPAT`, usable relocations, and the qualified x64 unwind/exception metadata;
 - approved Windows system-DLL resolution is distinguished from forbidden host SDK/compiler-development inputs.
 
 Python 3.15 preview qualification covers the standard GIL-enabled build only unless free-threaded Python is added later as a separate ABI/import-library qualification target.
 
-### Size gate
+### Early footprint gate
 
-Use the qualified LLVM-MinGW Stage AW package as the reference:
+Phase 3 is allowed to fail early if the complete backend package is already too large to justify further integration work. The provisional early gate is the same <=25% installed-footprint threshold used for final qualification (about 54 MiB against Stage AW). Passing Phase 3 only means the footprint is promising enough to continue; it is **not** the final shipping decision.
 
-- installed content: **216.43 MiB**;
-- compressed `.conda`: **51.34 MiB**.
+### Final size/performance gate
 
-TinyCC should be no more than **25% of the LLVM-MinGW installed footprint** (about 54 MiB) to justify proceeding past Phase 6. Record compressed size separately. A stretch objective is a single-digit-MiB dedicated runtime payload.
-
-When side-by-side packaging is measured, distinguish the common `fenics-jit-runtime` bytes from backend-specific incremental bytes so TinyCC and LLVM-MinGW are compared fairly.
-
-### Runtime performance gate
-
-Measure both JIT latency and generated kernel/assembly performance.
+Phase 6 repeats the installed/compressed/standalone footprint measurements after the complete integration and validation path exists and combines those measurements with JIT latency and generated-code performance.
 
 - **default candidate:** representative assembly/runtime performance within 25% of LLVM-MinGW, with no numerical/stability regression;
 - **fallback/compact candidate:** may be slower but should normally remain within 3x LLVM-MinGW on representative kernels while offering a compelling footprint reduction;
@@ -159,19 +198,20 @@ The epic is successful when:
 
 - an exact pinned TinyCC revision builds reproducibly from a pinned bootstrap compiler/build chain, with a self-host stage or an explicitly documented equivalent reproducibility proof;
 - the package has no runtime dependency on an external compiler/linker;
-- shared runtime ownership is single-source and compiler packages install to non-overlapping backend paths;
+- shared runtime ownership is single-source, compiler packages install to non-overlapping backend paths, and the common runtime has no compiler-backend dependency;
 - `cffi` and `setuptools` are explicit runtime dependencies with a tested compatibility contract for the integration used by the adapter;
-- CFFI/FFCx JIT works on supported CPython runtimes through an owned TinyCC adapter;
+- CFFI/FFCx JIT works on supported CPython runtimes through the narrow owned TinyCC `build_ext` path;
 - temporary process-global activation state is protected by a reentrant process-wide lock and conflicting nested backend activation fails deterministically;
 - generated modules use the intended Python Stable ABI, no minor-version Python link dependency is requested, and PE imports are audited;
-- UFCx/Windows ABI compatibility, including packing/bitfield and relevant floating-point/layout contracts, is proven;
+- UFCx/Windows ABI compatibility, including packing/bitfield contracts, is proven and no incompatible `long double` value crosses the compiler boundary;
 - the known TinyCC CRT model is qualified or replaced with a qualified UCRT-compatible configuration;
-- generated PE modules meet the required Windows security/unwind/relocation baseline using supported linker controls where possible;
+- generated PE modules meet the explicit x64 security/unwind/relocation baseline;
 - approved Windows system-DLL resolution is explicit and ambient SDK/compiler-library resolution is excluded;
 - unsupported foreign object/library inputs fail explicitly;
-- the full existing FFCx functional matrix, backend-isolated cache behavior, paths-with-spaces, thread-concurrency behavior, and MPI semantics pass;
+- each backend/cache-incompatible revision uses a distinct physical cache namespace selected before FFCx cache lookup;
+- the full existing FFCx functional matrix, paths-with-spaces, thread-concurrency behavior, and MPI semantics pass;
 - numerical results match the LLVM-MinGW reference;
-- size and compile/runtime performance are measured side-by-side;
+- size and compile/runtime performance are measured side-by-side against the pinned Stage AW baseline;
 - a standalone bundle performs fresh JIT with the original prefix unavailable and without depending on LLVM-MinGW merely for shared runtime code;
 - an explicit decision records whether TinyCC is a fallback, compact standalone backend, default backend, or rejected.
 

@@ -19,8 +19,9 @@ Expected retained components beneath a backend-specific layout such as `Library/
 - minimal TinyCC standard/include tree required by the CFFI/FFCx generated source;
 - minimal Windows import-definition files required by the compiler/runtime path;
 - deterministic `python3.def` for Stable-ABI linking;
-- the Phase-2 owned TinyCC compiler/build_ext adapter;
-- backend metadata/diagnostics support;
+- the Phase-2 owned TinyCC direct `build_ext` adapter;
+- backend metadata including the deterministic backend cache identity contribution;
+- diagnostics support;
 - TinyCC license/notices and source provenance metadata.
 
 Do **not** install a competing copy of `Library/fenics-jit/runtime/fenics_jit_runtime.py` or another path intended to be owned by the eventual common runtime package.
@@ -76,7 +77,7 @@ Rebuild the complete package twice in clean work directories. Compare:
 - installed manifest paths and sizes;
 - relevant file hashes;
 - compiler/runtime binary hashes after any explicitly documented normalization;
-- backend metadata recording source, bootstrap, patches, CRT policy, hardening policy, and adapter version.
+- backend metadata recording source, bootstrap, patches, CRT policy, hardening policy, adapter version, and backend cache identity.
 
 Where TinyCC's build embeds timestamps or other nondeterministic data, remove/normalize the source where reasonable or document the exact normalized fields and prove no semantic payload differs.
 
@@ -94,7 +95,7 @@ Generate `python3.def` during package construction from a pinned/reference Stabl
 
 Do not require import-definition generation at end-user runtime. The packaged adapter must suppress implicit versioned `pythonXY` linkage and pass this definition explicitly.
 
-Record whether `Py_NO_LINK_LIB` is available for each supported Python version, but do not make package correctness depend on it: captured link inputs and final PE imports remain authoritative.
+Record `_MSC_VER`, `Py_LIMITED_API`, and `Py_NO_LINK_LIB` state for each supported Python version, but do not make package correctness depend on any one macro: captured link inputs and final PE imports remain authoritative.
 
 ## Windows ABI policy provenance
 
@@ -104,7 +105,7 @@ Package metadata and tests must encode the exact Phase-1/2 ABI policy:
 - `__STDC_NO_COMPLEX__` policy;
 - `-mms-bitfields` policy and the ABI evidence supporting it;
 - packing/layout assumptions covered by the qualification probes;
-- `long double` relevance and any cross-boundary restrictions.
+- the known TinyCC x86-64 `long double` representation and proof that incompatible values do not cross the MSVC/UFCx boundary.
 
 Do not allow a later TinyCC or adapter update to silently change these flags.
 
@@ -116,10 +117,23 @@ The package recipe must encode the exact qualified runtime/link outcome:
 - if a mixed `msvcrt.dll` boundary is qualified, retain the corresponding runtime/ABI tests as package tests;
 - record whether approved Windows system-DLL lookup or fully explicit packaged definitions are used;
 - reject host SDK/MSVC/Python development library directories in installed-package tests;
-- use qualified TinyCC linker controls for dynamic base/high-entropy VA/NX when those controls were sufficient;
-- if PE mitigation requires a TinyCC source patch after supported options were proven insufficient, ship that exact patch source/provenance and verify generated `.pyd` characteristics from the installed package.
+- require `DYNAMIC_BASE`, `HIGH_ENTROPY_VA`, and `NX_COMPAT`, usable relocations, and qualified x64 unwind/exception metadata;
+- if PE mitigation/unwind requires a TinyCC source patch after supported options were proven insufficient, ship that exact patch source/provenance and verify generated `.pyd` characteristics from the installed package.
 
 Do not allow a later TinyCC upgrade to silently change CRT imports, system-library resolution, mitigation characteristics, or unwind/relocation behavior.
+
+## Backend cache identity metadata
+
+Package metadata must expose a deterministic backend cache identity contribution that changes whenever generated binary compatibility can change. Include at least:
+
+- exact TinyCC source revision and local patch set;
+- adapter/cache-schema version;
+- CRT model;
+- ABI-affecting compile flags including bitfield policy;
+- Python-link/import-definition policy;
+- PE hardening/link policy.
+
+Phase 4 uses this identity to select the physical FFCx cache namespace before FFCx cache lookup.
 
 ## Relocatability
 
@@ -137,6 +151,18 @@ TinyCC is LGPL-2.1. Package at minimum:
 
 Treat licensing completion as part of the package gate rather than release cleanup.
 
+## Early footprint gate
+
+Use the immutable LLVM-MinGW Stage AW baseline qualified in stack #231 (`34580520920`):
+
+- 215.19 MiB staged;
+- 216.43 MiB installed;
+- 51.34 MiB compressed.
+
+The complete TinyCC backend package should be <=25% of the LLVM-MinGW installed footprint (about 54 MiB) at this phase. This is an **early go/no-go gate** intended to avoid spending Phases 4-6 on a backend that has already lost its primary footprint advantage.
+
+Passing this gate is not the final size/shipping decision. Phase 6 repeats the measurements after full integration/validation and combines them with JIT latency and generated-code runtime performance.
+
 ## Tasks
 
 1. Add `recipes/fenics-jit-tinycc/` after Phase 2 succeeds.
@@ -144,16 +170,16 @@ Treat licensing completion as part of the package gate rather than release clean
 3. Implement the preferred self-host/equivalent reproducibility procedure and document any normalized nondeterministic fields.
 4. Stage the minimum x86-64 Windows backend payload under a non-overlapping TinyCC backend root.
 5. Generate/package `python3.def` and required system `.def` files according to the qualified import policy.
-6. Package the Phase-2 compiler/build_ext adapter and backend metadata without owning the common runtime-helper path.
-7. Encode the qualified Windows ABI, CRT, system-library, and PE-hardening configuration/patches from Phases 1-2.
+6. Package the Phase-2 direct build_ext adapter and backend metadata without owning the common runtime-helper path.
+7. Encode the qualified Windows ABI, CRT, system-library, fixed PE-hardening, and backend-cache-identity configuration from Phases 1-2.
 8. Declare `cffi` and `setuptools` runtime dependencies and record the qualified versions/ranges.
 9. Add package smoke tests that compile and import a minimal CFFI extension and verify no versioned Python link dependency.
-10. Add package tests for foreign-object/library rejection, activation locking/restoration, bitfield policy, PE mitigation, CRT imports, and system-library provenance.
+10. Add package tests for foreign-object/library rejection, activation locking/restoration, bitfield/`long double` policy, PE mitigation, CRT imports, and system-library provenance.
 11. Test install into a clean prefix and a path containing spaces.
 12. Verify no runtime compiler input resolves to the build prefix or ambient Python/MSVC/Windows-SDK library directories.
 13. Perform two clean package rebuilds and compare manifests/hashes under the documented reproducibility contract.
-14. Record staged, installed, and compressed backend package sizes.
+14. Record staged, installed, and compressed backend package sizes and apply the early footprint gate.
 
 ## Exit criteria
 
-Phase 3 passes when the backend package installs into an otherwise compiler-free runtime prefix; performs the Phase-1 CFFI/Poisson proof through the Phase-2 production adapter; declares and validates its CFFI/setuptools compatibility contract; preserves the qualified Windows ABI, CRT, system-library, activation, and PE-security properties; is relocatable; can be reproduced from a pinned TinyCC source plus a pinned bootstrap/build chain under a documented binary/hash comparison procedure; contains complete licensing/provenance metadata; owns no common runtime-helper path; and remains below the 25%-of-LLVM-MinGW installed-size gate.
+Phase 3 passes when the backend package installs into an otherwise compiler-free runtime prefix; performs the Phase-1 CFFI/Poisson proof through the Phase-2 direct build_ext adapter; declares and validates its CFFI/setuptools compatibility contract; preserves the qualified Windows ABI, known `long double` boundary, CRT, system-library, activation, fixed PE-security, and backend-cache-identity properties; is relocatable; can be reproduced from a pinned TinyCC source plus a pinned bootstrap/build chain under a documented binary/hash comparison procedure; contains complete licensing/provenance metadata; owns no common runtime-helper path; and passes the explicit early <=25%-of-Stage-AW installed-size gate.

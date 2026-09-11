@@ -57,7 +57,7 @@ class TinyCCConfig:
             raise RuntimeError(f"TinyCC executable is missing: {tcc}")
         if not python_def.is_file():
             raise RuntimeError(f"python3.def is missing: {python_def}")
-        identity = "tinycc-phase1-v1-" + revision[:16] + "-mingw32-model-msbitfields-msvcrt-hardened-pe"
+        identity = "tinycc-phase1-v1-" + revision[:16] + "-mingw32-mswin64-model-msbitfields-msvcrt-hardened-pe"
         diagnostics_dir.mkdir(parents=True, exist_ok=True)
         return cls(root, tcc, python_def, diagnostics_dir, identity)
 
@@ -176,6 +176,7 @@ class TinyCCBuildExt(_dist.build_ext):
             "-Wl,-high-entropy-va",
             "-Wl,-nxcompat",
             "-D__MINGW32__=1",
+            "-DMS_WIN64=1",
             "-D__STDC_NO_COMPLEX__=1",
         ]
         if _header_supports_py_no_link_lib():

@@ -1,19 +1,19 @@
-# Phase 5: broad functional validation
+# Phase 5: broad integrated functional validation
 
 **Status:** proposed.
 
 ## Objective
 
-Run the same broad FFCx/CFFI coverage used to qualify LLVM-MinGW, but with the TinyCC backend selected explicitly and with the TinyCC-specific ABI, import, hardening, concurrency, and provenance contracts exercised as regressions.
+After Phase 4A has established TinyCC viability privately and Phase 4B has integrated the shared runtime, run the same broad FFCx/CFFI coverage used to qualify LLVM-MinGW with the TinyCC backend selected explicitly and with TinyCC-specific ABI, import, hardening, concurrency, cache-isolation, MPI, provenance, and external-config contracts exercised as regressions.
 
-The goal is to discover unsupported generated-C constructs, ABI/CRT edge cases, packing/bitfield mismatches, PE hardening/unwind problems, cache problems, thread/MPI behavior differences, foreign-binary-input regressions, system-library leakage, and compiler-specific numerical failures before performance/size can influence the decision.
+The goal is to discover integration-specific cache, thread/MPI, shared-runtime, ownership, or compiler-selection regressions while repeating the important TinyCC correctness checks from the private Phase-4A gate before performance/size can influence the final decision.
 
 ## Required matrix
 
 At minimum reproduce the current LLVM-MinGW Phase 5 coverage:
 
-- standard GIL-enabled CPython 3.12, 3.13, and 3.14;
-- standard GIL-enabled Python 3.15 preview when available in the existing CI path;
+- standard GIL-enabled CPython 3.12, 3.13, and 3.14 as the supported gating matrix;
+- standard GIL-enabled Python 3.15 preview when available in the existing CI path, **informational/non-blocking until Python 3.15 is promoted into the supported repository matrix**;
 - fresh JIT and subsequent cache reload;
 - scalar Poisson baseline;
 - vector/tensor forms;
@@ -75,7 +75,7 @@ If Phase 1 determined that `-mms-bitfields` is required, fail if any TinyCC comp
 
 ## Stress/repeatability
 
-Add repeated fresh JIT cycles within one process and across new processes to catch compiler/adapter state leakage.
+Repeat the private Phase-4A stress tests after shared-runtime integration and add cross-backend switching coverage.
 
 Suggested stress set:
 
@@ -90,7 +90,7 @@ Do not require unsafe forced unloading of CPython extension modules merely to cr
 
 ## Thread-concurrency and activation stress
 
-Validate the shared Phase-4 activation lock under standard GIL-enabled CPython:
+Validate the shared Phase-4B activation lock under standard GIL-enabled CPython:
 
 - start two TinyCC JIT requests from separate Python threads and prove their process-global activation windows do not interleave;
 - start TinyCC and LLVM-MinGW JIT requests concurrently and prove each completes under its own backend/cache identity without mixed environment/hooks;
@@ -101,13 +101,26 @@ Validate the shared Phase-4 activation lock under standard GIL-enabled CPython:
 
 The expected behavior is safe serialization, not same-process parallel compilation through mutable global CFFI/setuptools state.
 
+## CFFI interception and external-config integrity
+
+Repeat the Phase-1/2 hostile-config proof after shared-runtime integration.
+
+Require that:
+
+- the owned shimmed `Distribution` interception is selected for TinyCC;
+- ambient `setup.cfg`, `pydistutils.cfg`, or equivalent distutils/setuptools config cannot select another compiler or inject include/library/link options;
+- activation failure restores the original CFFI/setuptools objects;
+- switching back to LLVM-MinGW after a TinyCC activation does not retain TinyCC-specific hooks or config suppression state;
+- diagnostics identify the active adapter/config-policy version.
+
 ## Python-link integrity
 
 For every supported Python version and representative JIT module:
 
 - capture the logical libraries and `.def` inputs passed to TinyCC;
-- fail if `python312`, `python313`, `python314`, `python315`, or another minor-version Python library is requested;
-- inspect PE imports and require `python3.dll` with no minor-version Python DLL;
+- fail if `python312`, `python313`, `python314`, or another minor-version Python library is requested for a supported runtime;
+- for the non-blocking Python 3.15 preview, record whether any `python315` request/import occurs and treat such a result as preview failure evidence rather than a release gate until 3.15 is supported;
+- inspect PE imports and require `python3.dll` with no minor-version Python DLL on the supported matrix;
 - record whether `Py_NO_LINK_LIB` is supported/used for the active headers;
 - verify that versions without that macro still acquire no implicit Python autolink dependency.
 
@@ -166,28 +179,31 @@ Exercise the strict adapter boundary with negative cases:
 - arbitrary non-qualified archive;
 - unsupported `extra_objects`;
 - unsupported `cffi_libraries` request;
-- host SDK/MSVC/Python development library directory injection.
+- host SDK/MSVC/Python development library directory injection;
+- hostile external distutils/setuptools compiler/link configuration.
 
 Each case must fail before an ambient/alternate linker can participate.
 
 ## Tasks
 
 1. Parameterize the existing Phase 5 validation for backend selection where practical.
-2. Run the full standard GIL-enabled CPython matrix under TinyCC.
-3. Preserve generated C and compile/link diagnostics.
-4. Compare numerical results with LLVM-MinGW.
-5. Re-run ABI/packing/bitfield/`long double` probes from the installed package.
-6. Add repeated compile/load stress across same-process and new-process runs.
-7. Validate mandatory physical cache isolation, pre-cache-lookup root selection, and fresh compilation across backend switches.
-8. Validate thread-concurrency, nested activation, conflicting-backend rejection, and exception restoration through the shared runtime lock.
-9. Validate MPI behavior and cache-root propagation.
-10. Validate Stable-ABI link integrity on every supported Python version, including explicit handling of versions without `Py_NO_LINK_LIB`.
-11. Validate the qualified CRT boundary and allocator/ownership stress.
-12. Validate the qualified system-library-resolution policy and absence of SDK/compiler-development leakage.
-13. Validate PE mitigation, relocation, and x64 unwind properties and the expected TinyCC hardening controls.
-14. Run foreign-object/library negative tests.
-15. Record unsupported-warning inventory without suppressing it globally.
+2. Run the full supported standard GIL-enabled CPython 3.12-3.14 matrix under TinyCC.
+3. Run Python 3.15 preview separately as non-blocking evidence.
+4. Preserve generated C and compile/link diagnostics.
+5. Compare numerical results with LLVM-MinGW.
+6. Re-run ABI/packing/bitfield/`long double` probes from the installed package.
+7. Add repeated compile/load stress across same-process and new-process runs.
+8. Validate mandatory physical cache isolation, pre-cache-lookup root selection, and fresh compilation across backend switches.
+9. Validate thread-concurrency, nested activation, conflicting-backend rejection, and exception restoration through the shared runtime lock.
+10. Validate MPI behavior and cache-root propagation.
+11. Validate the owned CFFI `Distribution` interception and external-config suppression after backend switching.
+12. Validate Stable-ABI link integrity on every supported Python version, including explicit handling of versions without `Py_NO_LINK_LIB`.
+13. Validate the qualified CRT boundary and allocator/ownership stress.
+14. Validate the qualified system-library-resolution policy and absence of SDK/compiler-development leakage.
+15. Validate PE mitigation, relocation, and x64 unwind properties and the expected TinyCC hardening controls.
+16. Run foreign-object/library/config negative tests.
+17. Record unsupported-warning inventory without suppressing it globally.
 
 ## Exit criteria
 
-Phase 5 passes when TinyCC completes the full existing functional matrix and stress tests on supported standard GIL-enabled Python versions with no ABI/packing/bitfield, CRT, PE-security/unwind, cache, thread-activation, MPI, Python-link, system-library, object/library-boundary, or numerical regression and with no ambient compiler fallback.
+Phase 5 passes when TinyCC completes the full integrated functional matrix and stress tests on supported standard GIL-enabled Python 3.12-3.14 with no ABI/packing/bitfield, CRT, PE-security/unwind, cache, thread-activation, MPI, CFFI-interception/config, Python-link, system-library, object/library-boundary, or numerical regression and with no ambient compiler fallback. Python 3.15 preview results are recorded but do not block Phase 5 until that runtime becomes supported by the repository.

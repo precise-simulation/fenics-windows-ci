@@ -30,11 +30,31 @@ Prototype the smallest adapter required to prove the compiler path:
 - reject unsupported options and foreign binary inputs instead of silently ignoring important semantics;
 - prevent native-Windows setuptools behavior from adding MSVC/versioned-Python library inputs.
 
-Prefer an owned temporary `build_ext` command whose `build_extension()` directly invokes TinyCC for the CFFI `Extension`. Do not implement a general-purpose `CCompiler` abstraction or depend on `new_compiler("tinycc")` unless the direct build_ext path proves insufficient. CFFI's current build flow creates one temporary `Distribution`, runs `build_ext`, and then consumes its outputs, so direct source-to-PYD compilation is the intended narrow path.
+Prefer an owned temporary `build_ext` command whose `build_extension()` directly invokes TinyCC for the CFFI `Extension`. Do not implement a general-purpose `CCompiler` abstraction or depend on `new_compiler("tinycc")` unless the direct build_ext path proves insufficient.
+
+CFFI's current `ffiplatform._build()` creates its own `_shimmed_dist_utils.Distribution`, calls `parse_config_files()`, invokes `run_command("build_ext")`, and then consumes `get_outputs()`. There is therefore no ordinary caller-supplied `cmdclass` injection point to assume. Phase 1 must identify and prove the exact process-local interception used by the prototype. Prefer temporarily replacing `cffi._shimmed_dist_utils.Distribution` with an owned subclass under the activation lock so the `Distribution` created by CFFI installs `TinyCCBuildExt` itself. The subclass must also own the configuration-file policy described below. If the qualified CFFI version makes that interception unreliable, use the narrowest version-pinned wrapper around `cffi.ffiplatform._build()` instead and record why.
 
 TinyCC's Windows `-c` path emits ELF intermediate objects, so do not treat those objects as normal COFF interchange objects.
 
 The prototype may patch only the minimum process-local CFFI/setuptools entry points required for the proof. Record every temporary hook so Phase 2 can replace the prototype with the production owned adapter and activation contract.
+
+### External distutils/setuptools configuration isolation
+
+Hermetic compiler selection must not depend on user, repository, or machine-level distutils/setuptools configuration.
+
+Because CFFI currently calls `Distribution.parse_config_files()` before `build_ext`, the TinyCC interception must either:
+
+1. suppress external config parsing for the owned temporary CFFI `Distribution`; or
+2. parse only a deliberately empty/owned configuration source and prove no external option can alter compiler selection, build directories, libraries, library directories, or link flags.
+
+Do not merely sanitize environment variables and then allow arbitrary `setup.cfg`, `pydistutils.cfg`, or equivalent setuptools/distutils configuration to participate.
+
+Add a hostile-config proof that places compiler/build_ext/library options in the configuration locations exercised by the qualified CFFI/setuptools pair and verifies that:
+
+- the owned TinyCC `build_ext` is still selected;
+- no external compiler executable or library root is introduced;
+- output/cache paths remain the owned paths;
+- the configuration is ignored or rejected deterministically rather than partially applied.
 
 ## C language/FFCx flags
 
@@ -76,7 +96,7 @@ Acceptance checks:
 - the same definition strategy works for all supported interpreters;
 - diagnostics record `_MSC_VER`, `Py_LIMITED_API`, and `Py_NO_LINK_LIB` state for the active interpreter.
 
-Preview standard GIL-enabled Python 3.15 after the supported matrix passes. Free-threaded Python is out of scope for this epic unless it is later added as a separate ABI/import-library qualification target.
+Preview standard GIL-enabled Python 3.15 only after the supported matrix passes. The preview is informational/non-blocking until Python 3.15 is promoted into the supported repository matrix. Free-threaded Python is out of scope for this epic unless it is later added as a separate ABI/import-library qualification target.
 
 ## Windows ABI and CRT proof
 
@@ -176,21 +196,22 @@ CI must fail if the JIT invokes or resolves `cl.exe`, MSVC `link.exe`, Clang, GC
 
 1. Add a manual-only TinyCC experiment workflow on `windows-2022`.
 2. Pin and build/download the selected TinyCC x86-64 revision.
-3. Implement the smallest prototype TinyCC `build_ext` adapter, preferring direct source-to-PYD compilation.
-4. Compile/import a minimal CFFI module.
-5. Implement the `python3.def` Stable-ABI link path and suppress all implicit versioned Python linking.
-6. Translate/reject FFCx compile flags explicitly, including the qualified Windows bitfield-layout flag, and prove the generated corpus under TinyCC's available language modes.
-7. Run a fresh FFCx Poisson JIT/solve on standard GIL-enabled CPython 3.12-3.14.
-8. Run ABI layout probes against the LLVM-MinGW/MSVC reference, including packing/bitfields and the known `long double` mismatch.
-9. Establish either UCRT-compatible TinyCC output or a documented mixed-CRT safety proof.
-10. Qualify explicit TinyCC PE hardening linker options against the fixed x64 baseline before considering any source patch.
-11. Inspect PE imports, mitigations, relocation/unwind metadata, and retain compile/link/source diagnostics.
-12. Establish and test the explicit system-library-resolution policy.
-13. Add negative foreign-object/library-input tests.
-14. Preview standard GIL-enabled CPython 3.15.
+3. Implement the smallest prototype TinyCC `build_ext` adapter, preferring direct source-to-PYD compilation and proving the exact CFFI `Distribution` interception point.
+4. Neutralize external CFFI/setuptools/distutils configuration for the owned TinyCC `Distribution` and add a hostile-config regression proof.
+5. Compile/import a minimal CFFI module.
+6. Implement the `python3.def` Stable-ABI link path and suppress all implicit versioned Python linking.
+7. Translate/reject FFCx compile flags explicitly, including the qualified Windows bitfield-layout flag, and prove the generated corpus under TinyCC's available language modes.
+8. Run a fresh FFCx Poisson JIT/solve on standard GIL-enabled CPython 3.12-3.14.
+9. Run ABI layout probes against the LLVM-MinGW/MSVC reference, including packing/bitfields and the known `long double` mismatch.
+10. Establish either UCRT-compatible TinyCC output or a documented mixed-CRT safety proof.
+11. Qualify explicit TinyCC PE hardening linker options against the fixed x64 baseline before considering any source patch.
+12. Inspect PE imports, mitigations, relocation/unwind metadata, and retain compile/link/source diagnostics.
+13. Establish and test the explicit system-library-resolution policy.
+14. Add negative foreign-object/library-input tests.
+15. Preview standard GIL-enabled CPython 3.15 as non-blocking evidence.
 
 ## Exit criteria
 
-Phase 1 passes only when all supported Python versions compile, load, and solve correctly with TinyCC as the sole JIT compiler/linker; generated modules import only the intended Stable-ABI Python DLL; no implicit/versioned Python library input participates; the C language, Python/UFCx ABI, packing/bitfield policy, known `long double` mismatch, CRT model, fixed PE mitigation/unwind baseline, system-library policy, and object/library boundary are demonstrated; and no required generated C feature is unsupported.
+Phase 1 passes only when all supported Python versions compile, load, and solve correctly with TinyCC as the sole JIT compiler/linker; the exact owned CFFI interception path is demonstrated; external distutils/setuptools configuration cannot alter compiler selection or link inputs; generated modules import only the intended Stable-ABI Python DLL; no implicit/versioned Python library input participates; the C language, Python/UFCx ABI, packing/bitfield policy, known `long double` mismatch, CRT model, fixed PE mitigation/unwind baseline, system-library policy, and object/library boundary are demonstrated; and no required generated C feature is unsupported.
 
 If this phase needs invasive FFCx source rewriting, cannot establish a safe CRT/ABI boundary, exposes incompatible `long double` across the compiler boundary, cannot produce the fixed hardened PE image with supported options or a narrow maintainable change, or requires foreign object/library interoperability that TinyCC cannot provide, stop the epic.

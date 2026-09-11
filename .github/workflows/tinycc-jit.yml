@@ -98,7 +98,7 @@ jobs:
           retention-days: 14
 
   compatibility-proof:
-    name: Phase 1 compatibility (Python ${{ matrix.python }})
+    name: Phase 1/2 compatibility (Python ${{ matrix.python }})
     needs: bootstrap-development
     runs-on: windows-2022
     timeout-minutes: 60
@@ -140,6 +140,12 @@ jobs:
             setuptools
             pefile
 
+      - name: Run Phase-2 adapter contract tests
+        shell: pwsh
+        run: >-
+          python ./scripts/tinycc-jit/phase2-contract.py
+          --diagnostics-dir tinycc-phase2-diagnostics
+
       - name: Run hermetic TinyCC Phase-1 proof
         shell: pwsh
         run: |
@@ -151,13 +157,14 @@ jobs:
             -DiagnosticsDir "tinycc-phase1-diagnostics" `
             -PoissonScript "scripts/test-poisson.py"
 
-      - name: Upload Phase-1 evidence
+      - name: Upload TinyCC compatibility evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tinycc-phase1-py${{ matrix.python }}
           path: |
             tinycc-phase1-diagnostics/
+            tinycc-phase2-diagnostics/
             tinycc-phase1-work/**/*.c
             tinycc-phase1-work/**/*.pyd
             tinycc-phase1-work/**/setup.cfg

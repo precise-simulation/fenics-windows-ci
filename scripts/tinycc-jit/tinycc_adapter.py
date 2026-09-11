@@ -1,8 +1,9 @@
-"""Private Phase-1 TinyCC adapter for CFFI on Windows.
+"""Owned TinyCC CFFI adapter for FEniCS JIT on Windows.
 
-This module is intentionally narrow. It intercepts the Distribution object
-created by cffi.ffiplatform, suppresses external distutils configuration, and
-builds CFFI extensions directly from C source to a .pyd with TinyCC.
+The adapter intercepts the Distribution object created by cffi.ffiplatform,
+suppresses external distutils configuration, and builds CFFI extensions
+directly from C source to a .pyd with TinyCC. Temporary process-global CFFI
+state is serialized by a process-wide reentrant activation lock.
 """
 
 from __future__ import annotations
@@ -15,11 +16,19 @@ import re
 import subprocess
 import sysconfig
 import threading
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Iterator, Sequence
 
 from cffi import _shimmed_dist_utils as _dist
 
+
+ADAPTER_SCHEMA_VERSION = "tinycc-cffi-adapter-v2"
+EXTERNAL_CONFIG_POLICY_VERSION = "suppress-all-v1"
+ABI_POLICY_VERSION = "win64-mingw32-mswin64-msbitfields-v1"
+PYTHON_LINK_POLICY_VERSION = "stable-abi-python3-def-v1"
+PE_POLICY_VERSION = "dynamicbase-highentropyva-nxcompat-v1"
+CRT_POLICY_VERSION = "msvcrt-internal-python-allocator-boundary-v1"
 
 _VERSIONED_PYTHON = re.compile(r"(?i)(?:^|[\\/])?python3(?:12|13|14|15)(?:_d)?(?:\.lib|\.dll)?$")
 _FOREIGN_BINARY_SUFFIXES = {".obj", ".o", ".lib", ".a"}
@@ -29,7 +38,15 @@ _IGNORED_LANGUAGE_ARGS = {"-std:c17", "/std:c17", "-std=c17", "-std=gnu17"}
 _ACTIVATION_LOCK = threading.RLock()
 _ACTIVE_CONFIG: TinyCCConfig | None = None
 _ACTIVE_DEPTH = 0
+_ACTIVE_OWNER_THREAD: int | None = None
 _ORIGINAL_DISTRIBUTION = None
+
+
+def _package_version(name: str) -> str:
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return "unknown"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,6 +55,7 @@ class TinyCCConfig:
     tcc: Path
     python_def: Path
     diagnostics_dir: Path
+    revision: str
     backend_cache_id: str
 
     @classmethod
@@ -57,9 +75,32 @@ class TinyCCConfig:
             raise RuntimeError(f"TinyCC executable is missing: {tcc}")
         if not python_def.is_file():
             raise RuntimeError(f"python3.def is missing: {python_def}")
-        identity = "tinycc-phase1-v1-" + revision[:16] + "-mingw32-mswin64-model-msbitfields-msvcrt-hardened-pe"
+        identity = "-".join(
+            [
+                "tinycc",
+                revision[:16],
+                ADAPTER_SCHEMA_VERSION,
+                EXTERNAL_CONFIG_POLICY_VERSION,
+                ABI_POLICY_VERSION,
+                PYTHON_LINK_POLICY_VERSION,
+                CRT_POLICY_VERSION,
+                PE_POLICY_VERSION,
+            ]
+        )
         diagnostics_dir.mkdir(parents=True, exist_ok=True)
-        return cls(root, tcc, python_def, diagnostics_dir, identity)
+        return cls(root, tcc, python_def, diagnostics_dir, revision, identity)
+
+    def policy_metadata(self) -> dict[str, str]:
+        return {
+            "revision": self.revision,
+            "backend_cache_id": self.backend_cache_id,
+            "adapter_schema": ADAPTER_SCHEMA_VERSION,
+            "external_config_policy": EXTERNAL_CONFIG_POLICY_VERSION,
+            "abi_policy": ABI_POLICY_VERSION,
+            "python_link_policy": PYTHON_LINK_POLICY_VERSION,
+            "crt_policy": CRT_POLICY_VERSION,
+            "pe_policy": PE_POLICY_VERSION,
+        }
 
 
 def _active_config() -> TinyCCConfig:
@@ -89,7 +130,7 @@ def _reject_path(path: str | os.PathLike[str], *, what: str) -> None:
     value = str(path)
     suffix = Path(value).suffix.lower()
     if suffix in _FOREIGN_BINARY_SUFFIXES:
-        raise RuntimeError(f"TinyCC Phase-1 adapter rejects {what} input: {value}")
+        raise RuntimeError(f"TinyCC adapter rejects {what} input: {value}")
     if _VERSIONED_PYTHON.search(Path(value).name):
         raise RuntimeError(f"TinyCC adapter rejects versioned Python link input: {value}")
 
@@ -147,6 +188,10 @@ class TinyCCBuildExt(_dist.build_ext):
                 "TinyCC adapter rejects ambient library directories: "
                 f"library_dirs={library_dirs!r}, runtime_library_dirs={runtime_library_dirs!r}"
             )
+
+        extra_link_args = list(getattr(ext, "extra_link_args", None) or [])
+        if extra_link_args:
+            raise RuntimeError(f"TinyCC adapter rejects unsupported extra_link_args: {extra_link_args!r}")
 
         output = Path(self.get_ext_fullpath(ext.name)).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -217,14 +262,20 @@ class TinyCCBuildExt(_dist.build_ext):
 def activate(config: TinyCCConfig) -> Iterator[None]:
     """Serialize and install the temporary CFFI Distribution interception."""
 
-    global _ACTIVE_CONFIG, _ACTIVE_DEPTH, _ORIGINAL_DISTRIBUTION
+    global _ACTIVE_CONFIG, _ACTIVE_DEPTH, _ACTIVE_OWNER_THREAD, _ORIGINAL_DISTRIBUTION
 
     with _ACTIVATION_LOCK:
+        current_thread = threading.get_ident()
         if _ACTIVE_CONFIG is not None and _ACTIVE_CONFIG != config:
-            raise RuntimeError("Conflicting nested TinyCC activation is not permitted")
+            raise RuntimeError(
+                "Conflicting nested TinyCC activation is not permitted: "
+                f"active={_ACTIVE_CONFIG.backend_cache_id}, requested={config.backend_cache_id}"
+            )
 
         if _ACTIVE_DEPTH == 0:
             original_distribution = _dist.Distribution
+            if original_distribution is None:
+                raise RuntimeError("cffi._shimmed_dist_utils.Distribution is unavailable")
 
             class TinyCCDistribution(original_distribution):
                 def __init__(self, attrs=None):  # noqa: ANN001
@@ -240,7 +291,7 @@ def activate(config: TinyCCConfig) -> Iterator[None]:
                         "config-isolation.jsonl",
                         {
                             "filenames": [str(item) for item in filenames] if filenames else [],
-                            "policy": "suppressed",
+                            "policy": EXTERNAL_CONFIG_POLICY_VERSION,
                         },
                     )
                     return []
@@ -248,25 +299,46 @@ def activate(config: TinyCCConfig) -> Iterator[None]:
             _ORIGINAL_DISTRIBUTION = original_distribution
             _dist.Distribution = TinyCCDistribution
             _ACTIVE_CONFIG = config
+            _ACTIVE_OWNER_THREAD = current_thread
             _record(
                 config,
                 "activation.jsonl",
                 {
                     "event": "activate",
-                    "backend_cache_id": config.backend_cache_id,
+                    "owner_thread": current_thread,
+                    "depth": 1,
+                    "cffi_version": _package_version("cffi"),
+                    "setuptools_version": _package_version("setuptools"),
                     "distribution_interception": "cffi._shimmed_dist_utils.Distribution",
-                    "external_config_policy": "suppressed",
+                    **config.policy_metadata(),
                 },
             )
+        elif _ACTIVE_OWNER_THREAD != current_thread:
+            # This should be unreachable because the RLock is held across yield,
+            # but keep the invariant explicit if activation mechanics change.
+            raise RuntimeError("TinyCC activation ownership changed while process-global state is active")
 
         _ACTIVE_DEPTH += 1
+        if _ACTIVE_DEPTH > 1:
+            _record(
+                config,
+                "activation.jsonl",
+                {"event": "nested-activate", "owner_thread": current_thread, "depth": _ACTIVE_DEPTH},
+            )
         try:
             yield
         finally:
+            if _ACTIVE_DEPTH > 1:
+                _record(
+                    config,
+                    "activation.jsonl",
+                    {"event": "nested-deactivate", "owner_thread": current_thread, "depth": _ACTIVE_DEPTH},
+                )
             _ACTIVE_DEPTH -= 1
             if _ACTIVE_DEPTH == 0:
                 assert _ORIGINAL_DISTRIBUTION is not None
                 _dist.Distribution = _ORIGINAL_DISTRIBUTION
-                _record(config, "activation.jsonl", {"event": "deactivate"})
+                _record(config, "activation.jsonl", {"event": "deactivate", "owner_thread": current_thread})
                 _ORIGINAL_DISTRIBUTION = None
                 _ACTIVE_CONFIG = None
+                _ACTIVE_OWNER_THREAD = None

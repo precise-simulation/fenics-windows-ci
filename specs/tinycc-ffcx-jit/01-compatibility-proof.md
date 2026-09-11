@@ -71,6 +71,26 @@ For TinyCC:
 - capture the complete generated C source for every failure;
 - treat actually required unsupported C17 semantics as a go/no-go result, not as a reason for broad generated-source rewriting.
 
+## CPython Win64 target-model compatibility
+
+Do not assume that `_WIN64` alone makes the official Windows CPython headers expose their 64-bit data model to TinyCC.
+
+Current TinyCC Win64 defines `_WIN32`/`_WIN64`, but the official CPython Windows `pyconfig.h` selects important Win64 declarations through compiler-family compatibility paths such as `_MSC_VER` or `__MINGW32__`. A compiler that reaches the generic `MS_WIN32` path while actually emitting x86-64 code can expose 32-bit `SIZEOF_*` values and incompatible Python types even though a trivial extension still compiles.
+
+Phase 1 must therefore prove the exact CPython header target model before accepting any CFFI/FFCx result:
+
+- record TinyCC's built-in `_WIN32`, `_WIN64`, `_MSC_VER`, `__MINGW32__`, `_M_X64`, and `_M_AMD64` state before compatibility definitions are applied;
+- establish the narrowest explicit compatibility-definition policy required for official CPython headers to select their Win64 model; prefer a truthful compiler-family compatibility definition such as a qualified `__MINGW32__` policy if needed rather than pretending TinyCC is MSVC by defining `_MSC_VER`;
+- after including the active CPython headers, require `_WIN64` and `MS_WIN64` to be defined;
+- require `SIZEOF_VOID_P == 8` and `SIZEOF_SIZE_T == 8` from the active CPython configuration;
+- compile runtime/static probes requiring `sizeof(void *) == 8`, `sizeof(size_t) == 8`, and `sizeof(Py_ssize_t) == 8`;
+- fail if the headers take a 32-bit `MS_WIN32` data-model branch for an x86-64 TinyCC target;
+- run this proof on every supported CPython version because the Windows header-selection logic is version-sensitive.
+
+Any compatibility macro/patch used to establish the correct CPython Win64 model is part of the backend ABI policy and **must contribute to the immutable backend cache identity**. A later TinyCC or CPython change that removes the need for that compatibility policy also changes backend identity until requalified.
+
+If official CPython headers cannot be made to expose a coherent Win64 model with a small truthful compatibility definition or narrowly scoped maintained patch, stop the epic rather than carrying a broad private Python-header fork.
+
 ## Python Stable ABI
 
 Use the same conceptual ABI strategy as LLVM-MinGW: generated modules import `python3.dll` and must not acquire a minor-version Python dependency through setuptools or CPython headers.
@@ -89,12 +109,12 @@ The integration must own Python-library selection end-to-end:
 
 Acceptance checks:
 
-- CFFI wrapper compiles with official CPython headers;
+- CFFI wrapper compiles with official CPython headers under the qualified Win64 target-model compatibility policy;
 - `.pyd` loads on standard GIL-enabled CPython 3.12, 3.13, and 3.14;
 - captured compile/link inputs contain no versioned Python library request;
 - PE import inspection shows `python3.dll`, not a minor-version DLL;
 - the same definition strategy works for all supported interpreters;
-- diagnostics record `_MSC_VER`, `Py_LIMITED_API`, and `Py_NO_LINK_LIB` state for the active interpreter.
+- diagnostics record `_MSC_VER`, `Py_LIMITED_API`, `Py_NO_LINK_LIB`, and the qualified CPython Win64 compatibility-definition state for the active interpreter.
 
 Preview standard GIL-enabled Python 3.15 only after the supported matrix passes. The preview is informational/non-blocking until Python 3.15 is promoted into the supported repository matrix. Free-threaded Python is out of scope for this epic unless it is later added as a separate ABI/import-library qualification target.
 
@@ -113,6 +133,7 @@ Add an ABI probe compiled by MSVC/LLVM-MinGW and TinyCC that records:
 - offsets of fields read by DOLFINx;
 - function-pointer/calling-convention assumptions;
 - sizes/alignment of core integer/pointer/floating types used by UFCx;
+- CPython target-model macros and `sizeof(void *)`, `sizeof(size_t)`, and `sizeof(Py_ssize_t)` from the qualified TinyCC header path;
 - explicit `sizeof(long double)` / `alignof(long double)`;
 - representative `#pragma pack`/packed-layout behavior used by consumed headers;
 - representative bitfield layouts under TinyCC's default behavior and `-mms-bitfields`, compared with the MSVC/LLVM-MinGW consumer contract.
@@ -201,17 +222,18 @@ CI must fail if the JIT invokes or resolves `cl.exe`, MSVC `link.exe`, Clang, GC
 5. Compile/import a minimal CFFI module.
 6. Implement the `python3.def` Stable-ABI link path and suppress all implicit versioned Python linking.
 7. Translate/reject FFCx compile flags explicitly, including the qualified Windows bitfield-layout flag, and prove the generated corpus under TinyCC's available language modes.
-8. Run a fresh FFCx Poisson JIT/solve on standard GIL-enabled CPython 3.12-3.14.
-9. Run ABI layout probes against the LLVM-MinGW/MSVC reference, including packing/bitfields and the known `long double` mismatch.
-10. Establish either UCRT-compatible TinyCC output or a documented mixed-CRT safety proof.
-11. Qualify explicit TinyCC PE hardening linker options against the fixed x64 baseline before considering any source patch.
-12. Inspect PE imports, mitigations, relocation/unwind metadata, and retain compile/link/source diagnostics.
-13. Establish and test the explicit system-library-resolution policy.
-14. Add negative foreign-object/library-input tests.
-15. Preview standard GIL-enabled CPython 3.15 as non-blocking evidence.
+8. Prove the official CPython headers select the qualified Win64 target model on TinyCC, including macro-state and pointer/size/Py_ssize_t width checks on CPython 3.12-3.14.
+9. Run a fresh FFCx Poisson JIT/solve on standard GIL-enabled CPython 3.12-3.14.
+10. Run ABI layout probes against the LLVM-MinGW/MSVC reference, including CPython target-model state, packing/bitfields, and the known `long double` mismatch.
+11. Establish either UCRT-compatible TinyCC output or a documented mixed-CRT safety proof.
+12. Qualify explicit TinyCC PE hardening linker options against the fixed x64 baseline before considering any source patch.
+13. Inspect PE imports, mitigations, relocation/unwind metadata, and retain compile/link/source diagnostics.
+14. Establish and test the explicit system-library-resolution policy.
+15. Add negative foreign-object/library-input tests.
+16. Preview standard GIL-enabled CPython 3.15 as non-blocking evidence.
 
 ## Exit criteria
 
-Phase 1 passes only when all supported Python versions compile, load, and solve correctly with TinyCC as the sole JIT compiler/linker; the exact owned CFFI interception path is demonstrated; external distutils/setuptools configuration cannot alter compiler selection or link inputs; generated modules import only the intended Stable-ABI Python DLL; no implicit/versioned Python library input participates; the C language, Python/UFCx ABI, packing/bitfield policy, known `long double` mismatch, CRT model, fixed PE mitigation/unwind baseline, system-library policy, and object/library boundary are demonstrated; and no required generated C feature is unsupported.
+Phase 1 passes only when all supported Python versions compile, load, and solve correctly with TinyCC as the sole JIT compiler/linker; official CPython headers demonstrably select the correct Win64 data model under an explicit qualified compatibility-definition policy; the exact owned CFFI interception path is demonstrated; external distutils/setuptools configuration cannot alter compiler selection or link inputs; generated modules import only the intended Stable-ABI Python DLL; no implicit/versioned Python library input participates; the C language, Python/UFCx ABI, packing/bitfield policy, known `long double` mismatch, CRT model, fixed PE mitigation/unwind baseline, system-library policy, and object/library boundary are demonstrated; the CPython target-model compatibility policy is part of backend cache identity; and no required generated C feature is unsupported.
 
-If this phase needs invasive FFCx source rewriting, cannot establish a safe CRT/ABI boundary, exposes incompatible `long double` across the compiler boundary, cannot produce the fixed hardened PE image with supported options or a narrow maintainable change, or requires foreign object/library interoperability that TinyCC cannot provide, stop the epic.
+If this phase needs invasive FFCx source rewriting, cannot establish the correct official CPython Win64 target model with a small truthful compatibility policy, cannot establish a safe CRT/ABI boundary, exposes incompatible `long double` across the compiler boundary, cannot produce the fixed hardened PE image with supported options or a narrow maintainable change, or requires foreign object/library interoperability that TinyCC cannot provide, stop the epic.

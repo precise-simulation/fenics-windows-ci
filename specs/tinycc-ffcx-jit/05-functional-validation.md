@@ -30,9 +30,35 @@ Reuse existing test generation and numerical assertions wherever possible so Tin
 
 ## Generated-source corpus
 
-Retain every generated C source involved in the matrix as a CI artifact.
+Retain every generated C source involved in the matrix as CI evidence, but do **not** make GitHub Actions artifact retention the compatibility contract. Workflow artifacts are supplemental diagnostics and may expire.
 
-For each source record:
+The durable compatibility contract must live in the repository and be reproducible from pinned generator inputs. After the Phase-5 matrix is finalized, maintain a versioned corpus manifest under a repository path such as:
+
+```text
+tests/tinycc/generated-corpus/manifest.json
+```
+
+The manifest must record at least:
+
+- corpus schema/version;
+- FFCx, CFFI, UFL/Basix/DOLFINx versions or exact package identities that affect generated source;
+- form/test identity and deterministic generation inputs;
+- CPython version where wrapper generation materially differs;
+- source path/logical module identity;
+- normalized generated-source SHA-256;
+- selected TinyCC standard mode;
+- effective CPython Win64 compatibility-definition policy;
+- effective packing/bitfield policy;
+- backend/compiler patch identity used for the qualifying compile.
+
+Use one of these durable source strategies:
+
+1. **Preferred when generation is deterministic:** commit the generator inputs plus the expected normalized source hashes and provide a test that regenerates the corpus and fails if any source hash changes unexpectedly; or
+2. **Canonical-source fallback:** if exact regeneration is not stable enough across supported environments, commit the canonical generated C sources alongside the manifest.
+
+In either case, a future TinyCC revision may replace the pinned compiler only after CI reconstructs or loads the exact versioned corpus, verifies the recorded source hashes, and compiles every corpus member successfully. A generator/version change that intentionally changes the corpus must update the repository contract explicitly rather than silently replacing expired CI artifacts.
+
+For each CI execution also record:
 
 - TinyCC compile result;
 - compile/link command line;
@@ -41,10 +67,9 @@ For each source record:
 - Python version;
 - form/test identity;
 - selected TinyCC standard mode;
+- effective CPython Win64 compatibility-definition policy;
 - effective packing/bitfield flag policy;
 - backend/compiler patch identity.
-
-This corpus becomes the compatibility contract for future TinyCC upgrades. A new compiler revision must compile the same corpus before it can replace the pinned revision.
 
 ## Numerical equivalence
 
@@ -65,6 +90,10 @@ Re-run the Phase-1 cross-compiler ABI probes from the installed Phase-3 package.
 
 Require:
 
+- `_WIN64` and `MS_WIN64` are defined through the qualified TinyCC/CPython header path on every supported interpreter;
+- CPython reports `SIZEOF_VOID_P == 8` and `SIZEOF_SIZE_T == 8`;
+- `sizeof(void *) == 8`, `sizeof(size_t) == 8`, and `sizeof(Py_ssize_t) == 8` under the actual generated-module compile path;
+- the qualified CPython Win64 compatibility-definition policy remains unchanged unless the backend cache identity changes and the new policy is requalified;
 - relevant UFCx struct sizes, alignments, and field offsets match the qualified MSVC/LLVM-MinGW consumer contract;
 - calling-convention probes remain unchanged;
 - `long double` size/alignment/relevance remains consistent with the qualification record;
@@ -189,21 +218,22 @@ Each case must fail before an ambient/alternate linker can participate.
 1. Parameterize the existing Phase 5 validation for backend selection where practical.
 2. Run the full supported standard GIL-enabled CPython 3.12-3.14 matrix under TinyCC.
 3. Run Python 3.15 preview separately as non-blocking evidence.
-4. Preserve generated C and compile/link diagnostics.
-5. Compare numerical results with LLVM-MinGW.
-6. Re-run ABI/packing/bitfield/`long double` probes from the installed package.
-7. Add repeated compile/load stress across same-process and new-process runs.
-8. Validate mandatory physical cache isolation, pre-cache-lookup root selection, and fresh compilation across backend switches.
-9. Validate thread-concurrency, nested activation, conflicting-backend rejection, and exception restoration through the shared runtime lock.
-10. Validate MPI behavior and cache-root propagation.
-11. Validate the owned CFFI `Distribution` interception and external-config suppression after backend switching.
-12. Validate Stable-ABI link integrity on every supported Python version, including explicit handling of versions without `Py_NO_LINK_LIB`.
-13. Validate the qualified CRT boundary and allocator/ownership stress.
-14. Validate the qualified system-library-resolution policy and absence of SDK/compiler-development leakage.
-15. Validate PE mitigation, relocation, and x64 unwind properties and the expected TinyCC hardening controls.
-16. Run foreign-object/library/config negative tests.
-17. Record unsupported-warning inventory without suppressing it globally.
+4. Preserve generated C and compile/link diagnostics as CI artifacts and establish the durable repository-tracked corpus manifest/source-hash contract.
+5. Add regeneration/hash-verification CI for the durable generated-source corpus, or commit canonical sources if exact regeneration cannot be made stable.
+6. Compare numerical results with LLVM-MinGW.
+7. Re-run the CPython Win64 target-model plus ABI/packing/bitfield/`long double` probes from the installed package.
+8. Add repeated compile/load stress across same-process and new-process runs.
+9. Validate mandatory physical cache isolation, pre-cache-lookup root selection, and fresh compilation across backend switches.
+10. Validate thread-concurrency, nested activation, conflicting-backend rejection, and exception restoration through the shared runtime lock.
+11. Validate MPI behavior and cache-root propagation.
+12. Validate the owned CFFI `Distribution` interception and external-config suppression after backend switching.
+13. Validate Stable-ABI link integrity on every supported Python version, including explicit handling of versions without `Py_NO_LINK_LIB`.
+14. Validate the qualified CRT boundary and allocator/ownership stress.
+15. Validate the qualified system-library-resolution policy and absence of SDK/compiler-development leakage.
+16. Validate PE mitigation, relocation, and x64 unwind properties and the expected TinyCC hardening controls.
+17. Run foreign-object/library/config negative tests.
+18. Record unsupported-warning inventory without suppressing it globally.
 
 ## Exit criteria
 
-Phase 5 passes when TinyCC completes the full integrated functional matrix and stress tests on supported standard GIL-enabled Python 3.12-3.14 with no ABI/packing/bitfield, CRT, PE-security/unwind, cache, thread-activation, MPI, CFFI-interception/config, Python-link, system-library, object/library-boundary, or numerical regression and with no ambient compiler fallback. Python 3.15 preview results are recorded but do not block Phase 5 until that runtime becomes supported by the repository.
+Phase 5 passes when TinyCC completes the full integrated functional matrix and stress tests on supported standard GIL-enabled Python 3.12-3.14 with the qualified CPython Win64 target model intact; the versioned generated-source compatibility corpus is durably represented in the repository and reproducibly hash-checked rather than depending on expiring CI artifacts; and there is no ABI/packing/bitfield, CRT, PE-security/unwind, cache, thread-activation, MPI, CFFI-interception/config, Python-link, system-library, object/library-boundary, or numerical regression and no ambient compiler fallback. Python 3.15 preview results are recorded but do not block Phase 5 until that runtime becomes supported by the repository.

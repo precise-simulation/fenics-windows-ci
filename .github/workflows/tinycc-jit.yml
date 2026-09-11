@@ -1,0 +1,160 @@
+name: tinycc-jit
+
+# TinyCC remains experimental. Deep compatibility qualification is manual so
+# stack remains the single automatic PR/main workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tinycc-jit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formal-release-reference:
+    name: TinyCC 0.9.27 reference
+    runs-on: windows-2022
+    timeout-minutes: 30
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install reference inspection tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: tinycc-reference
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            pefile
+
+      - name: Bootstrap formal TinyCC release
+        shell: pwsh
+        run: >-
+          ./scripts/tinycc-jit/bootstrap-tinycc.ps1
+          -Revision d348a9a51d32cece842b7885d27a411436d7887b
+          -SourceDir tinycc-release-source
+          -OutputDir tinycc-release-stage
+          -DiagnosticsDir tinycc-release-diagnostics
+
+      - name: Test fixed PE hardening baseline
+        shell: pwsh
+        run: >-
+          python ./scripts/tinycc-jit/reference-smoke.py
+          --tinycc-root tinycc-release-stage
+          --diagnostics-dir tinycc-release-diagnostics/reference
+
+      - name: Upload formal-release evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tinycc-0.9.27-reference
+          path: tinycc-release-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
+  bootstrap-development:
+    name: Bootstrap pinned TinyCC development candidate
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Bootstrap pinned TinyCC revision
+        shell: pwsh
+        run: >-
+          ./scripts/tinycc-jit/bootstrap-tinycc.ps1
+          -Revision 0fb54300b56512754221d80adda85ddb9815bceb
+          -SourceDir tinycc-source
+          -OutputDir tinycc-stage
+          -DiagnosticsDir tinycc-bootstrap-diagnostics
+
+      - name: Upload pinned TinyCC stage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tinycc-development-stage
+          path: tinycc-stage/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload bootstrap diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tinycc-development-bootstrap-diagnostics
+          path: tinycc-bootstrap-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
+  compatibility-proof:
+    name: Phase 1 compatibility (Python ${{ matrix.python }})
+    needs: bootstrap-development
+    runs-on: windows-2022
+    timeout-minutes: 60
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.12"
+            experimental: false
+          - python: "3.13"
+            experimental: false
+          - python: "3.14"
+            experimental: false
+          - python: "3.15"
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download pinned TinyCC stage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tinycc-development-stage
+          path: tinycc-stage
+
+      - name: Install isolated FEniCS runtime
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: tinycc-jit
+          create-args: >-
+            --override-channels --strict-channel-priority
+            -c precise-simulation -c conda-forge
+            python=${{ matrix.python }}
+            libblas=*=*openblas
+            fenics-dolfinx
+            cffi
+            setuptools
+            pefile
+
+      - name: Run hermetic TinyCC Phase-1 proof
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/tinycc-jit"
+          ./scripts/tinycc-jit/run-phase1.ps1 `
+            -TinyCCRoot "tinycc-stage" `
+            -PythonPrefix $prefix `
+            -WorkDir "tinycc-phase1-work" `
+            -DiagnosticsDir "tinycc-phase1-diagnostics" `
+            -PoissonScript "scripts/test-poisson.py"
+
+      - name: Upload Phase-1 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tinycc-phase1-py${{ matrix.python }}
+          path: |
+            tinycc-phase1-diagnostics/
+            tinycc-phase1-work/**/*.c
+            tinycc-phase1-work/**/*.pyd
+            tinycc-phase1-work/**/setup.cfg
+            tinycc-phase1-work/**/pydistutils.cfg
+          if-no-files-found: warn
+          retention-days: 14

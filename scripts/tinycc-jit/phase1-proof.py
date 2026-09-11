@@ -128,6 +128,8 @@ int main(void) {
         raise RuntimeError("TinyCC unexpectedly defines _MSC_VER before compatibility definitions")
     if values.get("sizeof_void_p") != 8 or values.get("sizeof_size_t") != 8:
         raise RuntimeError(f"TinyCC built-in x64 data model is not 64-bit: {values}")
+    if values.get("sizeof_long_double") != 8 or values.get("alignof_long_double") != 8:
+        raise RuntimeError(f"TinyCC PE long-double model is not the Windows 8/8 ABI: {values}")
     return values
 
 
@@ -301,8 +303,8 @@ int probe_alloc_roundtrip(int n) {
         "sizeof_void_p": 8,
         "sizeof_size_t": 8,
         "sizeof_Py_ssize_t": 8,
-        "sizeof_long_double": 16,
-        "alignof_long_double": 16,
+        "sizeof_long_double": 8,
+        "alignof_long_double": 8,
         "bitfield_size": 4,
         "bitfield_raw": 0xAB8D,
         "packed_size": 9,
@@ -469,7 +471,7 @@ def main() -> None:
         "compiler_builtin_model": builtin_model,
         "compatibility_definitions": ["__MINGW32__=1", "__STDC_NO_COMPLEX__=1", "-mms-bitfields"],
         "abi_probes": abi_probes,
-        "long_double_boundary": "known TinyCC 16/16 representation; no long double in UFCx public ABI",
+        "long_double_boundary": "TinyCC PE uses the Windows 8/8 double representation for long double; no long double in UFCx public ABI",
         "crt_model": crt_model,
         "mixed_crt_policy": "TinyCC-owned malloc/free remains internal; Python/CFFI ownership uses Python APIs; allocation stress passed",
         "system_library_policy": "TinyCC packaged roots plus normal Windows system DLL resolution; no host SDK/development library directories",

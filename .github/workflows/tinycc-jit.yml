@@ -142,9 +142,11 @@ jobs:
 
       - name: Run Phase-2 adapter contract tests
         shell: pwsh
-        run: >-
-          python ./scripts/tinycc-jit/phase2-contract.py
-          --diagnostics-dir tinycc-phase2-diagnostics
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/tinycc-jit"
+          $python = Join-Path $prefix "python.exe"
+          & $python ./scripts/tinycc-jit/phase2-contract.py `
+            --diagnostics-dir tinycc-phase2-diagnostics
 
       - name: Run hermetic TinyCC Phase-1 proof
         shell: pwsh

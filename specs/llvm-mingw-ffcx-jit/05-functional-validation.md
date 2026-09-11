@@ -1,5 +1,7 @@
 # Phase 5: functional validation
 
+**Status:** complete — stack run #160 (`34125754984`) passed the full conservative functional matrix on the GitHub Windows runner.
+
 ## Objective
 
 Demonstrate that the conservative packaged LLVM-MinGW JIT path covers representative FFCx/DOLFINx runtime compilation, cache behavior, MPI behavior, supported CPython versions, and non-trivial paths.
@@ -54,17 +56,17 @@ The two-rank test must prove:
 
 ## Tasks
 
-1. Add representative form tests that are not already covered.
-2. Add fresh-cache and cache-reload modes.
-3. Add two-rank MPI JIT coverage.
-4. Matrix the workflow over CPython 3.12-3.14.
-5. Add paths-containing-spaces coverage.
-6. Add PE dependency inspection.
-7. Upload JIT logs and dependency reports as CI artifacts.
+1. [x] Add representative P2 Poisson, vector elasticity, cell/facet, coefficient/Constant, nonlinear residual/Jacobian, and `fem.Expression` tests.
+2. [x] Add fresh-cache and cache-reload modes with compiler subprocess accounting.
+3. [x] Add two-rank MPI JIT coverage proving rank-0 compilation and non-root cache load.
+4. [x] Matrix the validation over CPython 3.12-3.14.
+5. [x] Install each consumer environment and place each JIT cache below paths containing spaces.
+6. [x] Inspect every generated JIT `.pyd` with packaged `llvm-readobj`, including stable Python DLL and compiler-runtime checks.
+7. [x] Retain compiler commands, package provenance, cache summaries, MPI reports, and PE reports below `build-logs/phase5`.
 
 ## Exit criteria
 
-Phase 5 is complete when the full conservative runtime package passes the complete matrix with:
+Phase 5 is complete. Stack run #160 (`34125754984`) passed the full conservative runtime package matrix with:
 
 - no MSVC/host SDK fallback;
 - correct Python DLL imports;

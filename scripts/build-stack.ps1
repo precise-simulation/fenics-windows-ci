@@ -89,18 +89,23 @@ function Assert-LocalPackageVersion {
 $plan = (Get-Content $PlanFile | ConvertFrom-Json)
 
 $stages = @(
-    @{ name = "hdf5";      package = "hdf5";           recipe = "$root/recipes/hdf5/recipe.yaml";      variants = "$root/recipes/hdf5/variants-win64.yaml" },
-    @{ name = "petsc";     package = "petsc";          recipe = "$root/recipes/petsc/recipe.yaml";     variants = "$root/recipes/petsc/variants-win64.yaml" },
-    @{ name = "petsc4py";  package = "petsc4py";       recipe = "$root/recipes/petsc4py/recipe.yaml";  variants = "$root/recipes/petsc4py/variants-win64.yaml" },
-    @{ name = "dolfinx";   package = "fenics-dolfinx"; recipe = "$root/recipes/dolfinx/recipe.yaml";   variants = "$root/recipes/dolfinx/variants-win64.yaml" }
+    @{ name = "hdf5";      package = "hdf5";                    recipe = "$root/recipes/hdf5/recipe.yaml";                    variants = "$root/recipes/hdf5/variants-win64.yaml";     plan = "hdf5" },
+    @{ name = "petsc";     package = "petsc";                   recipe = "$root/recipes/petsc/recipe.yaml";                   variants = "$root/recipes/petsc/variants-win64.yaml";    plan = "petsc" },
+    @{ name = "petsc4py";  package = "petsc4py";                recipe = "$root/recipes/petsc4py/recipe.yaml";                variants = "$root/recipes/petsc4py/variants-win64.yaml"; plan = "petsc4py" },
+    # DOLFINx's Windows runtime metadata now depends on this package. Build it
+    # into the same local channel before DOLFINx so rattler's package tests and
+    # downstream ABI3 consumer solves exercise the exact candidate artifact.
+    @{ name = "jit-llvm-mingw"; package = "fenics-jit-llvm-mingw"; recipe = "$root/recipes/fenics-jit-llvm-mingw/recipe.yaml"; variants = $null; plan = "dolfinx"; version = "20260826" },
+    @{ name = "dolfinx";   package = "fenics-dolfinx";          recipe = "$root/recipes/dolfinx/recipe.yaml";                 variants = "$root/recipes/dolfinx/variants-win64.yaml";  plan = "dolfinx" }
 )
 
 foreach ($s in $stages) {
-    if (-not $plan.$($s.name).rebuild) {
+    $planKey = [string]$s.plan
+    if (-not $plan.$planKey.rebuild) {
         Write-Host "== skip $($s.name) (unchanged) =="
         continue
     }
-    $expectedVersion = [string]$plan.$($s.name).version
+    $expectedVersion = if ($s.version) { [string]$s.version } else { [string]$plan.$planKey.version }
     Write-Host "== building $($s.name) $expectedVersion =="
 
     $channels = @()
@@ -109,14 +114,18 @@ foreach ($s in $stages) {
     Write-Host "channels (strict priority): $($channels -join ' -> ')"
 
     Copy-Item $s.recipe (Join-Path $logOutput "$($s.name)-recipe.yaml") -Force
-    Copy-Item $s.variants (Join-Path $logOutput "$($s.name)-variants-win64.yaml") -Force
+    $variantArgs = @()
+    if ($s.variants) {
+        Copy-Item $s.variants (Join-Path $logOutput "$($s.name)-variants-win64.yaml") -Force
+        $variantArgs = @("--variant-config", $s.variants)
+    }
     Set-Content (Join-Path $logOutput "$($s.name)-channels.txt") ($channels -join [Environment]::NewLine)
 
     $stageStart = Get-Date
     $stageLog = Join-Path $logOutput "$($s.name)-rattler.log"
     & $rattler build `
         --recipe $s.recipe `
-        --variant-config $s.variants `
+        @variantArgs `
         --output-dir $output `
         --channel-priority strict `
         @($channels | ForEach-Object { "-c"; $_ }) 2>&1 | Tee-Object -FilePath $stageLog

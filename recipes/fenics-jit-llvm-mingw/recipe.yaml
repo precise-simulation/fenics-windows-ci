@@ -1,0 +1,107 @@
+schema_version: 1
+
+context:
+  name: fenics-jit-llvm-mingw
+  version: "20260826"
+  build: 49
+  archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
+  archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  url: https://github.com/mstorsjo/llvm-mingw/releases/download/${{ version }}/${{ archive_name }}
+  sha256: ${{ archive_sha256 }}
+  file_name: ${{ archive_name }}
+
+build:
+  number: ${{ build }}
+  script:
+    file: build.bat
+
+requirements:
+  build:
+    # Build-time only: python3.dll supplies the Stable-ABI exports used to
+    # construct GNU import libraries for the supported runtime interpreters.
+    # Keeping this in the build prefix prevents a Python runtime dependency.
+    - python 3.12.*
+
+tests:
+  - script:
+      file: test-package.bat
+    requirements:
+      run: []
+
+about:
+  summary: Conservative LLVM-MinGW runtime compiler for FEniCS FFCx/CFFI JIT on Windows
+  description: |
+    A relocatable x86-64 UCRT LLVM-MinGW compiler/runtime subset dedicated to
+    FEniCS FFCx/CFFI JIT. Phase 6 minimization is applied reproducibly during
+    package construction; build 5 strips debug information from retained PE
+    compiler/runtime binaries, build 6 prunes the measured-unobserved legacy
+    mshtml* Windows header family, build 7 prunes the measured-unobserved
+    Direct3D/DXGI header family, build 8 prunes the measured-unobserved
+    Direct2D/DirectWrite header family, build 9 prunes the measured-unobserved
+    UI Automation header family, build 10 prunes the measured-unobserved
+    Windows Runtime UI header subfamily, build 11 prunes the measured-unobserved
+    Windows Runtime Devices header subfamily, build 12 prunes the measured-
+    unobserved Windows Runtime ApplicationModel header subfamily, build 13
+    prunes the measured-unobserved Windows Runtime Media header subfamily,
+    build 14 prunes the measured-unobserved Windows Runtime Storage header
+    subfamily, build 15 prunes the measured-unobserved Windows Runtime Graphics
+    header subfamily, build 16 prunes the measured-unobserved Windows Runtime
+    Gaming header subfamily, build 17 prunes the measured-unobserved Windows
+    Runtime Foundation header subfamily, build 18 prunes the measured-unobserved
+    Windows Runtime Security header subfamily, build 19 prunes the measured-
+    unobserved Windows Runtime Networking header subfamily, build 20 prunes the
+    measured-unobserved Windows Runtime Data header subfamily, build 21 prunes
+    the measured-unobserved Windows Runtime System header subfamily, build 22
+    prunes the measured-unobserved Windows Runtime Globalization header
+    subfamily, build 23 prunes the measured-unobserved Windows Runtime
+    Management header subfamily, build 24 additionally prunes the measured-
+    unobserved Direct3D/DXGI/Direct2D/DirectWrite target import libraries, and
+    build 25 prunes the measured-unobserved versioned legacy MSVC target import
+    libraries while preserving generic MSVCRT, MinGW, UCRT, and startup/runtime
+    archives, and build 26 prunes the measured-unobserved OneCore/UWP/WindowsApp
+    target import-library family while preserving desktop Win32 and runtime
+    archives, build 27 prunes the remaining measured-unobserved Nano Server
+    and Windows Core Headless target import libraries, build 28 prunes the
+    measured-unobserved Media Foundation and UI Automation target import
+    libraries, build 29 prunes the exact measured-unobserved Speech API
+    (sapi*) root header family, build 30 prunes the exact measured-unobserved
+    OpenGL include/GL header family, build 31 prunes the exact measured-
+    unobserved Windows DDK include/ddk header family, build 32 prunes the exact
+    measured-unobserved MSXML root header/IDL family, build 33 prunes the exact
+    measured-unobserved Media Foundation mf* root header/IDL family, build 34
+    prunes the exact measured-unobserved Windows Media SDK wmsdk* root
+    header/IDL family, build 35 prunes the exact measured-unobserved Windows
+    Media Player wmp* root header/IDL family, build 36 prunes the exact
+    measured-unobserved Windows Runtime Perception root header/IDL family,
+    build 37 prunes the exact measured-unobserved DirectShow strmif root
+    header/IDL pair, build 38 prunes the exact measured-unobserved Broadcast
+    Driver Architecture tuner root header/IDL pair, build 39 prunes the exact
+    measured-unobserved XML Paper Specification (XPS) root header/IDL family,
+    build 40 prunes the exact measured-unobserved GDI+ root and include/
+    gdiplus header family, build 41 prunes the exact measured-unobserved
+    DirectShow Editing Services qedit root header/IDL pair, build 42 prunes
+    the exact measured-unobserved DirectShow AMStream root header/IDL pair,
+    build 43 prunes the exact measured-unobserved Enhanced Video Renderer
+    evr/evr9 root header/IDL family, build 44 prunes the exact measured-
+    unobserved Task Scheduler taskschd root header/IDL pair, build 45 prunes
+    the exact measured-unobserved Windows Update Agent wuapi root header/IDL
+    pair, build 46 prunes the exact measured-unobserved DirectShow DVD
+    interface dvdif root header/IDL pair, build 47 prunes the exact measured-
+    unobserved DirectShow Video Mixing Renderer 9 vmr9 root header/IDL pair,
+    build 48 prunes the exact measured-unobserved DirectShow Analog Video
+    amvideo root header/IDL pair, and build 49 prunes the exact measured-
+    unobserved Broadcast Driver Architecture bdaiface root header/IDL/enums
+    family.
+  license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
+  homepage: https://github.com/mstorsjo/llvm-mingw
+  repository: https://github.com/mstorsjo/llvm-mingw
+
+extra:
+  recipe-maintainers:
+    - precsim

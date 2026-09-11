@@ -228,13 +228,13 @@ outputs:
         # on Windows below so no libboost reaches runtime metadata.
         - libboost-devel
       run:
-        # code generation only needs c, not cxx
-        # get implementation, not full activation package
-        # need unqualified 'gcc' to get `gcc` executable
+        # Windows runtime JIT uses the dedicated hermetic LLVM-MinGW package.
+        # Native DOLFINx/PETSc build requirements above remain on VS2022.
         - if: win
           then:
-            # windows only has activation
-            - ${{ compiler("c") }}
+            - fenics-jit-llvm-mingw ==20260826
+            # CFFI on Python 3.12+ uses setuptools' vendored distutils backend.
+            - setuptools
           else:
             - ${{ c_compiler | default("bot") }} >=${{ c_compiler_version | default("0") }}
         - pkg-config

@@ -1,0 +1,194 @@
+name: llvm-mingw-jit
+
+# Dedicated deep JIT validation is intentionally manual. The stack workflow is
+# the single automatic PR/main gate, so one repository change creates one run.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llvm-mingw-jit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-package:
+    name: Build runtime package
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install package build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: jit-package-build
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            rattler-build=0.74.0
+
+      - name: Build conservative LLVM-MinGW runtime package
+        shell: pwsh
+        run: ./scripts/llvm-mingw-jit/build-runtime-package.ps1
+
+      - name: Install package into compiler-free clean prefix
+        shell: pwsh
+        run: |
+          $localPath = (Resolve-Path "jit-package-output").Path -replace "\\", "/"
+          $localChannel = "file:///$localPath"
+          & $env:MAMBA_EXE create -y `
+            -r $env:MAMBA_ROOT_PREFIX `
+            -n jit-package-only `
+            --override-channels --strict-channel-priority `
+            -c $localChannel `
+            fenics-jit-llvm-mingw
+          if ($LASTEXITCODE -ne 0) { throw "clean package install failed" }
+
+          & $env:MAMBA_EXE list -r $env:MAMBA_ROOT_PREFIX -n jit-package-only --json |
+            Set-Content "jit-package-logs/clean-prefix-packages.json"
+          if ($LASTEXITCODE -ne 0) { throw "could not record clean-prefix package list" }
+
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/jit-package-only"
+          $clang = Join-Path $prefix "Library/fenics-jit/bin/x86_64-w64-mingw32-clang.exe"
+          $smokeC = Join-Path $env:RUNNER_TEMP "fenics-jit-package-smoke.c"
+          $smokeDll = Join-Path $env:RUNNER_TEMP "fenics-jit-package-smoke.dll"
+          "__declspec(dllexport) int fenics_jit_package_smoke(void) { return 42; }" | Set-Content $smokeC -Encoding ascii
+          & $clang -shared $smokeC -o $smokeDll
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $smokeDll)) {
+            throw "compiler-free clean-prefix smoke compile failed"
+          }
+
+      - name: Upload runtime package
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: llvm-mingw-runtime-package
+          path: |
+            jit-package-output/win-64/
+            jit-package-output/noarch/
+            jit-package-logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  package-jit:
+    name: Packaged JIT (Python ${{ matrix.python }})
+    needs: runtime-package
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download runtime package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: llvm-mingw-runtime-package
+          path: .
+
+      - name: Install isolated FEniCS runtime
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: llvm-mingw-jit
+          create-args: >-
+            --override-channels --strict-channel-priority
+            -c precise-simulation -c conda-forge
+            python=${{ matrix.python }}
+            libblas=*=*openblas
+            fenics-dolfinx
+            cffi
+            setuptools
+
+      - name: Install packaged LLVM-MinGW JIT runtime
+        shell: pwsh
+        run: |
+          $localPath = (Resolve-Path "jit-package-output").Path -replace "\\", "/"
+          $localChannel = "file:///$localPath"
+          & $env:MAMBA_EXE install -y `
+            -r $env:MAMBA_ROOT_PREFIX `
+            -n llvm-mingw-jit `
+            --override-channels --strict-channel-priority `
+            -c $localChannel -c precise-simulation -c conda-forge `
+            fenics-jit-llvm-mingw
+          if ($LASTEXITCODE -ne 0) { throw "runtime package install failed" }
+
+      - name: Run packaged CFFI and FFCx Poisson proofs
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/llvm-mingw-jit"
+          $toolchain = Join-Path $prefix "Library/fenics-jit"
+          ./scripts/llvm-mingw-jit/run-cffi-proof.ps1 `
+            -PythonPrefix $prefix `
+            -ToolchainRoot $toolchain `
+            -WorkDir "jit-work" `
+            -DiagnosticsDir "jit-diagnostics/proof" `
+            -PoissonScript "scripts/test-poisson.py"
+
+          $config = Get-Content "jit-diagnostics/proof/runtime-config.json" -Raw | ConvertFrom-Json
+          $expectedLibRoot = [System.IO.Path]::GetFullPath((Join-Path $toolchain "lib/python"))
+          $selectedLibRoot = [System.IO.Path]::GetFullPath([string]$config.python_import_library_dir)
+          if ($selectedLibRoot -ne $expectedLibRoot) {
+            throw "JIT helper did not select package-built Python import libraries: $selectedLibRoot"
+          }
+
+      - name: Verify MPI child runtime configuration
+        if: matrix.python == '3.12'
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/llvm-mingw-jit"
+          $toolchain = Join-Path $prefix "Library/fenics-jit"
+          $python = Join-Path $prefix "python.exe"
+          $mpiexec = Get-Command mpiexec.exe -ErrorAction SilentlyContinue
+          if (-not $mpiexec) {
+            $candidate = Get-ChildItem $prefix -Recurse -Filter mpiexec.exe -File -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if (-not $candidate) { throw "mpiexec.exe not found in FEniCS runtime" }
+            $mpiexecPath = $candidate.FullName
+          } else {
+            $mpiexecPath = $mpiexec.Source
+          }
+
+          $poison = Join-Path $env:RUNNER_TEMP "mpi-jit-poison"
+          $env:VSINSTALLDIR = Join-Path $poison "Microsoft Visual Studio"
+          $env:VCINSTALLDIR = Join-Path $poison "Microsoft Visual Studio/VC"
+          $env:INCLUDE = Join-Path $poison "Windows Kits/Include"
+          $env:LIB = Join-Path $poison "Windows Kits/Lib"
+          $env:CC = "cl.exe"
+          $env:CXX = "cl.exe"
+          $env:LD = "link.exe"
+
+          & $mpiexecPath -n 2 $python `
+            ./scripts/llvm-mingw-jit/mpi-runtime-proof.py `
+            --toolchain-root $toolchain `
+            --python-prefix $prefix `
+            --diagnostics-dir "jit-diagnostics/mpi"
+          if ($LASTEXITCODE -ne 0) { throw "MPI JIT runtime helper proof failed" }
+
+          $summary = Get-Content "jit-diagnostics/mpi/summary.json" -Raw | ConvertFrom-Json
+          if ([int]$summary.ranks -ne 2) {
+            throw "MPI helper proof did not record two ranks"
+          }
+
+      - name: Upload JIT diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: llvm-mingw-package-jit-py${{ matrix.python }}
+          path: |
+            jit-diagnostics/
+            jit-work/setup.cfg
+            jit-work/*.c
+            jit-work/*.pyd
+            jit-work/ffcx-cache/**/*.c
+            jit-work/ffcx-cache/**/*.pyd
+            jit-work/ffcx-cache/**/setup.cfg
+          if-no-files-found: warn
+          retention-days: 14

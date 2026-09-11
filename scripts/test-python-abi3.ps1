@@ -22,9 +22,8 @@ if ($Preview) {
     $pythonVersions = @("3.15.*")
     $channels += "conda-forge/label/python_dev", "conda-forge/label/python_rc", "conda-forge"
 } else {
-    # Test both ends of the supported ABI3 range: the build/minimum Python
-    # and the newest stable Python currently supported by the stack.
-    $pythonVersions = @("3.12.*", "3.14.*")
+    # Phase 4 runtime metadata/JIT gate covers every supported interpreter.
+    $pythonVersions = @("3.12.*", "3.13.*", "3.14.*")
     $channels += "conda-forge"
 }
 
@@ -88,6 +87,23 @@ foreach ($pythonVersion in $pythonVersions) {
 
         Save-EnvironmentProvenance -EnvironmentName $envName -Tag $modeTag
 
+        if (-not $Preview) {
+            $packageList = (& micromamba list -n $envName 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not inspect Phase 4 consumer environment"
+            }
+            foreach ($required in @("fenics-jit-llvm-mingw", "cffi", "setuptools")) {
+                if ($packageList -notmatch "(?m)^\s*$([regex]::Escape($required))\s") {
+                    throw "Phase 4 runtime environment is missing required package: $required"
+                }
+            }
+            foreach ($forbidden in @("vs2022_win-64", "vswhere")) {
+                if ($packageList -match "(?m)^\s*$([regex]::Escape($forbidden))\s") {
+                    throw "Phase 4 runtime environment still contains compiler activation package: $forbidden"
+                }
+            }
+        }
+
         Invoke-Micromamba -Arguments @(
             "run", "-n", $envName,
             "python", "-c",
@@ -99,6 +115,41 @@ foreach ($pythonVersion in $pythonVersions) {
             "python", "-c",
             "from mpi4py import MPI; from dolfinx import mesh; mesh.create_unit_square(MPI.COMM_SELF, 4, 4); print('serial ABI3 smoke test OK')"
         )
+
+        if (-not $Preview) {
+            # Exercise the ordinary user path: no explicit helper activation and
+            # no CI patching of FFCx. DOLFINx must enter the packaged runtime
+            # helper automatically and perform a fresh JIT.
+            $jitCache = Join-Path $logOutput "phase4-jit-$modeTag-cache"
+            $jitLog = Join-Path $logOutput "phase4-jit-$modeTag.txt"
+            Remove-Item -Recurse -Force $jitCache -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $jitCache | Out-Null
+
+            $savedXdgCache = $env:XDG_CACHE_HOME
+            $savedJitVerbose = $env:FENICS_JIT_VERBOSE
+            try {
+                $env:XDG_CACHE_HOME = $jitCache
+                $env:FENICS_JIT_VERBOSE = "1"
+                & micromamba run -n $envName python (Join-Path $root "scripts/test-poisson.py") 2>&1 |
+                    Tee-Object -FilePath $jitLog
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Phase 4 fresh Poisson JIT failed on Python $pythonVersion"
+                }
+            }
+            finally {
+                $env:XDG_CACHE_HOME = $savedXdgCache
+                $env:FENICS_JIT_VERBOSE = $savedJitVerbose
+            }
+
+            $jitText = Get-Content $jitLog -Raw
+            if ($jitText -notmatch "FFCx JIT compiler:\s+LLVM-MinGW") {
+                throw "Direct DOLFINx JIT did not report automatic LLVM-MinGW helper activation"
+            }
+            $jitModules = @(Get-ChildItem (Join-Path $jitCache "fenics") -Filter "*.pyd" -File -ErrorAction SilentlyContinue)
+            if ($jitModules.Count -eq 0) {
+                throw "Phase 4 fresh Poisson solve produced no JIT modules"
+            }
+        }
     }
     catch {
         # If creation succeeded, any failure below this point is a real

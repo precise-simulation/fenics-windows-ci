@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** proposed.
+**Status:** in progress — Phases 1-6 complete; Phase 7 standalone/Nuitka staging is next.
 
 This epic replaces the Windows runtime Visual Studio compiler dependency used by FFCx/CFFI JIT with a small, self-contained LLVM-MinGW toolchain. It does not change the compiler used to build PETSc, DOLFINx, Basix, or other native packages.
 
@@ -63,6 +63,50 @@ It should not be exposed or activated as a general-purpose compiler environment 
 | 7 | [Standalone/Nuitka staging](07-standalone-nuitka.md) | Standalone bundle performs fresh JIT with build prefix unavailable | Release gate |
 
 Phases are ordered. A later phase may be prototyped early when useful, but its production change must not bypass the exit gate of an earlier dependency.
+
+### Implementation status
+
+Phases 1, 2, 3, 4, 5, and 6 are complete. Phase 7 standalone/Nuitka staging is next.
+
+Phase 1 proved fresh CFFI and FFCx Poisson JIT on CPython 3.12-3.14 with the
+setuptools `mingw32` backend, LLVM-MinGW Clang/LLD, Stable-ABI
+`python3.dll` imports, and sanitized Visual Studio/Windows SDK state.
+
+Phase 2 packages the conservative proven toolchain as
+`fenics-jit-llvm-mingw`. The package has no runtime dependencies, installs
+and compiles in an otherwise empty conda prefix, generates its Python GNU import
+libraries during package construction, and passes the same packaged CFFI/FFCx
+matrix on CPython 3.12-3.14. A rattler-build rebuild is bit-for-bit identical to
+the original package.
+
+Phase 3 packages an owned hermetic runtime helper that resolves compiler,
+linker, Python development inputs, UFCx headers, and the setuptools backend
+without compiler activation or persistent environment changes. CI poisons
+ambient Visual Studio/Windows SDK/compiler variables and verifies the actual
+compile/link inputs remain package-relative. The fresh Poisson proof passes on
+CPython 3.12-3.14, and a two-rank MPI probe confirms identical JIT
+configuration across child processes. Dedicated workflow run #44
+(`34094463578`) is green.
+
+Phase 4 switched the Windows `fenics-dolfinx` runtime metadata from the
+general compiler dependency to `fenics-jit-llvm-mingw` plus explicit
+`setuptools`, while leaving the native VS2022 package build toolchain unchanged.
+Stack run #155 (`34105011298`) is green on the normal package and Python
+3.12-3.14 consumer path.
+
+Phase 5 added broad generated-form coverage, deterministic fresh/cache-reload
+checks, two-rank MPI compile/cache semantics, paths containing spaces, and PE
+dependency inspection. Stack run #160 (`34125754984`) passed the complete
+functional gate on CPython 3.12-3.14; the Python 3.15 preview step also passed.
+
+Phase 6 reproducibly removed unsupported targets, unused C++ support, auxiliary
+LLVM tools, non-Windows/unused compiler runtimes, and debug data from shipped PE
+binaries. Stack run #171 (`34186723562`) passed the complete Phase 5 matrix
+and Python 3.15 preview after minimization. The final package is **298.65 MiB
+installed / 56.00 MiB compressed**. The same run measured a conservative
+VS2022 x64 C JIT lower bound of **1297.04 MiB**, making the installed
+LLVM-MinGW package **23.03%** of the previous external compiler prerequisite
+lower bound and comfortably satisfying the 50% size gate.
 
 ## Primary gates
 

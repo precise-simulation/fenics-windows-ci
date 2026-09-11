@@ -30,8 +30,9 @@ if not exist "%JIT_ROOT%\minimization-stage-aj.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-ak.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-al.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-am.json" exit /b 1
+if not exist "%JIT_ROOT%\minimization-stage-an.json" exit /b 1
 if not exist "%JIT_ROOT%\runtime\fenics_jit_runtime.py" exit /b 1
-powershell.exe -NoProfile -Command "$meta = Get-Content -LiteralPath '%JIT_ROOT%\metadata.json' -Raw | ConvertFrom-Json; if ([string]$meta.minimization_stage -ne 'stage-am' -or [string]$meta.minimization_report -ne 'minimization-stage-am.json' -or [string]$meta.library_minimization_stage -ne 'stage-ab') { exit 1 }"
+powershell.exe -NoProfile -Command "$meta = Get-Content -LiteralPath '%JIT_ROOT%\metadata.json' -Raw | ConvertFrom-Json; if ([string]$meta.minimization_stage -ne 'stage-an' -or [string]$meta.minimization_report -ne 'minimization-stage-an.json' -or [string]$meta.library_minimization_stage -ne 'stage-ab') { exit 1 }"
 if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -like 'mshtml*' }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
@@ -90,6 +91,8 @@ powershell.exe -NoProfile -Command "$names = @('tuner.h','tuner.idl'); $bad = @(
 if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$names = @('xpsdigitalsignature.h','xpsdigitalsignature.idl','xpsobjectmodel.h','xpsobjectmodel.idl','xpsobjectmodel_1.h','xpsobjectmodel_1.idl','xpsprint.h','xpsprint.idl','xpsrassvc.h','xpsrassvc.idl'); $bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -in $names }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1
+if exist "%JIT_ROOT%\include\gdiplus" exit /b 1
+if exist "%JIT_ROOT%\include\gdiplus.h" exit /b 1
 
 powershell.exe -NoProfile -Command "$files = @(Get-ChildItem -LiteralPath '%JIT_BIN%' -File); $bad = @($files.Where({$_.Name -match '^(?:aarch64|arm64ec|armv7|i686)-w64-mingw32(?:uwp)?(?:-|$)'})); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"
 if errorlevel 1 exit /b 1

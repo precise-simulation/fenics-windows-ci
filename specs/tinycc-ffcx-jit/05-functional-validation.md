@@ -12,8 +12,8 @@ The goal is to discover unsupported generated-C constructs, ABI edge cases, cach
 
 At minimum reproduce the current LLVM-MinGW Phase 5 coverage:
 
-- CPython 3.12, 3.13, and 3.14;
-- Python 3.15 preview when available in the existing CI path;
+- standard GIL-enabled CPython 3.12, 3.13, and 3.14;
+- standard GIL-enabled Python 3.15 preview when available in the existing CI path;
 - fresh JIT and subsequent cache reload;
 - scalar Poisson baseline;
 - vector/tensor forms;
@@ -23,6 +23,8 @@ At minimum reproduce the current LLVM-MinGW Phase 5 coverage:
 - paths containing spaces;
 - two-rank MPI compile/cache semantics;
 - PE import/export inspection for generated modules.
+
+Free-threaded CPython is not part of this matrix unless a later proposal explicitly adds its ABI/import-library requirements and qualification cases.
 
 Reuse existing test generation and numerical assertions wherever possible so TinyCC and LLVM-MinGW are compared on exactly the same source/forms.
 
@@ -62,8 +64,19 @@ Suggested stress set:
 
 - 100 minimal CFFI compile/load/unload cycles;
 - 20 fresh FFCx module compilations across distinct cache keys;
-- concurrent MPI ranks hitting one cache namespace;
+- concurrent MPI ranks hitting one TinyCC cache namespace;
 - repeated backend switching LLVM-MinGW -> TinyCC -> LLVM-MinGW.
+
+For every backend transition, prove from diagnostics that the target backend performs at least one fresh compilation in its own physical cache namespace before a same-backend cache hit is accepted.
+
+## Python-link integrity
+
+For every supported Python version and representative JIT module:
+
+- capture the logical libraries and `.def` inputs passed to TinyCC;
+- fail if `python312`, `python313`, `python314`, `python315`, or another minor-version Python library is requested;
+- inspect PE imports and require `python3.dll` with no minor-version Python DLL;
+- verify `Py_NO_LINK_LIB`/header handling did not introduce an implicit Python autolink dependency.
 
 ## CRT/allocator stress
 
@@ -80,15 +93,16 @@ A crash-free small Poisson solve is not sufficient evidence for a mixed-CRT boun
 ## Tasks
 
 1. Parameterize the existing Phase 5 validation for backend selection where practical.
-2. Run the full CPython matrix under TinyCC.
+2. Run the full standard GIL-enabled CPython matrix under TinyCC.
 3. Preserve generated C and compile/link diagnostics.
 4. Compare numerical results with LLVM-MinGW.
 5. Add repeated compile/load stress.
-6. Validate cache isolation and backend switching.
-7. Validate MPI behavior.
-8. Add CRT-boundary stress if required by PE imports.
-9. Record unsupported-warning inventory without suppressing it globally.
+6. Validate mandatory physical cache isolation and fresh compilation across backend switches.
+7. Validate MPI behavior and cache-root propagation.
+8. Validate Stable-ABI link integrity on every supported Python version.
+9. Add CRT-boundary stress if required by PE imports.
+10. Record unsupported-warning inventory without suppressing it globally.
 
 ## Exit criteria
 
-Phase 5 passes when TinyCC completes the full existing functional matrix and stress tests on supported Python versions with no ABI, cache, MPI, or numerical regression and with no ambient compiler fallback.
+Phase 5 passes when TinyCC completes the full existing functional matrix and stress tests on supported standard GIL-enabled Python versions with no ABI, cache, MPI, Python-link, or numerical regression and with no ambient compiler fallback.

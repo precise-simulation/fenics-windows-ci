@@ -17,7 +17,7 @@ Expected retained components:
 - minimal TinyCC standard/include tree required by the CFFI/FFCx generated source;
 - minimal Windows import-definition files required by the compiler/runtime path;
 - deterministic `python3.def` for Stable-ABI linking;
-- owned TinyCC compiler adapter;
+- owned TinyCC compiler/build_ext adapter;
 - runtime helper/backend metadata;
 - TinyCC license/notices and source provenance metadata.
 
@@ -27,6 +27,17 @@ Do not automatically ship:
 - examples, documentation generators, tests, cross targets, 32-bit target support, ARM targets, debug tooling, or general development utilities;
 - `tiny_impdef.exe` if all required `.def` files are generated at package-build time;
 - a full Windows SDK or full mingw-w64 development environment.
+
+## Runtime dependencies and compatibility
+
+CFFI runtime compilation on Python 3.12+ uses CFFI's setuptools/distutils shim and setuptools' vendored distutils implementation. Declare both `cffi` and `setuptools` as explicit runtime dependencies of the TinyCC JIT integration rather than relying on them transitively.
+
+The adapter uses private/version-sensitive integration points, so packaging must also record a tested compatibility contract:
+
+- capture the exact `cffi` and `setuptools` versions used by the Phase 1 proof;
+- initially constrain the package to versions proven by CI if necessary;
+- broaden any version range only after Phase 3 compatibility tests establish that compiler discovery, the temporary `Distribution`, custom `build_ext`, and CFFI compilation still behave as expected;
+- fail clearly when an unsupported combination cannot resolve the TinyCC backend instead of falling back to another compiler.
 
 ## Build source and reproducibility
 
@@ -53,7 +64,7 @@ Every added header family must have a recorded reason and license provenance.
 
 Generate `python3.def` during package construction from a pinned/reference Stable-ABI export source or a validated `python3.dll` export set. The file must name `python3.dll` as the target library.
 
-Do not require import-definition generation at end-user runtime.
+Do not require import-definition generation at end-user runtime. The packaged adapter must suppress implicit versioned `pythonXY` linkage and pass this definition explicitly.
 
 ## Relocatability
 
@@ -76,13 +87,14 @@ Treat licensing completion as part of the package gate rather than release clean
 2. Pin exact upstream source and build inputs.
 3. Stage the minimum x86-64 Windows runtime payload.
 4. Generate/package `python3.def` and required system `.def` files.
-5. Package the adapter/runtime helper.
-6. Add package smoke tests that compile and import a minimal CFFI extension.
-7. Test install into a clean prefix and a path containing spaces.
-8. Verify no compiler/runtime input resolves to the build prefix.
-9. Perform two clean rebuilds and compare manifests/hashes.
-10. Record staged, installed, and compressed package sizes.
+5. Package the compiler/build_ext adapter and runtime helper.
+6. Declare `cffi` and `setuptools` runtime dependencies and record the qualified versions/ranges.
+7. Add package smoke tests that compile and import a minimal CFFI extension and verify no versioned Python link dependency.
+8. Test install into a clean prefix and a path containing spaces.
+9. Verify no compiler/runtime input resolves to the build prefix or ambient Python/MSVC library directories.
+10. Perform two clean rebuilds and compare manifests/hashes.
+11. Record staged, installed, and compressed package sizes.
 
 ## Exit criteria
 
-Phase 2 passes when the package installs into an otherwise compiler-free runtime prefix, performs the Phase 1 CFFI/Poisson proof, is relocatable and reproducible, contains complete licensing/provenance metadata, and remains below the 25%-of-LLVM-MinGW installed-size gate.
+Phase 2 passes when the package installs into an otherwise compiler-free runtime prefix, performs the Phase 1 CFFI/Poisson proof, declares and validates its CFFI/setuptools runtime integration contract, is relocatable and reproducible, contains complete licensing/provenance metadata, and remains below the 25%-of-LLVM-MinGW installed-size gate.

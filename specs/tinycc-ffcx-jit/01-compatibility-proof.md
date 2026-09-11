@@ -28,7 +28,9 @@ Prototype a minimal `distutils.ccompiler.CCompiler` implementation with `compile
 - translate include dirs, macros, library dirs, and supported extra arguments;
 - reject unsupported options instead of silently ignoring important semantics.
 
-If the object/link split proves fragile, the fallback is a narrower adapter that invokes TinyCC directly on the generated C sources for the final `.pyd`. Avoid patching global setuptools behavior.
+Import/register the TinyCC compiler subclass inside the owned JIT activation context before setuptools calls `new_compiler("tinycc")`. Do not rely on persistent/global compiler registration.
+
+The prototype may also use the smallest owned `build_ext` subclass needed to prevent native-Windows setuptools behavior from adding MSVC/versioned-Python library inputs. If the object/link split proves fragile, the fallback is a narrower adapter that invokes TinyCC directly on the generated C sources for the final `.pyd`. Avoid patching global setuptools behavior.
 
 ## C language/FFCx flags
 
@@ -39,23 +41,33 @@ For TinyCC:
 - determine the exact supported `-std=` mode on the pinned revision;
 - remove/translate MSVC- or Clang-specific flags;
 - preserve `-D__STDC_NO_COMPLEX__` for the initial proof;
+- define `Py_NO_LINK_LIB` for CFFI wrapper compilation where supported so CPython headers cannot request a library through compiler-specific autolink pragmas;
 - capture the complete generated C source for every failure;
 - treat unsupported required C semantics as a go/no-go result, not as a reason for broad source rewriting.
 
 ## Python Stable ABI
 
-Prefer the same conceptual ABI strategy as LLVM-MinGW: generated modules import `python3.dll`.
+Use the same conceptual ABI strategy as LLVM-MinGW: generated modules import `python3.dll` and must not acquire a minor-version Python dependency through setuptools or CPython headers.
 
 TinyCC's Windows linker uses import definition files. Generate/package a deterministic `python3.def` from a supported `python3.dll` export set and link it explicitly.
+
+The integration must own Python-library selection end-to-end:
+
+- override/suppress setuptools `build_ext.get_libraries()` behavior that would otherwise add `python312`, `python313`, `python314`, or another versioned Python library for a non-MSVC compiler;
+- prevent native-Windows setuptools library-directory injection from becoming an accidental source of Python/MSVC link inputs, retaining only explicitly approved library roots;
+- define `Py_NO_LINK_LIB` when compiling against CPython headers and verify no header-driven `#pragma comment(lib, ...)` Python dependency is introduced;
+- pass packaged `python3.def` to TinyCC explicitly;
+- reject any versioned Python library name reaching the TinyCC adapter rather than silently accepting it.
 
 Acceptance checks:
 
 - CFFI wrapper compiles with official CPython headers;
-- `.pyd` loads on CPython 3.12, 3.13, and 3.14;
+- `.pyd` loads on standard GIL-enabled CPython 3.12, 3.13, and 3.14;
+- captured compile/link inputs contain no versioned Python library request;
 - PE import inspection shows `python3.dll`, not a minor-version DLL;
 - the same definition strategy works for all supported interpreters.
 
-Preview Python 3.15 after the supported matrix passes.
+Preview standard GIL-enabled Python 3.15 after the supported matrix passes. Free-threaded Python is out of scope for this epic unless it is later added as a separate ABI/import-library qualification target.
 
 ## Windows/CRT ABI proof
 
@@ -78,7 +90,7 @@ Reuse the LLVM-MinGW sanitization approach:
 - remove Visual Studio and Windows Kits paths from `PATH`;
 - clear `CC`, `CXX`, `LD`, include/library search variables;
 - expose only the TinyCC package, active Python/FEniCS runtime DLL paths, and normal Windows system directories;
-- clear the FFCx cache before each fresh JIT.
+- clear the TinyCC-specific FFCx cache namespace before each fresh JIT.
 
 CI must fail if the JIT invokes or resolves `cl.exe`, MSVC `link.exe`, Clang, GCC, `vswhere.exe`, or host Windows SDK inputs.
 
@@ -86,17 +98,17 @@ CI must fail if the JIT invokes or resolves `cl.exe`, MSVC `link.exe`, Clang, GC
 
 1. Add a manual-only TinyCC experiment workflow on `windows-2022`.
 2. Pin and build/download the selected TinyCC x86-64 revision.
-3. Implement the smallest prototype TinyCC `CCompiler` adapter.
+3. Implement the smallest prototype TinyCC `CCompiler`/`build_ext` adapter.
 4. Compile/import a minimal CFFI module.
-5. Implement the `python3.def` Stable-ABI link path.
+5. Implement the `python3.def` Stable-ABI link path and suppress all implicit versioned Python linking.
 6. Normalize/reject FFCx compile flags explicitly.
-7. Run a fresh FFCx Poisson JIT/solve on CPython 3.12-3.14.
+7. Run a fresh FFCx Poisson JIT/solve on standard GIL-enabled CPython 3.12-3.14.
 8. Run ABI layout probes against the LLVM-MinGW/MSVC reference.
-9. Inspect PE imports and retain compile/link/source diagnostics.
-10. Preview CPython 3.15.
+9. Inspect PE imports and retain compile/link/source diagnostics, including proof that no `pythonXY` library was requested.
+10. Preview standard GIL-enabled CPython 3.15.
 
 ## Exit criteria
 
-Phase 1 passes only when all supported Python versions compile, load, and solve correctly with TinyCC as the sole JIT compiler/linker, the Python/Windows ABI is demonstrated, and no required generated C feature is unsupported.
+Phase 1 passes only when all supported Python versions compile, load, and solve correctly with TinyCC as the sole JIT compiler/linker, the generated module imports only the intended Stable-ABI Python DLL, no implicit/versioned Python library input participates, the Python/Windows ABI is demonstrated, and no required generated C feature is unsupported.
 
 If this phase needs invasive FFCx source rewriting or cannot establish a safe ABI/CRT boundary, stop the epic.

@@ -28,7 +28,7 @@ This is a dedicated FFCx JIT backend, not a general-purpose conda compiler envir
 
 ## Architecture
 
-TinyCC is not a drop-in executable replacement for `x86_64-w64-mingw32-clang` under setuptools' `mingw32` backend. The Windows port can emit DLLs directly with `tcc -shared`, but it uses its own compile/link model and Windows `.def` import definitions. Use an owned TinyCC `CCompiler` adapter (or, only if necessary, a narrower direct CFFI adapter) rather than pretending TinyCC is GCC/Clang.
+TinyCC is not a drop-in executable replacement for `x86_64-w64-mingw32-clang` under setuptools' `mingw32` backend. The Windows port can emit DLLs directly with `tcc -shared`, but it uses its own compile/link model and Windows `.def` import definitions. Use an owned TinyCC `CCompiler` adapter plus the smallest required CFFI `build_ext` integration rather than pretending TinyCC is GCC/Clang.
 
 ```text
 UFL
@@ -51,11 +51,12 @@ FENICS_JIT_COMPILER=tinycc       # experimental
 
 1. **C language coverage** — prove the exact pinned TinyCC revision against the actual CFFI/FFCx generated-source corpus. Unsupported C semantics are a Phase 1 stop condition.
 2. **Windows ABI compatibility** — TCC-generated x86-64 PE code must interoperate with MSVC-built CPython/DOLFINx. Compare UFCx layout/calling-convention probes with the working LLVM-MinGW path. Preserve `__STDC_NO_COMPLEX__` unless a stronger ABI proof permits otherwise.
-3. **Python linking** — use a package-built `python3.def` targeting Stable-ABI `python3.dll`; validate PE imports on every supported CPython version.
+3. **Python linking** — use a package-built `python3.def` targeting Stable-ABI `python3.dll`; explicitly suppress setuptools' native-Windows versioned `pythonXY` library selection and disable/verify absence of CPython header-driven library autolinking. CI must reject any versioned Python library request or PE import.
 4. **CRT boundary** — record actual CRT/system DLL imports. If TinyCC uses a different CRT from CPython/DOLFINx, audit allocation/file-handle ownership and either prove the boundary safe or configure the package to use the required CRT.
 5. **Generated-code performance** — TinyCC should compile very quickly, but its generated code may be slower. Kernel/assembly execution must be benchmarked against LLVM-MinGW before any default switch.
-6. **Setuptools integration** — own compiler selection in-process; do not depend on global config or masquerade as the `mingw32` backend.
-7. **Licensing** — TinyCC is LGPL-2.1; ship required notices/license material and satisfy source/modification distribution obligations before release.
+6. **Setuptools/CFFI integration** — own compiler selection in-process; do not depend on global config or masquerade as the `mingw32` backend. Treat CFFI's `_shimmed_dist_utils` and setuptools' compiler discovery as a versioned integration boundary with explicit runtime dependencies and compatibility tests.
+7. **Cache identity** — LLVM-MinGW and TinyCC artifacts must never share a physical FFCx/CFFI cache namespace. Backend-specific cache roots are mandatory during qualification.
+8. **Licensing** — TinyCC is LGPL-2.1; ship required notices/license material and satisfy source/modification distribution obligations before release.
 
 ## Upstream baseline
 
@@ -81,12 +82,15 @@ Phases are ordered. No runtime metadata/default switch may bypass an earlier gat
 
 Stop if the following cannot be made reliable with a small maintainable adapter:
 
-- minimal CFFI extension compiles/imports on CPython 3.12-3.14;
+- minimal CFFI extension compiles/imports on standard GIL-enabled CPython 3.12-3.14;
 - fresh FFCx Poisson JIT compiles, imports, assembles, and solves;
 - no Visual Studio, host Windows SDK, GCC, Clang, or external linker participates;
 - generated `.pyd` imports the intended `python3.dll` Stable ABI;
+- no TinyCC link command requests `python312`, `python313`, `python314`, or another minor-version Python library, and no resulting PE imports a minor-version Python DLL;
 - UFCx ABI probes match the MSVC/LLVM-MinGW reference;
 - the generated C corpus does not require unsupported compiler semantics.
+
+Python 3.15 preview qualification covers the standard GIL-enabled build only unless free-threaded Python is added later as a separate ABI/import-library qualification target.
 
 ### Size gate
 
@@ -119,10 +123,11 @@ The epic is successful when:
 
 - an exact pinned TinyCC revision builds reproducibly;
 - the package has no runtime dependency on an external compiler/linker;
+- `cffi` and `setuptools` are explicit runtime dependencies with a tested compatibility contract for the private CFFI/distutils integration used by the adapter;
 - CFFI/FFCx JIT works on supported CPython runtimes through an owned TinyCC adapter;
-- generated modules use the intended Python ABI and have audited PE imports;
+- generated modules use the intended Python Stable ABI, no minor-version Python link dependency is requested, and PE imports are audited;
 - UFCx ABI compatibility is proven;
-- the full existing FFCx functional matrix, cache, paths-with-spaces, and MPI semantics pass;
+- the full existing FFCx functional matrix, backend-isolated cache behavior, paths-with-spaces, and MPI semantics pass;
 - numerical results match the LLVM-MinGW reference;
 - size and compile/runtime performance are measured side-by-side;
 - a standalone bundle performs fresh JIT with the original prefix unavailable;

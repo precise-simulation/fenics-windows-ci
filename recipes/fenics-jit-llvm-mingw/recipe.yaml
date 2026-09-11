@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 47
+  build: 48
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -92,9 +92,10 @@ about:
     unobserved Task Scheduler taskschd root header/IDL pair, build 45 prunes
     the exact measured-unobserved Windows Update Agent wuapi root header/IDL
     pair, build 46 prunes the exact measured-unobserved DirectShow DVD
-    interface dvdif root header/IDL pair, and build 47 prunes the exact
-    measured-unobserved DirectShow Video Mixing Renderer 9 vmr9 root
-    header/IDL pair.
+    interface dvdif root header/IDL pair, build 47 prunes the exact measured-
+    unobserved DirectShow Video Mixing Renderer 9 vmr9 root header/IDL pair,
+    and build 48 prunes the exact measured-unobserved DirectShow Analog Video
+    amvideo root header/IDL pair.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

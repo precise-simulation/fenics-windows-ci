@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 42
+  build: 43
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -85,8 +85,10 @@ about:
     measured-unobserved XML Paper Specification (XPS) root header/IDL family,
     build 40 prunes the exact measured-unobserved GDI+ root and include/
     gdiplus header family, build 41 prunes the exact measured-unobserved
-    DirectShow Editing Services qedit root header/IDL pair, and build 42 prunes
-    the exact measured-unobserved DirectShow AMStream root header/IDL pair.
+    DirectShow Editing Services qedit root header/IDL pair, build 42 prunes
+    the exact measured-unobserved DirectShow AMStream root header/IDL pair,
+    and build 43 prunes the exact measured-unobserved Enhanced Video Renderer
+    evr/evr9 root header/IDL family.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

@@ -38,10 +38,18 @@ if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found: $vcvars" }
 
 $buildScript = Join-Path $source "win32/build-tcc.bat"
 if (-not (Test-Path $buildScript)) { throw "TinyCC Windows build script not found: $buildScript" }
+$buildDir = Split-Path -Parent $buildScript
 
 $cmd = "call `"$vcvars`" >nul && call `"$buildScript`" -c cl -t x86_64 -i `"$output`""
-cmd.exe /d /s /c $cmd 2>&1 | Tee-Object -FilePath (Join-Path $diagnostics "build.log")
-if ($LASTEXITCODE -ne 0) { throw "TinyCC bootstrap failed" }
+Push-Location $buildDir
+try {
+    cmd.exe /d /s /c $cmd 2>&1 | Tee-Object -FilePath (Join-Path $diagnostics "build.log")
+    $bootstrapExitCode = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+}
+if ($bootstrapExitCode -ne 0) { throw "TinyCC bootstrap failed" }
 
 $tcc = Join-Path $output "tcc.exe"
 if (-not (Test-Path $tcc)) { throw "TinyCC bootstrap did not produce $tcc" }

@@ -1,8 +1,14 @@
 name: tinycc-jit
 
-# TinyCC remains experimental. Deep compatibility qualification is manual so
-# stack remains the single automatic PR/main workflow.
+# TinyCC remains experimental. Run its deep qualification automatically only
+# for TinyCC-specific pull-request changes, while retaining manual dispatch.
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/tinycc-jit.yml"
+      - "scripts/tinycc-jit/**"
+      - "specs/tinycc-ffcx-jit/**"
+      - "recipes/fenics-jit-tinycc/**"
   workflow_dispatch:
 
 permissions:

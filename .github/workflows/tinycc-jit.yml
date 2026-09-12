@@ -277,3 +277,116 @@ jobs:
             phase3-diagnostics/
           if-no-files-found: warn
           retention-days: 14
+
+  private-qualification:
+    name: Phase 4A private qualification (Python ${{ matrix.python }})
+    needs: package-backend
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download qualified Phase-3 package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tinycc-phase3-package
+          path: phase4a-package-artifact
+
+      - name: Install Phase-4A runtime tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: phase4a-tools
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Install TinyCC and LLVM-MinGW side by side without shared-runtime changes
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $package = Get-ChildItem phase4a-package-artifact -Recurse -Filter "fenics-jit-tinycc-*.conda" | Select-Object -First 1
+          if (-not $package) { throw "downloaded fenics-jit-tinycc package not found" }
+          $prefix = Join-Path $PWD "phase4a runtime py${{ matrix.python }} with spaces"
+          & $mamba create -y -p $prefix --override-channels --strict-channel-priority `
+            -c precise-simulation -c conda-forge `
+            "python=${{ matrix.python }}" "libblas=*=*openblas" `
+            fenics-dolfinx fenics-jit-llvm-mingw pefile "cffi=2.1.*" "setuptools=84.*"
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4A FEniCS/LLVM-MinGW environment install failed" }
+          & $mamba install -y -p $prefix $package.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4A local TinyCC package install failed" }
+
+      - name: Run LLVM-MinGW reference form corpus
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $prefix = Join-Path $PWD "phase4a runtime py${{ matrix.python }} with spaces"
+          & $mamba run -p $prefix python scripts/tinycc-jit/phase4a-proof.py `
+            --mode llvm-mingw `
+            --work-dir "phase4a reference py${{ matrix.python }}" `
+            --output "phase4a-evidence/reference-py${{ matrix.python }}.json"
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4A LLVM-MinGW reference corpus failed" }
+
+      - name: Run fresh TinyCC broad private qualification
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $prefix = Join-Path $PWD "phase4a runtime py${{ matrix.python }} with spaces"
+          $backend = Join-Path $prefix "Library/fenics-jit/backends/tinycc"
+          & $mamba run -p $prefix python scripts/tinycc-jit/phase4a-proof.py `
+            --mode tinycc `
+            --backend-root $backend `
+            --work-dir "phase4a tinycc py${{ matrix.python }} with spaces" `
+            --reference-json "phase4a-evidence/reference-py${{ matrix.python }}.json" `
+            --output "phase4a-evidence/tinycc-fresh-py${{ matrix.python }}.json"
+          if ($LASTEXITCODE -ne 0) { throw "fresh Phase-4A TinyCC corpus failed" }
+
+      - name: Run new-process TinyCC private-cache reload
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $prefix = Join-Path $PWD "phase4a runtime py${{ matrix.python }} with spaces"
+          $backend = Join-Path $prefix "Library/fenics-jit/backends/tinycc"
+          & $mamba run -p $prefix python scripts/tinycc-jit/phase4a-proof.py `
+            --mode tinycc `
+            --backend-root $backend `
+            --work-dir "phase4a tinycc py${{ matrix.python }} with spaces" `
+            --reference-json "phase4a-evidence/reference-py${{ matrix.python }}.json" `
+            --output "phase4a-evidence/tinycc-reload-py${{ matrix.python }}.json" `
+            --cache-reload
+          if ($LASTEXITCODE -ne 0) { throw "new-process Phase-4A TinyCC cache reload failed" }
+
+      - name: Re-run installed package ABI/CRT/PE/negative-input self-test
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $prefix = Join-Path $PWD "phase4a runtime py${{ matrix.python }} with spaces"
+          $backend = Join-Path $prefix "Library/fenics-jit/backends/tinycc"
+          & $mamba run -p $prefix python (Join-Path $backend "selftest.py") `
+            --backend-root $backend `
+            --work-dir "phase4a package selftest py${{ matrix.python }}" `
+            --poisson
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4A installed-package regression self-test failed" }
+
+      - name: Upload Phase-4A evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tinycc-phase4a-py${{ matrix.python }}
+          path: |
+            phase4a-evidence/
+            phase4a reference py${{ matrix.python }}/
+            phase4a tinycc py${{ matrix.python }} with spaces/
+            phase4a package selftest py${{ matrix.python }}/
+          if-no-files-found: warn
+          retention-days: 14

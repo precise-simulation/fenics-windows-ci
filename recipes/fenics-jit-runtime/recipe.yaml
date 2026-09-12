@@ -30,7 +30,6 @@ about:
     Owns the backend-neutral Library/fenics-jit/runtime path used by DOLFINx.
     Compiler implementations are supplied separately by backend packages.
   license: BSD-3-Clause
-  license_file: ${{ RECIPE_DIR }}/../../LICENSE.txt
 
 extra:
   recipe-maintainers:

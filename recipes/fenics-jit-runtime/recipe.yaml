@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-runtime
   version: "0.1.0"
-  build: 0
+  build: 1
 
 package:
   name: ${{ name }}
@@ -14,22 +14,23 @@ build:
   script:
     file: build.bat
 
+requirements:
+  run: []
+
 tests:
   - script:
-      file: test-package.bat
+      - python -m py_compile %LIBRARY_PREFIX%\fenics-jit\runtime\fenics_jit_runtime.py
     requirements:
       run:
         - python 3.12.*
 
 about:
-  summary: Shared Windows FEniCS FFCx/CFFI JIT runtime
+  summary: Shared Windows FEniCS FFCx/CFFI JIT runtime bootstrap
   description: |
-    Single-owner Windows JIT runtime helper used by compiler backends. This
-    package intentionally has no runtime dependency on a compiler backend.
-    Phase 4B initially preserves the qualified LLVM-MinGW behavior while
-    moving shared runtime file ownership out of the compiler package.
+    Owns the backend-neutral Library/fenics-jit/runtime path used by DOLFINx.
+    Compiler implementations are supplied separately by backend packages.
   license: BSD-3-Clause
-  repository: https://github.com/precise-simulation/fenics-windows-ci
+  license_file: ../../LICENSE.txt
 
 extra:
   recipe-maintainers:

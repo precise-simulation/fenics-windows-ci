@@ -1,7 +1,7 @@
 @echo on
 setlocal
 
-set "JIT_ROOT=%LIBRARY_PREFIX%\fenics-jit"
+set "JIT_ROOT=%LIBRARY_PREFIX%\fenics-jit\backends\llvm-mingw"
 set "JIT_BIN=%JIT_ROOT%\bin"
 set "JIT_TARGET_LIB=%JIT_ROOT%\x86_64-w64-mingw32\lib"
 set "CLANG=%JIT_BIN%\x86_64-w64-mingw32-clang.exe"
@@ -40,7 +40,7 @@ if not exist "%JIT_ROOT%\minimization-stage-at.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-au.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-av.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-aw.json" exit /b 1
-if not exist "%JIT_ROOT%\runtime\fenics_jit_runtime.py" exit /b 1
+if not exist "%LIBRARY_PREFIX%\fenics-jit\runtime\fenics_jit_runtime.py" exit /b 1
 powershell.exe -NoProfile -Command "$meta = Get-Content -LiteralPath '%JIT_ROOT%\metadata.json' -Raw | ConvertFrom-Json; if ([string]$meta.minimization_stage -ne 'stage-aw' -or [string]$meta.minimization_report -ne 'minimization-stage-aw.json' -or [string]$meta.library_minimization_stage -ne 'stage-ab') { exit 1 }"
 if errorlevel 1 exit /b 1
 powershell.exe -NoProfile -Command "$bad = @(Get-ChildItem -LiteralPath '%JIT_ROOT%\include' -File | Where-Object { $_.Name -like 'mshtml*' }); if ($bad.Count -ne 0) { $bad.FullName; exit 1 }"

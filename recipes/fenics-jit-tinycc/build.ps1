@@ -33,19 +33,14 @@ $buildText = $buildText.Replace($oldLine, $newLine)
 [IO.File]::WriteAllText($buildScript, $buildText, [Text.Encoding]::ASCII)
 $patchedBuildHash = (Get-FileHash -Algorithm SHA256 $buildScript).Hash.ToLowerInvariant()
 
-$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
-if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
-$vsInstall = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1).Trim()
-if (-not $vsInstall) { throw "Visual Studio C++ tools not found" }
-$vcvars = Join-Path $vsInstall "VC/Auxiliary/Build/vcvars64.bat"
-if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found" }
-$clOutput = (cmd.exe /d /s /c "call `"$vcvars`" >nul && cl 2>&1" | Out-String).Trim()
-$clVersion = ($clOutput -split "`r?`n" | Where-Object { $_ -match "Compiler Version" } | Select-Object -First 1).Trim()
-if (-not $clVersion) { throw "could not capture MSVC compiler version" }
+$cl = Get-Command cl.exe -ErrorAction Stop
+$clOutput = (& $cl.Source 2>&1 | Out-String)
+$clVersion = (($clOutput -split "`r?`n" | Where-Object { $_ -match "Compiler Version" } | Select-Object -First 1) -as [string]).Trim()
+if (-not $clVersion) { throw "could not capture activated MSVC compiler version" }
 
 Push-Location (Join-Path $source "win32")
 try {
-    cmd.exe /d /s /c "call `"$vcvars`" >nul && call build-tcc.bat -c cl -t x86_64 -i `"$stage`""
+    cmd.exe /d /s /c "call build-tcc.bat -c cl -t x86_64 -i `"$stage`""
     if ($LASTEXITCODE -ne 0) { throw "TinyCC bootstrap failed" }
 } finally {
     Pop-Location
@@ -83,7 +78,7 @@ $metadata = [ordered]@{
     patched_build_script_sha256 = $patchedBuildHash
     local_build_patch = "build-tcc-msvc-repro-v1: remove -Zi and add linker -Brepro"
     bootstrap_compiler = $clVersion
-    bootstrap_contract = "GitHub windows-2022 + vs2022_win-64 19.44.*"
+    bootstrap_contract = "rattler vs2022_win-64 19.44.* on GitHub windows-2022"
     runner_image = if ($env:ImageVersion) { $env:ImageVersion } else { "windows-2022" }
     tcc_version = $tccVersion
     tcc_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "tcc.exe")).Hash.ToLowerInvariant()

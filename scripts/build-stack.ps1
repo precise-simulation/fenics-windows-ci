@@ -92,9 +92,10 @@ $stages = @(
     @{ name = "hdf5";      package = "hdf5";                    recipe = "$root/recipes/hdf5/recipe.yaml";                    variants = "$root/recipes/hdf5/variants-win64.yaml";     plan = "hdf5" },
     @{ name = "petsc";     package = "petsc";                   recipe = "$root/recipes/petsc/recipe.yaml";                   variants = "$root/recipes/petsc/variants-win64.yaml";    plan = "petsc" },
     @{ name = "petsc4py";  package = "petsc4py";                recipe = "$root/recipes/petsc4py/recipe.yaml";                variants = "$root/recipes/petsc4py/variants-win64.yaml"; plan = "petsc4py" },
-    # DOLFINx's Windows runtime metadata now depends on this package. Build it
-    # into the same local channel before DOLFINx so rattler's package tests and
-    # downstream ABI3 consumer solves exercise the exact candidate artifact.
+    # Phase 4B gives the common Windows JIT helper its own package/file owner.
+    # Build it before the default LLVM-MinGW backend so the latter's runtime
+    # dependency and package test resolve against the exact candidate artifact.
+    @{ name = "jit-runtime"; package = "fenics-jit-runtime"; recipe = "$root/recipes/fenics-jit-runtime/recipe.yaml"; variants = $null; plan = "dolfinx"; version = "0.1.0" },
     @{ name = "jit-llvm-mingw"; package = "fenics-jit-llvm-mingw"; recipe = "$root/recipes/fenics-jit-llvm-mingw/recipe.yaml"; variants = $null; plan = "dolfinx"; version = "20260826" },
     @{ name = "dolfinx";   package = "fenics-dolfinx";          recipe = "$root/recipes/dolfinx/recipe.yaml";                 variants = "$root/recipes/dolfinx/variants-win64.yaml";  plan = "dolfinx" }
 )

@@ -74,14 +74,6 @@ if (-not (Test-Path $minimizer)) {
 }
 & $minimizer -ToolchainRoot $destination -Stage "stage-h"
 
-$runtimeDir = Join-Path $destination "runtime"
-New-Item -ItemType Directory -Force $runtimeDir | Out-Null
-$runtimeHelperSource = Join-Path $PSScriptRoot "fenics_jit_runtime.py"
-if (-not (Test-Path $runtimeHelperSource)) {
-    throw "Runtime helper source missing from recipe: $runtimeHelperSource"
-}
-Copy-Item -Force $runtimeHelperSource (Join-Path $runtimeDir "fenics_jit_runtime.py")
-
 foreach ($name in @("versions.txt", "LICENSE.TXT")) {
     $source = Join-Path $sourceRoot $name
     if (Test-Path $source) {
@@ -167,7 +159,7 @@ $metadata = [ordered]@{
     python_import_library_aliases = @("python3", "python312", "python313", "python314")
     minimization_stage = "stage-h"
     minimization_report = "minimization-stage-h.json"
-    runtime_helper = "runtime/fenics_jit_runtime.py"
+    runtime_helper_owner = "fenics-jit-runtime"
 }
 $metadata | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $destination "metadata.json") -Encoding UTF8
 

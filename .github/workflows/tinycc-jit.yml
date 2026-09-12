@@ -177,3 +177,107 @@ jobs:
             tinycc phase2 work/**/*.pyd
           if-no-files-found: warn
           retention-days: 14
+
+  package-backend:
+    name: Phase 3 package reproducibility and footprint
+    needs: compatibility-proof
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install package build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: tinycc-package-ci
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            rattler-build=0.74.0
+
+      - name: Put package CI environment on PATH
+        shell: pwsh
+        run: |
+          "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci/Library/bin" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci/Scripts" >> $env:GITHUB_PATH
+
+      - name: Build TinyCC package twice from clean work roots
+        shell: pwsh
+        run: |
+          rattler-build build `
+            --recipe recipes/fenics-jit-tinycc/recipe.yaml `
+            --output-dir phase3-output-a `
+            --channel-priority strict `
+            -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "first TinyCC package build failed" }
+          rattler-build build `
+            --recipe recipes/fenics-jit-tinycc/recipe.yaml `
+            --output-dir phase3-output-b `
+            --channel-priority strict `
+            -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "second TinyCC package build failed" }
+
+      - name: Install both package builds into relocatable spaced prefixes
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $channelA = "file:///" + ((Resolve-Path phase3-output-a).Path -replace '\\','/')
+          $channelB = "file:///" + ((Resolve-Path phase3-output-b).Path -replace '\\','/')
+          $prefixA = Join-Path $PWD "phase3 install A with spaces"
+          $prefixB = Join-Path $PWD "phase3 install B with spaces"
+          & $mamba create -y -p $prefixA --override-channels --strict-channel-priority `
+            -c $channelA -c precise-simulation -c conda-forge `
+            python=3.12 libblas=*=*openblas fenics-jit-tinycc fenics-dolfinx pefile
+          if ($LASTEXITCODE -ne 0) { throw "first TinyCC package install failed" }
+          & $mamba create -y -p $prefixB --override-channels --strict-channel-priority `
+            -c $channelB -c precise-simulation -c conda-forge `
+            python=3.12 libblas=*=*openblas fenics-jit-tinycc fenics-dolfinx pefile
+          if ($LASTEXITCODE -ne 0) { throw "second TinyCC package install failed" }
+
+      - name: Run installed-package TinyCC qualification
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $prefixA = Join-Path $PWD "phase3 install A with spaces"
+          $prefixB = Join-Path $PWD "phase3 install B with spaces"
+          $backendA = Join-Path $prefixA "Library/fenics-jit/backends/tinycc"
+          $backendB = Join-Path $prefixB "Library/fenics-jit/backends/tinycc"
+          & $mamba run -p $prefixA python (Join-Path $backendA "selftest.py") `
+            --backend-root $backendA --work-dir "phase3-selftest-a" --poisson
+          if ($LASTEXITCODE -ne 0) { throw "installed TinyCC package A self-test failed" }
+          & $mamba run -p $prefixB python (Join-Path $backendB "selftest.py") `
+            --backend-root $backendB --work-dir "phase3-selftest-b" --poisson
+          if ($LASTEXITCODE -ne 0) { throw "installed TinyCC package B self-test failed" }
+
+      - name: Compare package payloads and apply early footprint gate
+        shell: pwsh
+        run: |
+          $prefixA = Join-Path $PWD "phase3 install A with spaces"
+          $prefixB = Join-Path $PWD "phase3 install B with spaces"
+          $packageA = Get-ChildItem phase3-output-a/win-64 -Filter "fenics-jit-tinycc-*.conda" | Select-Object -First 1
+          $packageB = Get-ChildItem phase3-output-b/win-64 -Filter "fenics-jit-tinycc-*.conda" | Select-Object -First 1
+          if (-not $packageA -or -not $packageB) { throw "TinyCC package artifact not found" }
+          python scripts/tinycc-jit/phase3-package-compare.py `
+            --prefix-a $prefixA --prefix-b $prefixB `
+            --package-a $packageA.FullName --package-b $packageB.FullName `
+            --output phase3-diagnostics/package-comparison.json
+          if ($LASTEXITCODE -ne 0) { throw "TinyCC Phase-3 package comparison failed" }
+
+      - name: Upload Phase-3 package evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tinycc-phase3-package
+          path: |
+            phase3-output-a/win-64/fenics-jit-tinycc-*.conda
+            phase3-output-b/win-64/fenics-jit-tinycc-*.conda
+            phase3-selftest-a/
+            phase3-selftest-b/
+            phase3-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14

@@ -27,7 +27,7 @@ $buildScript = Join-Path $source "win32/build-tcc.bat"
 $upstreamBuildHash = (Get-FileHash -Algorithm SHA256 $buildScript).Hash.ToLowerInvariant()
 $buildText = [IO.File]::ReadAllText($buildScript)
 $oldLine = '%CMD% -O2 -W2 -Zi -MT -GS- -nologo %DEF_GITHASH% -link -opt:ref,icf'
-$newLine = '%CMD% -O2 -W2 -MT -GS- -nologo "-pathmap:%TCC_SOURCE_ROOT%=tinycc" %DEF_GITHASH% -link -Brepro -opt:ref,icf'
+$newLine = '%CMD% -O2 -W2 -MT -GS- -nologo /experimental:deterministic "-pathmap:%TCC_SOURCE_ROOT%=tinycc" %DEF_GITHASH% -link -Brepro -opt:ref,icf'
 if (-not $buildText.Contains($oldLine)) { throw "expected TinyCC MSVC bootstrap line not found" }
 $buildText = $buildText.Replace($oldLine, $newLine)
 [IO.File]::WriteAllText($buildScript, $buildText, [Text.Encoding]::ASCII)
@@ -84,7 +84,7 @@ $metadata = [ordered]@{
     source_revision = $revision
     upstream_build_script_sha256 = $upstreamBuildHash
     patched_build_script_sha256 = $patchedBuildHash
-    local_build_patch = "build-tcc-msvc-repro-v2: remove -Zi, path-map source root, and add linker -Brepro"
+    local_build_patch = "build-tcc-msvc-repro-v3: remove -Zi, enable deterministic source path mapping, and add linker -Brepro"
     bootstrap_compiler = $clVersion
     bootstrap_contract = "rattler vs2022_win-64 19.44.* on GitHub windows-2022"
     runner_image = if ($env:ImageVersion) { $env:ImageVersion } else { "windows-2022" }

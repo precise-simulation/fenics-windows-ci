@@ -34,7 +34,7 @@ $buildText = $buildText.Replace($oldLine, $newLine)
 $patchedBuildHash = (Get-FileHash -Algorithm SHA256 $buildScript).Hash.ToLowerInvariant()
 
 $cl = Get-Command cl.exe -ErrorAction Stop
-$clOutput = (& $cl.Source 2>&1 | Out-String)
+$clOutput = (cmd.exe /d /c "`"$($cl.Source)`" 2>&1" | Out-String)
 $clVersion = (($clOutput -split "`r?`n" | Where-Object { $_ -match "Compiler Version" } | Select-Object -First 1) -as [string]).Trim()
 if (-not $clVersion) { throw "could not capture activated MSVC compiler version" }
 

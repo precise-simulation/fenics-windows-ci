@@ -27,7 +27,7 @@ $buildScript = Join-Path $source "win32/build-tcc.bat"
 $upstreamBuildHash = (Get-FileHash -Algorithm SHA256 $buildScript).Hash.ToLowerInvariant()
 $buildText = [IO.File]::ReadAllText($buildScript)
 $oldLine = '%CMD% -O2 -W2 -Zi -MT -GS- -nologo %DEF_GITHASH% -link -opt:ref,icf'
-$newLine = '%CMD% -O2 -W2 -MT -GS- -nologo %DEF_GITHASH% -link -Brepro -opt:ref,icf'
+$newLine = '%CMD% -O2 -W2 -MT -GS- -nologo "-pathmap:%TCC_SOURCE_ROOT%=tinycc" %DEF_GITHASH% -link -Brepro -opt:ref,icf'
 if (-not $buildText.Contains($oldLine)) { throw "expected TinyCC MSVC bootstrap line not found" }
 $buildText = $buildText.Replace($oldLine, $newLine)
 [IO.File]::WriteAllText($buildScript, $buildText, [Text.Encoding]::ASCII)
@@ -38,13 +38,21 @@ $clOutput = (cmd.exe /d /c "`"$($cl.Source)`" 2>&1" | Out-String)
 $clVersion = (($clOutput -split "`r?`n" | Where-Object { $_ -match "Compiler Version" } | Select-Object -First 1) -as [string]).Trim()
 if (-not $clVersion) { throw "could not capture activated MSVC compiler version" }
 
+$previousSourceRoot = $env:TCC_SOURCE_ROOT
+$env:TCC_SOURCE_ROOT = $source
 Push-Location (Join-Path $source "win32")
 try {
     cmd.exe /d /s /c "call build-tcc.bat -c cl -t x86_64 -i `"$stage`""
     if ($LASTEXITCODE -ne 0) { throw "TinyCC bootstrap failed" }
 } finally {
     Pop-Location
+    $env:TCC_SOURCE_ROOT = $previousSourceRoot
 }
+
+# Bounds-checking support is debug tooling and is not used by the qualified
+# direct source-to-PYD FFCx path. The objects also embed their build directory,
+# so do not ship them in the minimal runtime backend payload.
+Remove-Item -Force (Join-Path $stage "lib/bcheck.o"), (Join-Path $stage "lib/bcheck_run.o") -ErrorAction SilentlyContinue
 
 foreach ($name in @("tcc.exe", "libtcc.dll")) {
     $path = Join-Path $stage $name
@@ -76,7 +84,7 @@ $metadata = [ordered]@{
     source_revision = $revision
     upstream_build_script_sha256 = $upstreamBuildHash
     patched_build_script_sha256 = $patchedBuildHash
-    local_build_patch = "build-tcc-msvc-repro-v1: remove -Zi and add linker -Brepro"
+    local_build_patch = "build-tcc-msvc-repro-v2: remove -Zi, path-map source root, and add linker -Brepro"
     bootstrap_compiler = $clVersion
     bootstrap_contract = "rattler vs2022_win-64 19.44.* on GitHub windows-2022"
     runner_image = if ($env:ImageVersion) { $env:ImageVersion } else { "windows-2022" }

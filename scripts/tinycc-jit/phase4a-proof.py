@@ -177,7 +177,7 @@ def crt_allocator_stress(backend_root: Path, diagnostics: Path, work: Path) -> P
     build = work / "crt stress build with spaces"
     with adapter.activate(config):
         output = Path(ffi.compile(tmpdir=str(build), verbose=False)).resolve()
-    module = load_module(output, "_tinycc_phase4a_crt_loaded")
+    module = load_module(output, "_tinycc_phase4a_crt")
     value = int(module.lib.phase4a_crt_stress(20000))
     if value <= 0:
         raise RuntimeError("mixed-CRT internal allocation stress failed")

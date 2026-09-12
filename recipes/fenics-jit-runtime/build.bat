@@ -8,5 +8,7 @@ if errorlevel 1 exit /b %errorlevel%
 
 copy /y "%RECIPE_DIR%\fenics_jit_runtime.py" "%RUNTIME_DIR%\fenics_jit_runtime.py"
 if errorlevel 1 exit /b %errorlevel%
+copy /y "%RECIPE_DIR%\fenics_jit_selector.py" "%RUNTIME_DIR%\fenics_jit_selector.py"
+if errorlevel 1 exit /b %errorlevel%
 
 exit /b 0

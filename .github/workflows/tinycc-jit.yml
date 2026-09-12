@@ -197,23 +197,19 @@ jobs:
             python=3.12
             rattler-build=0.74.0
 
-      - name: Put package CI environment on PATH
-        shell: pwsh
-        run: |
-          "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci" >> $env:GITHUB_PATH
-          "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci/Library/bin" >> $env:GITHUB_PATH
-          "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci/Scripts" >> $env:GITHUB_PATH
-
       - name: Build TinyCC package twice from clean work roots
         shell: pwsh
         run: |
-          rattler-build build `
+          $rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci" -Recurse -Filter rattler-build.exe `
+            -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $rattler) { throw "rattler-build.exe not found in tinycc-package-ci environment" }
+          & $rattler build `
             --recipe recipes/fenics-jit-tinycc/recipe.yaml `
             --output-dir phase3-output-a `
             --channel-priority strict `
             -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "first TinyCC package build failed" }
-          rattler-build build `
+          & $rattler build `
             --recipe recipes/fenics-jit-tinycc/recipe.yaml `
             --output-dir phase3-output-b `
             --channel-priority strict `

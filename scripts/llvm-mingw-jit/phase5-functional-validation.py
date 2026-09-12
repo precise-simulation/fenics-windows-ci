@@ -96,7 +96,7 @@ def _runtime_record() -> dict[str, object]:
     runtime = _load_runtime()
     config = runtime.RuntimeConfig.discover()
     record = config.diagnostic_record()
-    expected_root = Path(sys.prefix).resolve() / "Library" / "fenics-jit"
+    expected_root = Path(sys.prefix).resolve() / "Library" / "fenics-jit" / "backends" / "llvm-mingw"
     if Path(str(record["toolchain_root"])).resolve() != expected_root:
         raise RuntimeError(f"JIT helper selected wrong toolchain root: {record['toolchain_root']}")
     if record["backend"] != "mingw32" or record["crt"] != "UCRT":
@@ -128,7 +128,7 @@ def _assert_compiler_commands(calls: list[str], record: dict[str, object], *, re
 
 
 def _inspect_pyds(cache_dirs: list[Path], diagnostics: Path) -> list[Path]:
-    readobj = Path(sys.prefix) / "Library" / "fenics-jit" / "bin" / "llvm-readobj.exe"
+    readobj = Path(sys.prefix) / "Library" / "fenics-jit" / "backends" / "llvm-mingw" / "bin" / "llvm-readobj.exe"
     if not readobj.is_file():
         raise RuntimeError(f"Packaged llvm-readobj missing: {readobj}")
     pyds = sorted({path.resolve() for cache_dir in cache_dirs for path in cache_dir.rglob("*.pyd")})
@@ -447,7 +447,7 @@ def main() -> None:
         try:
             _mpi_validation(cache_root, diagnostics)
         except BaseException:
-            # DOLFINx\'s mpi_jit protocol can leave peer ranks blocked in a
+            # DOLFINx's mpi_jit protocol can leave peer ranks blocked in a
             # collective when one rank fails before cache publication. Abort
             # the communicator so a test failure is reported immediately
             # instead of waiting for the workflow-level timeout.

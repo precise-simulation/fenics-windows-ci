@@ -149,8 +149,8 @@ def test_abi_model(backend: Path, work: Path) -> dict[str, int]:
     source.write_text(
         "#include <stdio.h>\n"
         "struct bits { unsigned a:3; unsigned b:5; unsigned c:8; };\n"
-        "int main(void){ struct bits x={5,17,171}; unsigned raw=0; "
-        "__builtin_memcpy(&raw,&x,sizeof(raw)); "
+        "int main(void){ struct bits x={5,17,171}; const unsigned char *p=(const unsigned char *)&x; "
+        "unsigned raw=(unsigned)p[0]|((unsigned)p[1]<<8)|((unsigned)p[2]<<16)|((unsigned)p[3]<<24); "
         "printf(\"%zu %zu %zu %u\\n\",sizeof(long double),_Alignof(long double),sizeof(x),raw); return 0;}\n",
         encoding="ascii",
     )

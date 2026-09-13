@@ -7,7 +7,7 @@ set "PETSC_DIR=%PREFIX%\Library"
 set "PATH=%PREFIX%\bin;%PREFIX%\Library\bin;%PATH%"
 set "MPI_TEST_PATH=%PREFIX%\bin;%PREFIX%\Scripts;%PREFIX%\Library\bin;%SystemRoot%\system32;%SystemRoot%"
 set "MPI_PYTHONPATH=%PREFIX%\Lib\site-packages"
-set "LLVM_READOBJ=%PREFIX%\Library\fenics-jit\bin\llvm-readobj.exe"
+set "LLVM_READOBJ=%PREFIX%\Library\fenics-jit\backends\llvm-mingw\bin\llvm-readobj.exe"
 if not exist "%LLVM_READOBJ%" (
   echo Missing packaged LLVM-MinGW PE inspection tool: %LLVM_READOBJ%
   exit 1

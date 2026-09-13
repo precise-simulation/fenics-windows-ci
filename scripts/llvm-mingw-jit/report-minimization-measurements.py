@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 
 
 MIB = 1024 * 1024
-TOOLCHAIN_MARKER = "/library/fenics-jit/"
+TOOLCHAIN_MARKER = "/library/fenics-jit/backends/llvm-mingw/"
 
 HEADER_SAFETY_SET = (
     "include/assert.h",
@@ -167,8 +167,8 @@ def _toolchain_relative(raw: str) -> str | None:
     index = lower.find(TOOLCHAIN_MARKER)
     if index >= 0:
         return text[index + len(TOOLCHAIN_MARKER):].lstrip("/")
-    if lower.startswith("library/fenics-jit/"):
-        return text[len("Library/fenics-jit/"):]
+    if lower.startswith("library/fenics-jit/backends/llvm-mingw/"):
+        return text[len("Library/fenics-jit/backends/llvm-mingw/"):]
     return None
 
 

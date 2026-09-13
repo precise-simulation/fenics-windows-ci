@@ -77,7 +77,7 @@ foreach ($pythonVersion in @("3.12.*", "3.13.*", "3.14.*")) {
 
         $packageList = (& micromamba list -p $prefix 2>&1 | Out-String)
         if ($LASTEXITCODE -ne 0) { throw "Could not inspect Phase 5 environment" }
-        foreach ($required in @("fenics-jit-llvm-mingw", "cffi", "setuptools")) {
+        foreach ($required in @("fenics-jit-runtime", "fenics-jit-llvm-mingw", "cffi", "setuptools")) {
             if ($packageList -notmatch "(?m)^\s*$([regex]::Escape($required))\s") {
                 throw "Phase 5 environment is missing required package: $required"
             }
@@ -90,7 +90,7 @@ foreach ($pythonVersion in @("3.12.*", "3.13.*", "3.14.*")) {
 
         $sizeReport = Join-Path $measurementRoot "retained-size-report.json"
         if (-not (Test-Path $sizeReport)) {
-            $toolchainRoot = Join-Path $prefix "Library\fenics-jit"
+            $toolchainRoot = Join-Path $prefix "Library\fenics-jit\backends\llvm-mingw"
             & python $measurementScript --toolchain-root $toolchainRoot --output-dir $measurementRoot
             if ($LASTEXITCODE -ne 0) {
                 throw "Retained LLVM-MinGW size measurement failed"

@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 49
+  build: 52
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -27,6 +27,9 @@ requirements:
     # construct GNU import libraries for the supported runtime interpreters.
     # Keeping this in the build prefix prevents a Python runtime dependency.
     - python 3.12.*
+  run:
+    # Phase 4B: shared runtime ownership is independent of the compiler backend.
+    - fenics-jit-runtime ==0.1.0
 
 tests:
   - script:
@@ -95,9 +98,14 @@ about:
     interface dvdif root header/IDL pair, build 47 prunes the exact measured-
     unobserved DirectShow Video Mixing Renderer 9 vmr9 root header/IDL pair,
     build 48 prunes the exact measured-unobserved DirectShow Analog Video
-    amvideo root header/IDL pair, and build 49 prunes the exact measured-
-    unobserved Broadcast Driver Architecture bdaiface root header/IDL/enums
-    family.
+    amvideo root header/IDL pair, build 49 prunes the exact measured-unobserved
+    Broadcast Driver Architecture bdaiface root header/IDL/enums family, build
+    50 moves the shared runtime helper into the separately owned
+    fenics-jit-runtime package without changing the default LLVM-MinGW backend,
+    build 51 moves the compiler payload itself under the backend-specific
+    Library/fenics-jit/backends/llvm-mingw ownership boundary, and build 52
+    moves the LLVM-specific CFFI runtime implementation under that same backend
+    ownership boundary while retaining a backend-neutral shared loader path.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

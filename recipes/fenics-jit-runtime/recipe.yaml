@@ -1,0 +1,36 @@
+schema_version: 1
+
+context:
+  name: fenics-jit-runtime
+  version: "0.1.0"
+  build: 4
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+build:
+  number: ${{ build }}
+  script:
+    file: build.bat
+
+requirements:
+  run: []
+
+tests:
+  - script:
+      file: test-package.bat
+    requirements:
+      run:
+        - python 3.12.*
+
+about:
+  summary: Shared Windows FEniCS FFCx/CFFI JIT runtime bootstrap
+  description: |
+    Owns the backend-neutral Library/fenics-jit/runtime path used by DOLFINx.
+    Compiler implementations are supplied separately by backend packages.
+  license: BSD-3-Clause
+
+extra:
+  recipe-maintainers:
+    - precsim

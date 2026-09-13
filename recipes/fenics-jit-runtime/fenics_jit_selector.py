@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import hashlib
 import importlib.util
 import json
 import os
@@ -19,14 +18,6 @@ from typing import Iterator
 _ALLOWED_BACKENDS = ("llvm-mingw", "tinycc")
 _DEFAULT_BACKEND = "llvm-mingw"
 _CACHE_SCHEMA = "fenics-jit-cache-v1"
-_LLVM_POLICY = {
-    "adapter_schema": "llvm-mingw-cffi-runtime-v1",
-    "external_config": "suppress-all-v1",
-    "language": "c17-no-complex-v1",
-    "python_link": "stable-abi-python3-importlib-v1",
-    "crt": "ucrt-v1",
-    "pe_hardening": "llvm-mingw-default-pe-v1",
-}
 _REMOVED_ENV = {
     "CC", "CXX", "CPP", "LD", "LDSHARED",
     "INCLUDE", "LIB", "LIBPATH", "LIBRARY_PATH",
@@ -98,20 +89,6 @@ def _read_metadata(path: Path, label: str) -> dict[str, object]:
     return data
 
 
-def _llvm_cache_id(metadata: dict[str, object]) -> str:
-    payload = {
-        "cache_schema": _CACHE_SCHEMA,
-        "backend": "llvm-mingw",
-        "backend_metadata": metadata,
-        "policy": _LLVM_POLICY,
-    }
-    digest = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()[:20]
-    version = str(metadata.get("llvm_mingw_release") or metadata.get("package_version") or "unknown")
-    return f"llvm-mingw-{version}-{digest}"
-
-
 def _backend_unavailable(name: str, root: Path) -> RuntimeError:
     return RuntimeError(
         f"FENICS_JIT_COMPILER={name!r} selected, but that backend package is unavailable; "
@@ -173,27 +150,22 @@ class SelectedRuntime:
     backend_cache_id: str
     metadata: dict[str, object]
     backend_module: ModuleType
-    backend_config: object | None = None
 
     def cache_root(self, base_cache: str | os.PathLike[str]) -> Path:
         return backend_cache_root(base_cache, self.selected_backend, self.backend_cache_id)
 
     def diagnostic_record(self, cache_root: Path | None = None) -> dict[str, object]:
-        record: dict[str, object] = {
+        return {
             "selected_backend": self.selected_backend,
             "backend_cache_id": self.backend_cache_id,
             "backend_root": str(self.backend_root),
             "cache_root": str(cache_root.resolve()) if cache_root is not None else None,
             "cache_schema": _CACHE_SCHEMA,
-        }
-        if self.selected_backend == "llvm-mingw" and self.backend_config is not None:
-            record["backend"] = self.backend_config.diagnostic_record()
-        else:
-            record["backend"] = self.backend_module.diagnostic_record(
+            "backend": self.backend_module.diagnostic_record(
                 root=self.backend_root,
                 metadata=self.metadata,
-            )
-        return record
+            ),
+        }
 
     @contextlib.contextmanager
     def activate(
@@ -224,13 +196,7 @@ class SelectedRuntime:
                 os.environ["FENICS_JIT_CACHE_ROOT"] = str(cache)
                 os.environ["FENICS_JIT_BACKEND_ROOT"] = str(self.backend_root)
 
-                if self.selected_backend == "llvm-mingw":
-                    assert self.backend_config is not None
-                    backend_context = self.backend_config.activate(
-                        diagnostics_dir=diagnostics,
-                        verbose=verbose,
-                    )
-                else:
+                if self.selected_backend == "tinycc":
                     sanitized = _sanitized_tinycc_environment()
                     os.environ.clear()
                     os.environ.update(sanitized)
@@ -239,6 +205,14 @@ class SelectedRuntime:
                         metadata=self.metadata,
                         diagnostics_dir=diagnostics,
                         expected_cache_id=self.backend_cache_id,
+                    )
+                else:
+                    backend_context = self.backend_module.activate(
+                        root=self.backend_root,
+                        metadata=self.metadata,
+                        diagnostics_dir=diagnostics,
+                        expected_cache_id=self.backend_cache_id,
+                        verbose=verbose,
                     )
 
                 with backend_context:
@@ -270,18 +244,16 @@ def discover_runtime() -> SelectedRuntime:
     if selected == "llvm-mingw":
         metadata = _read_metadata(backend_root / "metadata.json", "LLVM-MinGW")
         module = _load_module(
-            Path(__file__).resolve().parent / "fenics_jit_runtime.py",
+            backend_root / "llvm_mingw_runtime.py",
             "_fenics_jit_llvm_mingw_runtime",
         )
-        config = module.RuntimeConfig.discover(toolchain_root=backend_root)
-        cache_id = _llvm_cache_id(metadata)
-        return SelectedRuntime(selected, backend_root, cache_id, metadata, module, config)
+    else:
+        metadata = _read_metadata(backend_root / "backend-metadata.json", "TinyCC")
+        module = _load_module(
+            backend_root / "tinycc_runtime.py",
+            "_fenics_jit_tinycc_runtime",
+        )
 
-    metadata = _read_metadata(backend_root / "backend-metadata.json", "TinyCC")
-    module = _load_module(
-        backend_root / "tinycc_runtime.py",
-        "_fenics_jit_tinycc_runtime",
-    )
     cache_id = module.backend_cache_id(root=backend_root, metadata=metadata)
     return SelectedRuntime(selected, backend_root, cache_id, metadata, module)
 

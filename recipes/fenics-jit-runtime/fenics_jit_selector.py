@@ -188,9 +188,12 @@ class SelectedRuntime:
         )
         diagnostics.mkdir(parents=True, exist_ok=True)
 
-        saved_environment = dict(os.environ)
-        try:
-            with _shared_activation(self.selected_backend) as depth:
+        with _shared_activation(self.selected_backend) as depth:
+            # Snapshot and restore process-global state while the shared lock is
+            # still held. A waiting backend must not observe or later restore
+            # another activation's temporary environment.
+            saved_environment = dict(os.environ)
+            try:
                 os.environ["FENICS_JIT_COMPILER"] = self.selected_backend
                 os.environ["FENICS_JIT_BACKEND_CACHE_ID"] = self.backend_cache_id
                 os.environ["FENICS_JIT_CACHE_ROOT"] = str(cache)
@@ -228,9 +231,9 @@ class SelectedRuntime:
                             f"{self.selected_backend} / {self.backend_cache_id} / {cache}"
                         )
                     yield self
-        finally:
-            os.environ.clear()
-            os.environ.update(saved_environment)
+            finally:
+                os.environ.clear()
+                os.environ.update(saved_environment)
 
 
 def discover_runtime() -> SelectedRuntime:
@@ -258,7 +261,48 @@ def discover_runtime() -> SelectedRuntime:
     return SelectedRuntime(selected, backend_root, cache_id, metadata, module)
 
 
+def _self_test_backend_module(name: str) -> ModuleType:
+    """Create a no-compiler backend used to qualify shared lifecycle semantics."""
+    module = ModuleType(name)
+
+    def diagnostic_record(*, root: Path, metadata: dict[str, object]) -> dict[str, object]:
+        return {
+            "backend": name,
+            "root": str(root.resolve()),
+            "metadata": metadata,
+        }
+
+    @contextlib.contextmanager
+    def activate(**kwargs) -> Iterator[ModuleType]:
+        yield module
+
+    module.diagnostic_record = diagnostic_record
+    module.activate = activate
+    return module
+
+
+class _SelfTestLock:
+    """Instrument an RLock so a test can observe a waiting thread deterministically."""
+
+    def __init__(self, owner_thread: int):
+        self._lock = threading.RLock()
+        self._owner_thread = owner_thread
+        self.waiter_attempted = threading.Event()
+
+    def __enter__(self):
+        if threading.get_ident() != self._owner_thread:
+            self.waiter_attempted.set()
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._lock.release()
+        return False
+
+
 def _self_test() -> None:
+    global _ACTIVATION_LOCK
+
     assert normalize_backend(None) == "llvm-mingw"
     assert normalize_backend("") == "llvm-mingw"
     assert normalize_backend(" LLVM-MinGW ") == "llvm-mingw"
@@ -272,6 +316,164 @@ def _self_test() -> None:
 
     root = backend_cache_root(Path("cache"), "tinycc", "tinycc-test-id")
     assert root.parts[-3:] == ("ffcx", "tinycc", "tinycc-test-id")
+
+    with tempfile.TemporaryDirectory(prefix="fenics-jit-selector-selftest-") as temp_name:
+        temp_root = Path(temp_name).resolve()
+        base_cache = temp_root / "cache"
+        llvm_root = temp_root / "llvm-mingw"
+        tinycc_root = temp_root / "tinycc"
+        llvm_root.mkdir()
+        tinycc_root.mkdir()
+
+        llvm = SelectedRuntime(
+            "llvm-mingw",
+            llvm_root,
+            "llvm-mingw-selftest",
+            {},
+            _self_test_backend_module("_fenics_jit_selftest_llvm"),
+        )
+        tinycc = SelectedRuntime(
+            "tinycc",
+            tinycc_root,
+            "tinycc-selftest",
+            {},
+            _self_test_backend_module("_fenics_jit_selftest_tinycc"),
+        )
+
+        sentinel_name = "FENICS_JIT_SELFTEST_SENTINEL"
+        nested_name = "FENICS_JIT_SELFTEST_NESTED"
+        old_sentinel = os.environ.get(sentinel_name)
+        had_sentinel = sentinel_name in os.environ
+        old_nested = os.environ.get(nested_name)
+        had_nested = nested_name in os.environ
+        os.environ[sentinel_name] = "baseline"
+        os.environ.pop(nested_name, None)
+        baseline_environment = dict(os.environ)
+
+        try:
+            # Same-backend nesting must be reentrant and restore the outer
+            # activation's exact process environment when the inner scope exits.
+            with tinycc.activate(
+                cache_root=tinycc.cache_root(base_cache),
+                diagnostics_dir=temp_root / "diag-nested-outer",
+            ):
+                assert _ACTIVE_BACKEND == "tinycc"
+                assert _ACTIVE_OWNER_THREAD == threading.get_ident()
+                assert _ACTIVE_DEPTH == 1
+                outer_environment = dict(os.environ)
+                with tinycc.activate(
+                    cache_root=tinycc.cache_root(base_cache),
+                    diagnostics_dir=temp_root / "diag-nested-inner",
+                ):
+                    assert _ACTIVE_BACKEND == "tinycc"
+                    assert _ACTIVE_DEPTH == 2
+                    os.environ[nested_name] = "inner"
+                assert _ACTIVE_DEPTH == 1
+                assert dict(os.environ) == outer_environment
+            assert _ACTIVE_BACKEND is None
+            assert _ACTIVE_OWNER_THREAD is None
+            assert _ACTIVE_DEPTH == 0
+            assert dict(os.environ) == baseline_environment
+
+            # A conflicting backend in the same thread must fail before it can
+            # alter the active backend's process-global state.
+            with llvm.activate(
+                cache_root=llvm.cache_root(base_cache),
+                diagnostics_dir=temp_root / "diag-conflict-outer",
+            ):
+                outer_environment = dict(os.environ)
+                try:
+                    with tinycc.activate(
+                        cache_root=tinycc.cache_root(base_cache),
+                        diagnostics_dir=temp_root / "diag-conflict-inner",
+                    ):
+                        raise AssertionError("conflicting backend activation unexpectedly entered")
+                except RuntimeError as exc:
+                    assert "Conflicting nested FEniCS JIT activation" in str(exc)
+                else:
+                    raise AssertionError("conflicting backend activation was accepted")
+                assert _ACTIVE_BACKEND == "llvm-mingw"
+                assert _ACTIVE_DEPTH == 1
+                assert dict(os.environ) == outer_environment
+            assert dict(os.environ) == baseline_environment
+
+            # Exceptions from user/JIT work must leave both lifecycle state and
+            # the complete environment exactly as they were before activation.
+            try:
+                with tinycc.activate(
+                    cache_root=tinycc.cache_root(base_cache),
+                    diagnostics_dir=temp_root / "diag-exception",
+                ):
+                    os.environ[nested_name] = "exception"
+                    raise ValueError("intentional shared-runtime restoration test")
+            except ValueError as exc:
+                assert "intentional shared-runtime restoration test" in str(exc)
+            else:
+                raise AssertionError("intentional activation exception did not propagate")
+            assert _ACTIVE_BACKEND is None
+            assert _ACTIVE_OWNER_THREAD is None
+            assert _ACTIVE_DEPTH == 0
+            assert dict(os.environ) == baseline_environment
+
+            # Observe a second thread reaching the shared lock while LLVM owns
+            # it. The worker must enter only after LLVM restores the baseline,
+            # and after the worker exits it must not restore LLVM's stale state.
+            original_lock = _ACTIVATION_LOCK
+            probe_lock = _SelfTestLock(threading.get_ident())
+            _ACTIVATION_LOCK = probe_lock
+            worker_entered = threading.Event()
+            worker_errors: list[BaseException] = []
+
+            def worker() -> None:
+                try:
+                    with tinycc.activate(
+                        cache_root=tinycc.cache_root(base_cache),
+                        diagnostics_dir=temp_root / "diag-thread-tinycc",
+                    ):
+                        assert os.environ["FENICS_JIT_COMPILER"] == "tinycc"
+                        assert _ACTIVE_BACKEND == "tinycc"
+                        assert _ACTIVE_DEPTH == 1
+                        worker_entered.set()
+                except BaseException as exc:
+                    worker_errors.append(exc)
+
+            try:
+                with llvm.activate(
+                    cache_root=llvm.cache_root(base_cache),
+                    diagnostics_dir=temp_root / "diag-thread-llvm",
+                ):
+                    assert os.environ["FENICS_JIT_COMPILER"] == "llvm-mingw"
+                    thread = threading.Thread(target=worker, name="fenics-jit-selftest-worker")
+                    thread.start()
+                    if not probe_lock.waiter_attempted.wait(5):
+                        raise AssertionError("worker did not reach the shared activation lock")
+                    assert not worker_entered.is_set()
+                    assert _ACTIVE_BACKEND == "llvm-mingw"
+                    assert _ACTIVE_DEPTH == 1
+
+                thread.join(5)
+                if thread.is_alive():
+                    raise AssertionError("worker did not finish after shared lock release")
+                if worker_errors:
+                    raise AssertionError(f"worker activation failed: {worker_errors!r}")
+                assert worker_entered.is_set()
+                assert _ACTIVE_BACKEND is None
+                assert _ACTIVE_OWNER_THREAD is None
+                assert _ACTIVE_DEPTH == 0
+                assert dict(os.environ) == baseline_environment
+            finally:
+                _ACTIVATION_LOCK = original_lock
+        finally:
+            if had_sentinel:
+                assert old_sentinel is not None
+                os.environ[sentinel_name] = old_sentinel
+            else:
+                os.environ.pop(sentinel_name, None)
+            if had_nested:
+                assert old_nested is not None
+                os.environ[nested_name] = old_nested
+            else:
+                os.environ.pop(nested_name, None)
 
 
 def main() -> None:

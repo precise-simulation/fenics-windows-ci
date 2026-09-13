@@ -8,6 +8,7 @@ on:
       - ".github/workflows/tinycc-jit.yml"
       - "scripts/tinycc-jit/**"
       - "specs/tinycc-ffcx-jit/**"
+      - "recipes/fenics-jit-runtime/**"
       - "recipes/fenics-jit-tinycc/**"
   workflow_dispatch:
 
@@ -197,18 +198,30 @@ jobs:
             python=3.12
             rattler-build=0.74.0
 
-      - name: Build TinyCC package twice from clean work roots
+      - name: Build shared runtime and TinyCC package twice from clean work roots
         shell: pwsh
         run: |
           $rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci" -Recurse -Filter rattler-build.exe `
             -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
           if (-not $rattler) { throw "rattler-build.exe not found in tinycc-package-ci environment" }
           & $rattler build `
+            --recipe recipes/fenics-jit-runtime/recipe.yaml `
+            --output-dir phase3-output-a `
+            --channel-priority strict `
+            -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "first shared runtime package build failed" }
+          & $rattler build `
             --recipe recipes/fenics-jit-tinycc/recipe.yaml `
             --output-dir phase3-output-a `
             --channel-priority strict `
             -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "first TinyCC package build failed" }
+          & $rattler build `
+            --recipe recipes/fenics-jit-runtime/recipe.yaml `
+            --output-dir phase3-output-b `
+            --channel-priority strict `
+            -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "second shared runtime package build failed" }
           & $rattler build `
             --recipe recipes/fenics-jit-tinycc/recipe.yaml `
             --output-dir phase3-output-b `
@@ -270,7 +283,9 @@ jobs:
         with:
           name: tinycc-phase3-package
           path: |
+            phase3-output-a/win-64/fenics-jit-runtime-*.conda
             phase3-output-a/win-64/fenics-jit-tinycc-*.conda
+            phase3-output-b/win-64/fenics-jit-runtime-*.conda
             phase3-output-b/win-64/fenics-jit-tinycc-*.conda
             phase3-selftest-a/
             phase3-selftest-b/
@@ -306,12 +321,14 @@ jobs:
             -c conda-forge
             python=3.12
 
-      - name: Install TinyCC and LLVM-MinGW side by side without shared-runtime changes
+      - name: Install TinyCC and LLVM-MinGW side by side with branch shared runtime
         shell: pwsh
         run: |
           $mamba = $env:MAMBA_EXE
           if (-not $mamba) { $mamba = "micromamba" }
+          $runtimePackage = Get-ChildItem phase4a-package-artifact -Recurse -Filter "fenics-jit-runtime-*.conda" | Select-Object -First 1
           $package = Get-ChildItem phase4a-package-artifact -Recurse -Filter "fenics-jit-tinycc-*.conda" | Select-Object -First 1
+          if (-not $runtimePackage) { throw "downloaded fenics-jit-runtime package not found" }
           if (-not $package) { throw "downloaded fenics-jit-tinycc package not found" }
           $prefix = Join-Path $PWD "phase4a runtime py${{ matrix.python }} with spaces"
           & $mamba create -y -p $prefix --override-channels --strict-channel-priority `
@@ -319,6 +336,8 @@ jobs:
             "python=${{ matrix.python }}" "libblas=*=*openblas" `
             fenics-dolfinx fenics-jit-llvm-mingw pefile "cffi=2.1.*" "setuptools=84.*"
           if ($LASTEXITCODE -ne 0) { throw "Phase-4A FEniCS/LLVM-MinGW environment install failed" }
+          & $mamba install -y -p $prefix $runtimePackage.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4A local shared runtime package install failed" }
           & $mamba install -y -p $prefix $package.FullName
           if ($LASTEXITCODE -ne 0) { throw "Phase-4A local TinyCC package install failed" }
 

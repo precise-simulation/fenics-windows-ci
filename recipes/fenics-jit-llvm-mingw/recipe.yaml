@@ -3,7 +3,7 @@ schema_version: 1
 context:
   name: fenics-jit-llvm-mingw
   version: "20260826"
-  build: 51
+  build: 52
   archive_name: llvm-mingw-20260826-ucrt-x86_64.zip
   archive_sha256: ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 
@@ -102,8 +102,10 @@ about:
     Broadcast Driver Architecture bdaiface root header/IDL/enums family, build
     50 moves the shared runtime helper into the separately owned
     fenics-jit-runtime package without changing the default LLVM-MinGW backend,
-    and build 51 moves the compiler payload itself under the backend-specific
-    Library/fenics-jit/backends/llvm-mingw ownership boundary.
+    build 51 moves the compiler payload itself under the backend-specific
+    Library/fenics-jit/backends/llvm-mingw ownership boundary, and build 52
+    moves the LLVM-specific CFFI runtime implementation under that same backend
+    ownership boundary while retaining a backend-neutral shared loader path.
   license: Apache-2.0 WITH LLVM-exception AND ZPL-2.1 AND MIT
   homepage: https://github.com/mstorsjo/llvm-mingw
   repository: https://github.com/mstorsjo/llvm-mingw

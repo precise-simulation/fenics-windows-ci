@@ -36,6 +36,14 @@ foreach ($entry in $entries) {
 }
 Remove-Item -LiteralPath $stagedRoot -Force
 
+# The proven compiler-specific CFFI runtime implementation belongs to the LLVM
+# backend package. Keep the shared runtime path as a backend-neutral loader.
+$backendRuntimeSource = Join-Path $PSScriptRoot "fenics_jit_runtime.py"
+if (-not (Test-Path -LiteralPath $backendRuntimeSource -PathType Leaf)) {
+    throw "LLVM-MinGW backend runtime source is missing: $backendRuntimeSource"
+}
+Copy-Item -LiteralPath $backendRuntimeSource -Destination (Join-Path $backendRoot "fenics_jit_runtime.py") -Force
+
 foreach ($required in @(
     "bin\x86_64-w64-mingw32-clang.exe",
     "bin\ld.lld.exe",
@@ -44,7 +52,8 @@ foreach ($required in @(
     "x86_64-w64-mingw32\lib\libunwind.a",
     "metadata.json",
     "manifest.csv",
-    "size.txt"
+    "size.txt",
+    "fenics_jit_runtime.py"
 )) {
     $path = Join-Path $backendRoot $required
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

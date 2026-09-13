@@ -112,13 +112,6 @@ def _llvm_cache_id(metadata: dict[str, object]) -> str:
     return f"llvm-mingw-{version}-{digest}"
 
 
-def _tinycc_cache_id(metadata: dict[str, object]) -> str:
-    value = metadata.get("backend_cache_id")
-    if not isinstance(value, str) or not value.strip():
-        raise RuntimeError("TinyCC backend metadata does not contain backend_cache_id")
-    return value.strip()
-
-
 def _backend_unavailable(name: str, root: Path) -> RuntimeError:
     return RuntimeError(
         f"FENICS_JIT_COMPILER={name!r} selected, but that backend package is unavailable; "
@@ -196,10 +189,10 @@ class SelectedRuntime:
         if self.selected_backend == "llvm-mingw" and self.backend_config is not None:
             record["backend"] = self.backend_config.diagnostic_record()
         else:
-            record["backend"] = {
-                "source_revision": self.metadata.get("source_revision"),
-                "policy": self.metadata.get("policy"),
-            }
+            record["backend"] = self.backend_module.diagnostic_record(
+                root=self.backend_root,
+                metadata=self.metadata,
+            )
         return record
 
     @contextlib.contextmanager
@@ -241,22 +234,12 @@ class SelectedRuntime:
                     sanitized = _sanitized_tinycc_environment()
                     os.environ.clear()
                     os.environ.update(sanitized)
-                    adapter = self.backend_module
-                    revision = self.metadata.get("source_revision")
-                    if not isinstance(revision, str) or not revision:
-                        raise RuntimeError("TinyCC backend metadata does not contain source_revision")
-                    tiny_config = adapter.TinyCCConfig.discover(
+                    backend_context = self.backend_module.activate(
                         root=self.backend_root,
-                        python_def=self.backend_root / "python3.def",
+                        metadata=self.metadata,
                         diagnostics_dir=diagnostics,
-                        revision=revision,
+                        expected_cache_id=self.backend_cache_id,
                     )
-                    if tiny_config.backend_cache_id != self.backend_cache_id:
-                        raise RuntimeError(
-                            "TinyCC backend cache identity mismatch: "
-                            f"metadata={self.backend_cache_id}, adapter={tiny_config.backend_cache_id}"
-                        )
-                    backend_context = adapter.activate(tiny_config)
 
                 with backend_context:
                     record = self.diagnostic_record(cache)
@@ -296,10 +279,10 @@ def discover_runtime() -> SelectedRuntime:
 
     metadata = _read_metadata(backend_root / "backend-metadata.json", "TinyCC")
     module = _load_module(
-        backend_root / "tinycc_adapter.py",
-        "_fenics_jit_tinycc_adapter",
+        backend_root / "tinycc_runtime.py",
+        "_fenics_jit_tinycc_runtime",
     )
-    cache_id = _tinycc_cache_id(metadata)
+    cache_id = module.backend_cache_id(root=backend_root, metadata=metadata)
     return SelectedRuntime(selected, backend_root, cache_id, metadata, module)
 
 

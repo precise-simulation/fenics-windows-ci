@@ -62,6 +62,7 @@ foreach ($name in @("tcc.exe", "libtcc.dll")) {
 Copy-Item (Join-Path $stage "include") (Join-Path $backend "include") -Recurse -Force
 Copy-Item (Join-Path $stage "lib") (Join-Path $backend "lib") -Recurse -Force
 Copy-Item (Join-Path $env:RECIPE_DIR "tinycc_adapter.py") (Join-Path $backend "tinycc_adapter.py") -Force
+Copy-Item (Join-Path $env:RECIPE_DIR "tinycc_runtime.py") (Join-Path $backend "tinycc_runtime.py") -Force
 Copy-Item (Join-Path $env:RECIPE_DIR "selftest.py") (Join-Path $backend "selftest.py") -Force
 
 $licenseDir = Join-Path $backend "licenses"
@@ -92,6 +93,7 @@ $metadata = [ordered]@{
     tcc_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "tcc.exe")).Hash.ToLowerInvariant()
     libtcc_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "libtcc.dll")).Hash.ToLowerInvariant()
     adapter_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "tinycc_adapter.py")).Hash.ToLowerInvariant()
+    runtime_integration_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "tinycc_runtime.py")).Hash.ToLowerInvariant()
     backend_cache_id = $backendCacheId
     qualified_dependencies = [ordered]@{ cffi = "2.1.*"; setuptools = "84.*"; python = ">=3.12,<3.15" }
     policy = [ordered]@{

@@ -1,8 +1,9 @@
-"""Broad private installed-package qualification for TinyCC Phase 4A.
+"""Broad installed-package qualification for TinyCC Phase 4A / shared Phase 4B lifecycle.
 
-This script deliberately uses either the existing LLVM-MinGW runtime helper or
-the installed TinyCC backend's private adapter. It does not introduce backend
-selection or modify production runtime ownership.
+The broad numerical/ABI qualification still uses either the existing LLVM-MinGW
+runtime helper or the installed TinyCC backend's private adapter. In the
+side-by-side LLVM reference process, this script also qualifies the installed
+shared selector's real backend lifecycle and cross-backend serialization.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import json
 import math
 import os
 import sys
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +24,7 @@ from cffi import FFI
 
 REVISION = "0fb54300b56512754221d80adda85ddb9815bceb"
 REQUIRED_DLL_CHARACTERISTICS = 0x40 | 0x20 | 0x100
+LIFECYCLE_SENTINEL = "FENICS_JIT_PHASE4B_LIFECYCLE_SENTINEL"
 
 
 def load_module(path: Path, name: str):
@@ -96,6 +99,384 @@ def runtime_context(mode: str, backend_root: Path, diagnostics: Path):
         python_prefix=Path(sys.prefix),
     )
     return config.activate(diagnostics_dir=diagnostics), "llvm-mingw-stage-aw-reference"
+
+
+class ObservedRLock:
+    """RLock wrapper exposing when another thread reaches the shared lock."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._meta = threading.Lock()
+        self._owner: int | None = None
+        self._depth = 0
+        self.waiter_attempted = threading.Event()
+
+    def __enter__(self):
+        thread_id = threading.get_ident()
+        with self._meta:
+            if self._owner is not None and self._owner != thread_id:
+                self.waiter_attempted.set()
+        self._lock.acquire()
+        with self._meta:
+            if self._owner is None:
+                self._owner = thread_id
+            elif self._owner != thread_id:
+                raise RuntimeError("observed shared RLock owner invariant violated")
+            self._depth += 1
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        with self._meta:
+            self._depth -= 1
+            if self._depth == 0:
+                self._owner = None
+        self._lock.release()
+        return False
+
+
+def load_shared_selector():
+    path = Path(sys.prefix) / "Library/fenics-jit/runtime/fenics_jit_selector.py"
+    if not path.is_file():
+        raise RuntimeError(f"installed shared JIT selector is missing: {path}")
+    return load_module(path, "phase4b_shared_jit_selector")
+
+
+def discover_shared_backend(selector, backend: str):
+    had = "FENICS_JIT_COMPILER" in os.environ
+    old = os.environ.get("FENICS_JIT_COMPILER")
+    os.environ["FENICS_JIT_COMPILER"] = backend
+    try:
+        runtime = selector.discover_runtime()
+    finally:
+        if had:
+            assert old is not None
+            os.environ["FENICS_JIT_COMPILER"] = old
+        else:
+            os.environ.pop("FENICS_JIT_COMPILER", None)
+    if runtime.selected_backend != backend:
+        raise RuntimeError(
+            f"shared selector returned {runtime.selected_backend!r}, expected {backend!r}"
+        )
+    return runtime
+
+
+def assert_shared_active(runtime, cache: Path) -> None:
+    expected = {
+        "FENICS_JIT_COMPILER": runtime.selected_backend,
+        "FENICS_JIT_BACKEND_CACHE_ID": runtime.backend_cache_id,
+        "FENICS_JIT_CACHE_ROOT": str(cache.resolve()),
+        "FENICS_JIT_BACKEND_ROOT": str(runtime.backend_root.resolve()),
+    }
+    actual = {key: os.environ.get(key) for key in expected}
+    if actual != expected:
+        raise RuntimeError(
+            f"shared activation identity mismatch for {runtime.selected_backend}: "
+            f"expected={expected!r}, actual={actual!r}"
+        )
+
+
+def assert_shared_record(
+    diagnostics: Path,
+    runtime,
+    cache: Path,
+    expected_depth: int,
+) -> dict[str, object]:
+    path = diagnostics / "shared-runtime.json"
+    if not path.is_file():
+        raise RuntimeError(f"shared runtime diagnostics missing: {path}")
+    record = json.loads(path.read_text(encoding="utf-8"))
+    expected = {
+        "selected_backend": runtime.selected_backend,
+        "backend_cache_id": runtime.backend_cache_id,
+        "backend_root": str(runtime.backend_root.resolve()),
+        "cache_root": str(cache.resolve()),
+        "activation_depth": expected_depth,
+    }
+    actual = {key: record.get(key) for key in expected}
+    if actual != expected:
+        raise RuntimeError(
+            f"shared runtime diagnostics mismatch: expected={expected!r}, actual={actual!r}"
+        )
+    return record
+
+
+def assert_shared_idle(selector, baseline: dict[str, str]) -> None:
+    if selector._ACTIVE_BACKEND is not None:
+        raise RuntimeError(f"shared runtime backend remained active: {selector._ACTIVE_BACKEND}")
+    if selector._ACTIVE_OWNER_THREAD is not None:
+        raise RuntimeError(
+            f"shared runtime owner remained active: {selector._ACTIVE_OWNER_THREAD}"
+        )
+    if selector._ACTIVE_DEPTH != 0:
+        raise RuntimeError(f"shared runtime depth did not restore: {selector._ACTIVE_DEPTH}")
+    if dict(os.environ) != baseline:
+        raise RuntimeError("process environment did not restore to the lifecycle baseline")
+
+
+def qualify_same_backend_nesting(
+    selector,
+    runtime,
+    base_cache: Path,
+    diagnostics_root: Path,
+) -> dict[str, object]:
+    cache = runtime.cache_root(base_cache)
+    outer_diagnostics = diagnostics_root / f"nested-{runtime.selected_backend}-outer"
+    inner_diagnostics = diagnostics_root / f"nested-{runtime.selected_backend}-inner"
+    baseline = dict(os.environ)
+    with runtime.activate(cache_root=cache, diagnostics_dir=outer_diagnostics):
+        assert_shared_active(runtime, cache)
+        assert_shared_record(outer_diagnostics, runtime, cache, 1)
+        outer_environment = dict(os.environ)
+        with runtime.activate(cache_root=cache, diagnostics_dir=inner_diagnostics):
+            assert_shared_active(runtime, cache)
+            assert_shared_record(inner_diagnostics, runtime, cache, 2)
+        if dict(os.environ) != outer_environment:
+            raise RuntimeError(
+                f"nested {runtime.selected_backend} activation did not restore outer environment"
+            )
+    assert_shared_idle(selector, baseline)
+    return {
+        "backend": runtime.selected_backend,
+        "backend_cache_id": runtime.backend_cache_id,
+        "cache_root": str(cache),
+        "status": "pass",
+    }
+
+
+def qualify_conflicting_nested_backends(
+    selector,
+    outer,
+    inner,
+    base_cache: Path,
+    diagnostics_root: Path,
+) -> dict[str, object]:
+    outer_cache = outer.cache_root(base_cache)
+    baseline = dict(os.environ)
+    message = ""
+    with outer.activate(
+        cache_root=outer_cache,
+        diagnostics_dir=diagnostics_root / f"conflict-{outer.selected_backend}-outer",
+    ):
+        assert_shared_active(outer, outer_cache)
+        outer_environment = dict(os.environ)
+        try:
+            with inner.activate(
+                cache_root=inner.cache_root(base_cache),
+                diagnostics_dir=diagnostics_root / f"conflict-{inner.selected_backend}-inner",
+            ):
+                raise RuntimeError("conflicting nested backend unexpectedly entered")
+        except RuntimeError as exc:
+            message = str(exc)
+            if "Conflicting nested FEniCS JIT activation" not in message:
+                raise
+        else:
+            raise RuntimeError("conflicting nested backend was accepted")
+        if dict(os.environ) != outer_environment:
+            raise RuntimeError("conflicting nested activation changed the outer environment")
+    assert_shared_idle(selector, baseline)
+    return {
+        "outer": outer.selected_backend,
+        "inner": inner.selected_backend,
+        "error": message,
+        "status": "pass",
+    }
+
+
+def qualify_exception_restoration(
+    selector,
+    runtime,
+    base_cache: Path,
+    diagnostics_root: Path,
+) -> dict[str, object]:
+    cache = runtime.cache_root(base_cache)
+    baseline = dict(os.environ)
+    try:
+        with runtime.activate(
+            cache_root=cache,
+            diagnostics_dir=diagnostics_root / f"exception-{runtime.selected_backend}",
+        ):
+            assert_shared_active(runtime, cache)
+            os.environ[LIFECYCLE_SENTINEL] = f"inside-{runtime.selected_backend}"
+            raise ValueError("intentional shared-runtime lifecycle exception")
+    except ValueError as exc:
+        if "intentional shared-runtime lifecycle exception" not in str(exc):
+            raise
+    else:
+        raise RuntimeError("intentional shared-runtime lifecycle exception did not propagate")
+    assert_shared_idle(selector, baseline)
+
+    with runtime.activate(
+        cache_root=cache,
+        diagnostics_dir=diagnostics_root / f"post-exception-{runtime.selected_backend}",
+    ):
+        assert_shared_active(runtime, cache)
+    assert_shared_idle(selector, baseline)
+    return {"backend": runtime.selected_backend, "status": "pass"}
+
+
+def qualify_thread_serialization(
+    selector,
+    first,
+    second,
+    base_cache: Path,
+    diagnostics_root: Path,
+) -> dict[str, object]:
+    baseline = dict(os.environ)
+    original_lock = selector._ACTIVATION_LOCK
+    observed_lock = ObservedRLock()
+    selector._ACTIVATION_LOCK = observed_lock
+
+    first_cache = first.cache_root(base_cache)
+    second_cache = second.cache_root(base_cache)
+    worker_entered = threading.Event()
+    worker_errors: list[str] = []
+    worker_observed: dict[str, str | None] = {}
+
+    def worker() -> None:
+        try:
+            worker_diagnostics = (
+                diagnostics_root
+                / f"thread-{first.selected_backend}-then-{second.selected_backend}-second"
+            )
+            with second.activate(
+                cache_root=second_cache,
+                diagnostics_dir=worker_diagnostics,
+            ):
+                assert_shared_active(second, second_cache)
+                assert_shared_record(worker_diagnostics, second, second_cache, 1)
+                worker_observed["compiler"] = os.environ.get("FENICS_JIT_COMPILER")
+                worker_observed["cache_id"] = os.environ.get("FENICS_JIT_BACKEND_CACHE_ID")
+                worker_entered.set()
+        except BaseException as exc:  # noqa: BLE001
+            worker_errors.append(repr(exc))
+
+    try:
+        first_diagnostics = (
+            diagnostics_root
+            / f"thread-{first.selected_backend}-then-{second.selected_backend}-first"
+        )
+        with first.activate(
+            cache_root=first_cache,
+            diagnostics_dir=first_diagnostics,
+        ):
+            assert_shared_active(first, first_cache)
+            assert_shared_record(first_diagnostics, first, first_cache, 1)
+            thread = threading.Thread(
+                target=worker,
+                name=f"phase4b-{first.selected_backend}-to-{second.selected_backend}",
+            )
+            thread.start()
+            if not observed_lock.waiter_attempted.wait(10):
+                raise RuntimeError("worker did not reach the shared activation lock")
+            if worker_entered.is_set():
+                raise RuntimeError(
+                    "second backend entered while the first backend still owned the shared lock"
+                )
+            assert_shared_active(first, first_cache)
+
+        thread.join(20)
+        if thread.is_alive():
+            raise RuntimeError("worker did not finish after shared lock release")
+        if worker_errors:
+            raise RuntimeError(f"worker activation failed: {worker_errors}")
+        if not worker_entered.is_set():
+            raise RuntimeError("worker never completed its serialized activation")
+        if worker_observed != {
+            "compiler": second.selected_backend,
+            "cache_id": second.backend_cache_id,
+        }:
+            raise RuntimeError(f"worker observed wrong backend identity: {worker_observed!r}")
+        assert_shared_idle(selector, baseline)
+    finally:
+        selector._ACTIVATION_LOCK = original_lock
+
+    return {
+        "first": first.selected_backend,
+        "second": second.selected_backend,
+        "first_cache_root": str(first_cache),
+        "second_cache_root": str(second_cache),
+        "status": "pass",
+    }
+
+
+def qualify_shared_runtime_lifecycle(work: Path) -> dict[str, object]:
+    selector = load_shared_selector()
+    llvm = discover_shared_backend(selector, "llvm-mingw")
+    tinycc = discover_shared_backend(selector, "tinycc")
+    base_cache = work / "shared lifecycle cache"
+    diagnostics_root = work / "shared lifecycle diagnostics"
+    diagnostics_root.mkdir(parents=True, exist_ok=True)
+
+    llvm_cache = llvm.cache_root(base_cache)
+    tinycc_cache = tinycc.cache_root(base_cache)
+    if llvm.backend_cache_id == tinycc.backend_cache_id:
+        raise RuntimeError("LLVM-MinGW and TinyCC unexpectedly share a backend cache identity")
+    if llvm_cache == tinycc_cache:
+        raise RuntimeError("LLVM-MinGW and TinyCC unexpectedly share a physical cache root")
+
+    had_sentinel = LIFECYCLE_SENTINEL in os.environ
+    old_sentinel = os.environ.get(LIFECYCLE_SENTINEL)
+    os.environ[LIFECYCLE_SENTINEL] = "baseline"
+    baseline = dict(os.environ)
+
+    try:
+        nesting = [
+            qualify_same_backend_nesting(selector, llvm, base_cache, diagnostics_root),
+            qualify_same_backend_nesting(selector, tinycc, base_cache, diagnostics_root),
+        ]
+        conflicts = [
+            qualify_conflicting_nested_backends(
+                selector, llvm, tinycc, base_cache, diagnostics_root
+            ),
+            qualify_conflicting_nested_backends(
+                selector, tinycc, llvm, base_cache, diagnostics_root
+            ),
+        ]
+        exceptions = [
+            qualify_exception_restoration(selector, llvm, base_cache, diagnostics_root),
+            qualify_exception_restoration(selector, tinycc, base_cache, diagnostics_root),
+        ]
+        threads = [
+            qualify_thread_serialization(
+                selector, llvm, llvm, base_cache, diagnostics_root
+            ),
+            qualify_thread_serialization(
+                selector, tinycc, tinycc, base_cache, diagnostics_root
+            ),
+            qualify_thread_serialization(
+                selector, llvm, tinycc, base_cache, diagnostics_root
+            ),
+            qualify_thread_serialization(
+                selector, tinycc, llvm, base_cache, diagnostics_root
+            ),
+        ]
+        assert_shared_idle(selector, baseline)
+    finally:
+        if had_sentinel:
+            assert old_sentinel is not None
+            os.environ[LIFECYCLE_SENTINEL] = old_sentinel
+        else:
+            os.environ.pop(LIFECYCLE_SENTINEL, None)
+
+    return {
+        "status": "pass",
+        "backends": {
+            "llvm-mingw": {
+                "backend_cache_id": llvm.backend_cache_id,
+                "backend_root": str(llvm.backend_root),
+                "cache_root": str(llvm_cache),
+            },
+            "tinycc": {
+                "backend_cache_id": tinycc.backend_cache_id,
+                "backend_root": str(tinycc.backend_root),
+                "cache_root": str(tinycc_cache),
+            },
+        },
+        "same_backend_nesting": nesting,
+        "conflicting_nested_backends": conflicts,
+        "exception_restoration": exceptions,
+        "thread_serialization": threads,
+    }
 
 
 def assemble_metrics(cache: Path) -> dict[str, float]:
@@ -211,6 +592,12 @@ def main() -> int:
     cache.mkdir(parents=True, exist_ok=True)
     backend_root = (args.backend_root or (Path(sys.prefix) / "Library/fenics-jit/backends/tinycc")).resolve()
 
+    shared_lifecycle = (
+        qualify_shared_runtime_lifecycle(work)
+        if args.mode == "llvm-mingw"
+        else None
+    )
+
     saved_cwd = Path.cwd()
     saved_home = os.environ.get("HOME")
     saved_profile = os.environ.get("USERPROFILE")
@@ -290,6 +677,7 @@ def main() -> int:
         "cache_reload": args.cache_reload,
         "generated_modules": pe_records,
         "hostile_config_root": str(work),
+        "shared_runtime_lifecycle": shared_lifecycle,
     }
     args.output.resolve().parent.mkdir(parents=True, exist_ok=True)
     args.output.resolve().write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")

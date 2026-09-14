@@ -159,7 +159,34 @@ def verify_selector(prefix: Path, backend: str) -> None:
     )
 
 
-def qualify_package_ownership(prefix: Path, package_dir: Path) -> dict[str, object]:
+def qualify_package_ownership(base_prefix: Path, package_dir: Path) -> dict[str, object]:
+    local_packages = {
+        name: local_package(package_dir, name)
+        for name in (RUNTIME_PACKAGE, LLVM_PACKAGE, TINYCC_PACKAGE)
+    }
+    mamba = micromamba_executable()
+    prefix = (base_prefix.parent / "phase4b ownership with spaces").resolve()
+    if prefix.exists():
+        shutil.rmtree(prefix)
+
+    run_mamba(
+        mamba,
+        "create",
+        "-y",
+        "-p",
+        str(prefix),
+        "--override-channels",
+        "--strict-channel-priority",
+        "-c",
+        "conda-forge",
+        "python=3.12",
+        "cffi=2.1.*",
+        "setuptools=84.*",
+        str(local_packages[RUNTIME_PACKAGE]),
+        str(local_packages[LLVM_PACKAGE]),
+        str(local_packages[TINYCC_PACKAGE]),
+    )
+
     records = {
         name: package_record(prefix, name)
         for name in (RUNTIME_PACKAGE, LLVM_PACKAGE, TINYCC_PACKAGE)
@@ -196,12 +223,6 @@ def qualify_package_ownership(prefix: Path, package_dir: Path) -> dict[str, obje
     if TINYCC_PACKAGE in dependencies[LLVM_PACKAGE]:
         raise RuntimeError("fenics-jit-llvm-mingw unexpectedly depends on fenics-jit-tinycc")
 
-    local_packages = {
-        name: local_package(package_dir, name)
-        for name in (RUNTIME_PACKAGE, LLVM_PACKAGE, TINYCC_PACKAGE)
-    }
-    mamba = micromamba_executable()
-
     run_mamba(mamba, "remove", "-y", "-p", str(prefix), TINYCC_PACKAGE)
     assert_manifest(prefix, RUNTIME_PACKAGE, manifests[RUNTIME_PACKAGE])
     assert_manifest(prefix, LLVM_PACKAGE, manifests[LLVM_PACKAGE])
@@ -224,6 +245,7 @@ def qualify_package_ownership(prefix: Path, package_dir: Path) -> dict[str, obje
 
     return {
         "status": "pass",
+        "test_prefix": str(prefix),
         "package_roots": PACKAGE_ROOTS,
         "file_counts": {name: len(manifest) for name, manifest in manifests.items()},
         "dependencies": dependencies,

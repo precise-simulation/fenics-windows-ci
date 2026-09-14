@@ -104,6 +104,17 @@ class TinyCCConfig:
         }
 
 
+def _activation_identity(config: TinyCCConfig) -> tuple[Path, Path, Path, str, str]:
+    """Return the compiler/runtime identity that must match across nested scopes."""
+    return (
+        config.root,
+        config.tcc,
+        config.python_def,
+        config.revision,
+        config.backend_cache_id,
+    )
+
+
 def _active_config() -> TinyCCConfig:
     if _ACTIVE_CONFIG is None:
         raise RuntimeError("TinyCC CFFI adapter used outside an active TinyCC context")
@@ -288,7 +299,11 @@ def activate(config: TinyCCConfig) -> Iterator[None]:
 
     thread_id = threading.get_ident()
     with _ACTIVATION_LOCK:
-        if _ACTIVE_CONFIG is not None and _ACTIVE_CONFIG != config:
+        previous_config = _ACTIVE_CONFIG
+        if (
+            previous_config is not None
+            and _activation_identity(previous_config) != _activation_identity(config)
+        ):
             raise RuntimeError("Conflicting nested TinyCC activation is not permitted")
         if _ACTIVE_DEPTH and _ACTIVE_OWNER_THREAD != thread_id:
             # RLock serialization should make this unreachable; retain a hard invariant.
@@ -307,8 +322,9 @@ def activate(config: TinyCCConfig) -> Iterator[None]:
                     super().__init__(owned)
 
                 def parse_config_files(self, filenames=None, ignore_option_errors=False):  # noqa: ANN001
+                    active_config = _active_config()
                     _record(
-                        config,
+                        active_config,
                         "config-isolation.jsonl",
                         {
                             "filenames": [str(item) for item in filenames] if filenames else [],
@@ -319,7 +335,6 @@ def activate(config: TinyCCConfig) -> Iterator[None]:
 
             _ORIGINAL_DISTRIBUTION = original_distribution
             _dist.Distribution = TinyCCDistribution
-            _ACTIVE_CONFIG = config
             _ACTIVE_OWNER_THREAD = thread_id
             _record(
                 config,
@@ -334,6 +349,7 @@ def activate(config: TinyCCConfig) -> Iterator[None]:
                 },
             )
 
+        _ACTIVE_CONFIG = config
         _ACTIVE_DEPTH += 1
         if _ACTIVE_DEPTH > 1:
             _record(config, "activation.jsonl", {"event": "nest", "thread": thread_id, "depth": _ACTIVE_DEPTH})
@@ -348,3 +364,5 @@ def activate(config: TinyCCConfig) -> Iterator[None]:
                 _ORIGINAL_DISTRIBUTION = None
                 _ACTIVE_CONFIG = None
                 _ACTIVE_OWNER_THREAD = None
+            else:
+                _ACTIVE_CONFIG = previous_config

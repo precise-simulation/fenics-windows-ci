@@ -348,12 +348,9 @@ jobs:
             "python=${{ matrix.python }}" "libblas=*=*openblas" `
             fenics-dolfinx fenics-jit-llvm-mingw pefile "cffi=2.1.*" "setuptools=84.*"
           if ($LASTEXITCODE -ne 0) { throw "Phase-4A FEniCS/LLVM-MinGW environment install failed" }
-          & $mamba install -y -p $prefix $runtimePackage.FullName
-          if ($LASTEXITCODE -ne 0) { throw "Phase-4A local shared runtime package install failed" }
-          & $mamba install -y -p $prefix $llvmPackage.FullName
-          if ($LASTEXITCODE -ne 0) { throw "Phase-4A local LLVM-MinGW backend package install failed" }
-          & $mamba install -y -p $prefix $package.FullName
-          if ($LASTEXITCODE -ne 0) { throw "Phase-4A local TinyCC package install failed" }
+          & $mamba install -y -p $prefix `
+            $runtimePackage.FullName $llvmPackage.FullName $package.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4A local branch JIT package install failed" }
 
       - name: Run LLVM-MinGW reference form corpus
         shell: pwsh

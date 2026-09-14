@@ -95,7 +95,6 @@ def runtime_context(mode: str, backend_root: Path, diagnostics: Path):
     runtime_path = Path(sys.prefix) / "Library/fenics-jit/runtime/fenics_jit_runtime.py"
     runtime = load_module(runtime_path, "phase4a_llvm_runtime")
     config = runtime.RuntimeConfig.discover(
-        toolchain_root=Path(sys.prefix) / "Library/fenics-jit",
         python_prefix=Path(sys.prefix),
     )
     return config.activate(diagnostics_dir=diagnostics), "llvm-mingw-stage-aw-reference"

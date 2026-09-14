@@ -9,6 +9,7 @@ on:
       - "scripts/tinycc-jit/**"
       - "specs/tinycc-ffcx-jit/**"
       - "recipes/fenics-jit-runtime/**"
+      - "recipes/fenics-jit-llvm-mingw/**"
       - "recipes/fenics-jit-tinycc/**"
   workflow_dispatch:
 
@@ -198,7 +199,7 @@ jobs:
             python=3.12
             rattler-build=0.74.0
 
-      - name: Build shared runtime and TinyCC package twice from clean work roots
+      - name: Build branch JIT packages and reproduce runtime/TinyCC from clean work roots
         shell: pwsh
         run: |
           $rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs/tinycc-package-ci" -Recurse -Filter rattler-build.exe `
@@ -210,11 +211,18 @@ jobs:
             --channel-priority strict `
             -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "first shared runtime package build failed" }
+          $channelA = "file:///" + ((Resolve-Path phase3-output-a).Path -replace '\\','/')
+          & $rattler build `
+            --recipe recipes/fenics-jit-llvm-mingw/recipe.yaml `
+            --output-dir phase3-output-a `
+            --channel-priority strict `
+            -c $channelA -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "branch LLVM-MinGW backend package build failed" }
           & $rattler build `
             --recipe recipes/fenics-jit-tinycc/recipe.yaml `
             --output-dir phase3-output-a `
             --channel-priority strict `
-            -c precise-simulation -c conda-forge
+            -c $channelA -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "first TinyCC package build failed" }
           & $rattler build `
             --recipe recipes/fenics-jit-runtime/recipe.yaml `
@@ -222,11 +230,12 @@ jobs:
             --channel-priority strict `
             -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "second shared runtime package build failed" }
+          $channelB = "file:///" + ((Resolve-Path phase3-output-b).Path -replace '\\','/')
           & $rattler build `
             --recipe recipes/fenics-jit-tinycc/recipe.yaml `
             --output-dir phase3-output-b `
             --channel-priority strict `
-            -c precise-simulation -c conda-forge
+            -c $channelB -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "second TinyCC package build failed" }
 
       - name: Install both package builds into relocatable spaced prefixes
@@ -284,6 +293,7 @@ jobs:
           name: tinycc-phase3-package
           path: |
             phase3-output-a/win-64/fenics-jit-runtime-*.conda
+            phase3-output-a/win-64/fenics-jit-llvm-mingw-*.conda
             phase3-output-a/win-64/fenics-jit-tinycc-*.conda
             phase3-output-b/win-64/fenics-jit-runtime-*.conda
             phase3-output-b/win-64/fenics-jit-tinycc-*.conda
@@ -327,8 +337,10 @@ jobs:
           $mamba = $env:MAMBA_EXE
           if (-not $mamba) { $mamba = "micromamba" }
           $runtimePackage = Get-ChildItem phase4a-package-artifact -Recurse -Filter "fenics-jit-runtime-*.conda" | Select-Object -First 1
+          $llvmPackage = Get-ChildItem phase4a-package-artifact -Recurse -Filter "fenics-jit-llvm-mingw-*.conda" | Select-Object -First 1
           $package = Get-ChildItem phase4a-package-artifact -Recurse -Filter "fenics-jit-tinycc-*.conda" | Select-Object -First 1
           if (-not $runtimePackage) { throw "downloaded fenics-jit-runtime package not found" }
+          if (-not $llvmPackage) { throw "downloaded fenics-jit-llvm-mingw package not found" }
           if (-not $package) { throw "downloaded fenics-jit-tinycc package not found" }
           $prefix = Join-Path $PWD "phase4a runtime py${{ matrix.python }} with spaces"
           & $mamba create -y -p $prefix --override-channels --strict-channel-priority `
@@ -338,6 +350,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Phase-4A FEniCS/LLVM-MinGW environment install failed" }
           & $mamba install -y -p $prefix $runtimePackage.FullName
           if ($LASTEXITCODE -ne 0) { throw "Phase-4A local shared runtime package install failed" }
+          & $mamba install -y -p $prefix $llvmPackage.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4A local LLVM-MinGW backend package install failed" }
           & $mamba install -y -p $prefix $package.FullName
           if ($LASTEXITCODE -ne 0) { throw "Phase-4A local TinyCC package install failed" }
 

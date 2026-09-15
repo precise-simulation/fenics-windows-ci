@@ -88,7 +88,7 @@ class RuntimeConfig:
         root = (
             Path(toolchain_root).resolve()
             if toolchain_root is not None
-            else Path(__file__).resolve().parent.parent
+            else (Path(__file__).resolve().parent.parent / "backends" / "llvm-mingw").resolve()
         )
         prefix = Path(python_prefix or sys.prefix).resolve()
         bin_dir = _require_dir(root / "bin", "LLVM-MinGW bin directory")

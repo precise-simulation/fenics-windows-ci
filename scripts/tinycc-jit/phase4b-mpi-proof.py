@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import ntpath
 import os
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ LLVM_WINDOWS_ABI_POLICY = "x86_64-w64-mingw32-ms-bitfields-longdouble80-storage1
 COMMON_EXTERNAL_CONFIG_POLICY = "suppress-all-v1"
 COMMON_SYSTEM_LIBRARY_POLICY = "windows-system-dll-resolution-v1"
 LLVM_CRT_IDENTITY = "ucrt-v1"
+MPI_TIMEOUT_SECONDS = 180
 
 
 def load_module(path: Path, name: str):
@@ -90,6 +92,32 @@ def require_string(mapping: dict[str, object], key: str, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError(f"{label} does not contain non-empty {key}")
     return value.strip()
+
+
+def windows_path_key(value: str | os.PathLike[str]) -> str:
+    """Normalize equivalent Windows path spellings for cross-rank comparison."""
+    text = str(value).replace("/", "\\")
+    lowered = text.casefold()
+    if lowered.startswith("\\\\?\\unc\\"):
+        text = "\\\\" + text[8:]
+    elif lowered.startswith("\\\\?\\"):
+        text = text[4:]
+    return ntpath.normcase(ntpath.normpath(text))
+
+
+def required_diagnostics_key(record: dict[str, object]) -> str:
+    """Return a stable identity key while preserving raw paths in evidence."""
+    normalized = dict(record)
+    python_abi_definition = normalized.get("python_abi_definition")
+    if isinstance(python_abi_definition, str):
+        normalized["python_abi_definition"] = windows_path_key(python_abi_definition)
+    include_roots = normalized.get("include_roots")
+    if isinstance(include_roots, dict):
+        normalized["include_roots"] = {
+            str(key): windows_path_key(str(value))
+            for key, value in include_roots.items()
+        }
+    return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
 
 
 def dynamic_include_identity(runtime, backend_record: dict[str, object]) -> dict[str, object]:
@@ -276,13 +304,17 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
     if not modules:
         raise RuntimeError(f"rank {rank}: MPI JIT did not produce a cached .pyd")
 
+    backend_root = str(runtime.backend_root.resolve())
+    cache_root = str(cache.resolve())
     rank_record = {
         "rank": rank,
         "size": size,
         "backend": backend,
         "backend_cache_id": runtime.backend_cache_id,
-        "backend_root": str(runtime.backend_root.resolve()),
-        "cache_root": str(cache.resolve()),
+        "backend_root": backend_root,
+        "backend_root_key": windows_path_key(backend_root),
+        "cache_root": cache_root,
+        "cache_root_key": windows_path_key(cache_root),
         "value": value,
         "modules": modules,
         "required_backend_diagnostics": required_diagnostics,
@@ -294,17 +326,19 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
         assert gathered is not None
         cache_ids = {item["backend_cache_id"] for item in gathered}
         cache_roots = {item["cache_root"] for item in gathered}
+        cache_root_keys = {item["cache_root_key"] for item in gathered}
         backend_roots = {item["backend_root"] for item in gathered}
+        backend_root_keys = {item["backend_root_key"] for item in gathered}
         module_sets = {json.dumps(item["modules"], sort_keys=True) for item in gathered}
         diagnostic_sets = {
-            json.dumps(item["required_backend_diagnostics"], sort_keys=True)
+            required_diagnostics_key(item["required_backend_diagnostics"])
             for item in gathered
         }
         if len(cache_ids) != 1:
             raise RuntimeError(f"MPI ranks disagreed on backend cache identity: {cache_ids!r}")
-        if len(cache_roots) != 1:
+        if len(cache_root_keys) != 1:
             raise RuntimeError(f"MPI ranks disagreed on physical cache root: {cache_roots!r}")
-        if len(backend_roots) != 1:
+        if len(backend_root_keys) != 1:
             raise RuntimeError(f"MPI ranks disagreed on backend root: {backend_roots!r}")
         if len(module_sets) != 1:
             raise RuntimeError("MPI ranks observed different cached module snapshots")
@@ -318,8 +352,10 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
             "backend": backend,
             "ranks": gathered,
             "shared_backend_cache_id": next(iter(cache_ids)),
-            "shared_cache_root": next(iter(cache_roots)),
-            "shared_backend_root": next(iter(backend_roots)),
+            "shared_cache_root": gathered[0]["cache_root"],
+            "shared_cache_root_key": gathered[0]["cache_root_key"],
+            "shared_backend_root": gathered[0]["backend_root"],
+            "shared_backend_root_key": gathered[0]["backend_root_key"],
             "shared_required_backend_diagnostics": gathered[0][
                 "required_backend_diagnostics"
             ],
@@ -370,7 +406,17 @@ def parent_probe(work: Path, output: Path) -> int:
             "--output",
             str(backend_output),
         ]
-        completed = subprocess.run(command, check=False)
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                timeout=MPI_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"{backend} MPI propagation qualification exceeded "
+                f"{MPI_TIMEOUT_SECONDS} seconds"
+            ) from exc
         if completed.returncode != 0:
             raise RuntimeError(
                 f"{backend} MPI propagation qualification failed with "

@@ -43,6 +43,13 @@ def _metadata_string(metadata: dict[str, object], key: str) -> str:
     return value.strip()
 
 
+def _policy_string(policy: dict[str, object], key: str) -> str:
+    value = policy.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"TinyCC backend policy does not contain {key}")
+    return value.strip()
+
+
 def backend_cache_id(*, root: Path, metadata: dict[str, object]) -> str:
     """Return and validate the immutable TinyCC binary-compatibility cache ID."""
     revision = _metadata_string(metadata, "source_revision")
@@ -62,11 +69,19 @@ def diagnostic_record(*, root: Path, metadata: dict[str, object]) -> dict[str, o
     policy = metadata.get("policy")
     if not isinstance(policy, dict):
         raise RuntimeError("TinyCC backend metadata does not contain policy")
+    revision = _metadata_string(metadata, "source_revision")
     return {
         "adapter": "tinycc-direct-cffi",
-        "source_revision": _metadata_string(metadata, "source_revision"),
+        "source_revision": revision,
+        "compiler_revision": revision,
         "backend_cache_id": backend_cache_id(root=root, metadata=metadata),
         "tcc_version": metadata.get("tcc_version"),
+        "compiler_version": metadata.get("tcc_version"),
+        "windows_abi_policy": _policy_string(policy, "abi"),
+        "external_config_policy": _policy_string(policy, "external_config"),
+        "system_library_policy": _policy_string(policy, "system_library"),
+        "crt_identity": _policy_string(policy, "crt"),
+        "python_abi_definition": str((root.resolve() / "python3.def")),
         "policy": policy,
     }
 
@@ -138,6 +153,8 @@ def _self_test(root: Path) -> None:
     record = diagnostic_record(root=root, metadata=metadata)
     if record["backend_cache_id"] != cache_id:
         raise AssertionError("TinyCC runtime diagnostics cache identity mismatch")
+    if record["compiler_revision"] != metadata["source_revision"]:
+        raise AssertionError("TinyCC runtime diagnostics compiler revision mismatch")
     with tempfile.TemporaryDirectory(prefix="fenics-jit-tinycc-runtime-") as temp_dir:
         diagnostics = Path(temp_dir)
         with activate(

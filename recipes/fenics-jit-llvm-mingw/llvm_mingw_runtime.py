@@ -20,7 +20,16 @@ _BACKEND_POLICY = {
     "crt": "ucrt-v1",
     "pe_hardening": "llvm-mingw-default-pe-v1",
 }
+_WINDOWS_ABI_POLICY = "x86_64-w64-mingw32-ms-bitfields-longdouble80-storage16-v1"
+_SYSTEM_LIBRARY_POLICY = "windows-system-dll-resolution-v1"
 _RUNTIME_MODULE_NAME = "_fenics_jit_llvm_mingw_backend_impl"
+
+
+def _metadata_string(metadata: dict[str, object], key: str) -> str:
+    value = metadata.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"LLVM-MinGW backend metadata does not contain {key}")
+    return value.strip()
 
 
 def _load_runtime(root: Path) -> ModuleType:
@@ -89,7 +98,35 @@ def diagnostic_record(*, root: Path, metadata: dict[str, object]) -> dict[str, o
         metadata=metadata,
         expected_cache_id=cache_id,
     )
-    return config.diagnostic_record()
+    release = _metadata_string(metadata, "llvm_mingw_release")
+    archive_sha256 = _metadata_string(metadata, "upstream_sha256")
+    record = config.diagnostic_record()
+    record.update(
+        {
+            "adapter": "llvm-mingw-cffi-runtime",
+            "backend_cache_id": cache_id,
+            "compiler_revision": f"llvm-mingw-{release}-sha256-{archive_sha256}",
+            "compiler_release": release,
+            "compiler_archive_sha256": archive_sha256,
+            "compiler_version": _metadata_string(metadata, "clang_version"),
+            "windows_abi_policy": _WINDOWS_ABI_POLICY,
+            "external_config_policy": _BACKEND_POLICY["external_config"],
+            "system_library_policy": _SYSTEM_LIBRARY_POLICY,
+            "crt_identity": _BACKEND_POLICY["crt"],
+            "python_abi_definition": str(config.python_stable_import_library),
+            "include_roots": {
+                "python": str(config.python_include),
+                "ffcx": str(config.ffcx_include),
+                "toolchain": str(config.toolchain_include),
+            },
+            "policy": {
+                **_BACKEND_POLICY,
+                "windows_abi": _WINDOWS_ABI_POLICY,
+                "system_library": _SYSTEM_LIBRARY_POLICY,
+            },
+        }
+    )
+    return record
 
 
 @contextlib.contextmanager

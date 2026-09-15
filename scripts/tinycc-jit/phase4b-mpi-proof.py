@@ -11,7 +11,13 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
+
+LLVM_WINDOWS_ABI_POLICY = "x86_64-w64-mingw32-ms-bitfields-longdouble80-storage16-v1"
+COMMON_EXTERNAL_CONFIG_POLICY = "suppress-all-v1"
+COMMON_SYSTEM_LIBRARY_POLICY = "windows-system-dll-resolution-v1"
+LLVM_CRT_IDENTITY = "ucrt-v1"
 
 
 def load_module(path: Path, name: str):
@@ -79,6 +85,119 @@ def mpi_path() -> str:
     return os.pathsep.join(str(path) for path in entries)
 
 
+def require_string(mapping: dict[str, object], key: str, label: str) -> str:
+    value = mapping.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"{label} does not contain non-empty {key}")
+    return value.strip()
+
+
+def dynamic_include_identity(runtime, backend_record: dict[str, object]) -> dict[str, object]:
+    if runtime.selected_backend == "llvm-mingw":
+        raw_roots = backend_record.get("include_roots")
+        if not isinstance(raw_roots, dict):
+            raise RuntimeError("LLVM-MinGW diagnostics do not contain include_roots")
+        include_roots = {
+            key: require_string(raw_roots, key, "LLVM-MinGW include_roots")
+            for key in ("python", "ffcx", "toolchain")
+        }
+        python_abi_definition = require_string(
+            backend_record, "python_abi_definition", "LLVM-MinGW diagnostics"
+        )
+    else:
+        python_include = Path(sysconfig.get_path("include") or "").resolve()
+        spec = importlib.util.find_spec("ffcx")
+        if spec is None or not spec.submodule_search_locations:
+            raise RuntimeError("TinyCC MPI diagnostics cannot locate installed FFCx")
+        ffcx_root = Path(next(iter(spec.submodule_search_locations))).resolve()
+        include_roots = {
+            "python": str(python_include),
+            "ffcx": str((ffcx_root / "codegeneration").resolve()),
+            "toolchain": str((runtime.backend_root / "include").resolve()),
+        }
+        python_abi_definition = require_string(
+            backend_record, "python_abi_definition", "TinyCC diagnostics"
+        )
+
+    for key, raw_path in include_roots.items():
+        path = Path(raw_path)
+        if not path.is_dir():
+            raise RuntimeError(
+                f"{runtime.selected_backend} diagnostics include root {key} is missing: {path}"
+            )
+    abi_path = Path(python_abi_definition)
+    if not abi_path.is_file():
+        raise RuntimeError(
+            f"{runtime.selected_backend} Python ABI definition is missing: {abi_path}"
+        )
+    return {
+        "python_abi_definition": str(abi_path.resolve()),
+        "include_roots": {key: str(Path(value).resolve()) for key, value in include_roots.items()},
+    }
+
+
+def assert_required_backend_diagnostics(
+    runtime,
+    record: dict[str, object],
+    rank: int,
+) -> dict[str, object]:
+    backend_record = record.get("backend")
+    if not isinstance(backend_record, dict):
+        raise RuntimeError(f"rank {rank}: shared diagnostics do not contain backend record")
+
+    if runtime.selected_backend == "tinycc":
+        policy = runtime.metadata.get("policy")
+        if not isinstance(policy, dict):
+            raise RuntimeError(f"rank {rank}: TinyCC metadata does not contain policy")
+        expected = {
+            "adapter": "tinycc-direct-cffi",
+            "backend_cache_id": runtime.backend_cache_id,
+            "compiler_revision": require_string(
+                runtime.metadata, "source_revision", "TinyCC metadata"
+            ),
+            "windows_abi_policy": require_string(policy, "abi", "TinyCC policy"),
+            "external_config_policy": require_string(
+                policy, "external_config", "TinyCC policy"
+            ),
+            "system_library_policy": require_string(
+                policy, "system_library", "TinyCC policy"
+            ),
+            "crt_identity": require_string(policy, "crt", "TinyCC policy"),
+        }
+    else:
+        release = require_string(runtime.metadata, "llvm_mingw_release", "LLVM-MinGW metadata")
+        archive_sha256 = require_string(
+            runtime.metadata, "upstream_sha256", "LLVM-MinGW metadata"
+        )
+        expected = {
+            "adapter": "llvm-mingw-cffi-runtime",
+            "backend_cache_id": runtime.backend_cache_id,
+            "compiler_revision": f"llvm-mingw-{release}-sha256-{archive_sha256}",
+            "windows_abi_policy": LLVM_WINDOWS_ABI_POLICY,
+            "external_config_policy": COMMON_EXTERNAL_CONFIG_POLICY,
+            "system_library_policy": COMMON_SYSTEM_LIBRARY_POLICY,
+            "crt_identity": LLVM_CRT_IDENTITY,
+        }
+
+    actual = {key: backend_record.get(key) for key in expected}
+    if actual != expected:
+        raise RuntimeError(
+            f"rank {rank}: {runtime.selected_backend} backend diagnostics mismatch: "
+            f"expected={expected!r}, actual={actual!r}"
+        )
+
+    abi_policy = str(actual["windows_abi_policy"]).lower()
+    for required in ("bitfields", "longdouble"):
+        if required not in abi_policy:
+            raise RuntimeError(
+                f"rank {rank}: {runtime.selected_backend} ABI policy does not expose {required}: "
+                f"{actual['windows_abi_policy']!r}"
+            )
+
+    include_identity = dynamic_include_identity(runtime, backend_record)
+    return {**actual, **include_identity}
+
+
 def child_probe(backend: str, work: Path, output: Path) -> int:
     import ufl
     from dolfinx import fem, mesh
@@ -144,6 +263,7 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
                 f"rank {rank}: shared diagnostics mismatch: "
                 f"expected={expected_record!r}, actual={actual_record!r}"
             )
+        required_diagnostics = assert_required_backend_diagnostics(runtime, record, rank)
 
     expected_value = 1.0 + 0.5 * scale
     if not math.isclose(value, expected_value, rel_tol=2e-10, abs_tol=2e-10):
@@ -165,6 +285,7 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
         "cache_root": str(cache.resolve()),
         "value": value,
         "modules": modules,
+        "required_backend_diagnostics": required_diagnostics,
         "diagnostics": record,
     }
     gathered = comm.gather(rank_record, root=0)
@@ -175,6 +296,10 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
         cache_roots = {item["cache_root"] for item in gathered}
         backend_roots = {item["backend_root"] for item in gathered}
         module_sets = {json.dumps(item["modules"], sort_keys=True) for item in gathered}
+        diagnostic_sets = {
+            json.dumps(item["required_backend_diagnostics"], sort_keys=True)
+            for item in gathered
+        }
         if len(cache_ids) != 1:
             raise RuntimeError(f"MPI ranks disagreed on backend cache identity: {cache_ids!r}")
         if len(cache_roots) != 1:
@@ -183,6 +308,10 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
             raise RuntimeError(f"MPI ranks disagreed on backend root: {backend_roots!r}")
         if len(module_sets) != 1:
             raise RuntimeError("MPI ranks observed different cached module snapshots")
+        if len(diagnostic_sets) != 1:
+            raise RuntimeError(
+                "MPI ranks disagreed on compiler/policy/include diagnostic identity"
+            )
 
         result = {
             "status": "pass",
@@ -191,6 +320,9 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
             "shared_backend_cache_id": next(iter(cache_ids)),
             "shared_cache_root": next(iter(cache_roots)),
             "shared_backend_root": next(iter(backend_roots)),
+            "shared_required_backend_diagnostics": gathered[0][
+                "required_backend_diagnostics"
+            ],
         }
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(

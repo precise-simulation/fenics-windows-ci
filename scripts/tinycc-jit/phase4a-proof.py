@@ -68,7 +68,22 @@ def main() -> int:
         ],
         check=False,
     )
-    return mpi_run.returncode
+    if mpi_run.returncode != 0:
+        return mpi_run.returncode
+
+    regression = scripts / "phase4b-llvm-regression-proof.py"
+    regression_run = subprocess.run(
+        [
+            sys.executable,
+            str(regression),
+            "--work-dir",
+            str(work / "p4br"),
+            "--output",
+            str(output.with_name(evidence_name(output, "llvm-regression-"))),
+        ],
+        check=False,
+    )
+    return regression_run.returncode
 
 
 if __name__ == "__main__":

@@ -264,6 +264,11 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
                 f"expected={expected_active!r}, actual={active!r}"
             )
 
+        if backend == "llvm-mingw" and sys.version_info[:2] == (3, 14):
+            # Python 3.14's setuptools MinGW backend emits objects below a relative
+            # Release build-temp directory without creating it for this MPI path.
+            (cache / "Release").mkdir(parents=True, exist_ok=True)
+
         domain = mesh.create_unit_square(comm, 2, 2)
         x = ufl.SpatialCoordinate(domain)
         scale = 1.75 if backend == "tinycc" else 1.25

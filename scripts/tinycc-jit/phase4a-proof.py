@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import json
 import math
 import os
+import shutil
 import sys
 import threading
 from pathlib import Path
@@ -134,10 +136,15 @@ class ObservedRLock:
 
 
 def load_shared_selector():
-    path = Path(sys.prefix) / "Library/fenics-jit/runtime/fenics_jit_selector.py"
-    if not path.is_file():
-        raise RuntimeError(f"installed shared JIT selector is missing: {path}")
-    return load_module(path, "phase4b_shared_jit_selector")
+    import dolfinx.jit as dolfinx_jit
+
+    loader = getattr(dolfinx_jit, "_load_fenics_windows_jit_runtime", None)
+    if loader is None:
+        raise RuntimeError("installed DOLFINx does not expose the shared Windows JIT runtime loader")
+    selector = loader()
+    if selector is None:
+        raise RuntimeError("installed DOLFINx shared Windows JIT runtime loader returned no selector")
+    return selector
 
 
 def discover_shared_backend(selector, backend: str):
@@ -157,6 +164,21 @@ def discover_shared_backend(selector, backend: str):
             f"shared selector returned {runtime.selected_backend!r}, expected {backend!r}"
         )
     return runtime
+
+
+@contextlib.contextmanager
+def selected_backend(backend: str):
+    had = "FENICS_JIT_COMPILER" in os.environ
+    old = os.environ.get("FENICS_JIT_COMPILER")
+    os.environ["FENICS_JIT_COMPILER"] = backend
+    try:
+        yield
+    finally:
+        if had:
+            assert old is not None
+            os.environ["FENICS_JIT_COMPILER"] = old
+        else:
+            os.environ.pop("FENICS_JIT_COMPILER", None)
 
 
 def assert_shared_active(runtime, cache: Path) -> None:
@@ -398,6 +420,224 @@ def qualify_thread_serialization(
     }
 
 
+def pyd_snapshot(root: Path) -> dict[str, dict[str, object]]:
+    snapshot: dict[str, dict[str, object]] = {}
+    if not root.is_dir():
+        return snapshot
+    for path in sorted(root.rglob("*.pyd")):
+        relative = str(path.relative_to(root)).replace("\\", "/")
+        stat = path.stat()
+        snapshot[relative] = {
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    return snapshot
+
+
+def clean_cache_base(path: Path) -> Path:
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def shared_cache_probe(backend: str, base_cache: Path) -> float:
+    import ufl
+    from dolfinx import fem, mesh
+    from mpi4py import MPI
+
+    with selected_backend(backend):
+        domain = mesh.create_unit_square(MPI.COMM_WORLD, 2, 2)
+        form = fem.form(
+            fem.Constant(domain, 1.0) * ufl.dx,
+            jit_options={"cache_dir": base_cache},
+        )
+        value = float(fem.assemble_scalar(form))
+    if not math.isclose(value, 1.0, rel_tol=2e-10, abs_tol=2e-10):
+        raise RuntimeError(f"{backend} shared-cache probe mismatch: {value}")
+    return value
+
+
+def qualify_switch_direction(
+    selector,
+    first_backend: str,
+    second_backend: str,
+    work: Path,
+) -> dict[str, object]:
+    base_cache = clean_cache_base(
+        work / f"shared cache switch {first_backend} then {second_backend} with spaces"
+    )
+    first = discover_shared_backend(selector, first_backend)
+    second = discover_shared_backend(selector, second_backend)
+    first_root = first.cache_root(base_cache)
+    second_root = second.cache_root(base_cache)
+    if first_root == second_root:
+        raise RuntimeError(
+            f"backend switch shares one physical cache root: {first_backend} -> {second_backend}"
+        )
+    if pyd_snapshot(first_root) or pyd_snapshot(second_root):
+        raise RuntimeError("fresh backend-switch cache roots were not empty")
+
+    first_value = shared_cache_probe(first_backend, base_cache)
+    first_fresh = pyd_snapshot(first_root)
+    if not first_fresh:
+        raise RuntimeError(f"{first_backend} switch probe did not produce a compiled module")
+    shared_cache_probe(first_backend, base_cache)
+    first_reuse = pyd_snapshot(first_root)
+    if first_reuse != first_fresh:
+        raise RuntimeError(f"{first_backend} same-identity cache reuse rewrote compiled modules")
+    if pyd_snapshot(second_root):
+        raise RuntimeError(
+            f"{second_backend} cache root was populated before switching to that backend"
+        )
+
+    second_value = shared_cache_probe(second_backend, base_cache)
+    second_fresh = pyd_snapshot(second_root)
+    if not second_fresh:
+        raise RuntimeError(f"{second_backend} switch probe did not produce a compiled module")
+    shared_cache_probe(second_backend, base_cache)
+    second_reuse = pyd_snapshot(second_root)
+    if second_reuse != second_fresh:
+        raise RuntimeError(f"{second_backend} same-identity cache reuse rewrote compiled modules")
+
+    common_modules = sorted(
+        {Path(path).name for path in first_fresh}
+        & {Path(path).name for path in second_fresh}
+    )
+    if not common_modules:
+        raise RuntimeError(
+            "backend switch did not produce a common FFCx module name in the isolated roots"
+        )
+
+    return {
+        "status": "pass",
+        "sequence": [first_backend, second_backend],
+        "base_cache": str(base_cache),
+        "first": {
+            "backend_cache_id": first.backend_cache_id,
+            "cache_root": str(first_root),
+            "fresh_module_count": len(first_fresh),
+            "same_identity_reuse_unchanged": True,
+            "value": first_value,
+        },
+        "second": {
+            "backend_cache_id": second.backend_cache_id,
+            "cache_root": str(second_root),
+            "fresh_module_count": len(second_fresh),
+            "same_identity_reuse_unchanged": True,
+            "value": second_value,
+        },
+        "common_module_names": common_modules,
+    }
+
+
+def qualify_llvm_identity_change(selector, work: Path) -> dict[str, object]:
+    base_cache = clean_cache_base(work / "shared cache llvm identity change with spaces")
+    original = discover_shared_backend(selector, "llvm-mingw")
+    original_root = original.cache_root(base_cache)
+    metadata_path = original.backend_root / "metadata.json"
+    original_bytes = metadata_path.read_bytes()
+
+    original_value = shared_cache_probe("llvm-mingw", base_cache)
+    original_fresh = pyd_snapshot(original_root)
+    if not original_fresh:
+        raise RuntimeError("LLVM-MinGW original identity did not produce a compiled module")
+    shared_cache_probe("llvm-mingw", base_cache)
+    if pyd_snapshot(original_root) != original_fresh:
+        raise RuntimeError("LLVM-MinGW original same-identity cache reuse rewrote compiled modules")
+
+    changed = None
+    changed_root = None
+    changed_fresh: dict[str, dict[str, object]] = {}
+    changed_value = None
+    try:
+        metadata = json.loads(original_bytes.decode("utf-8-sig"))
+        release = str(
+            metadata.get("llvm_mingw_release")
+            or metadata.get("package_version")
+            or "unknown"
+        )
+        metadata["llvm_mingw_release"] = f"{release}-phase4b-identity-probe"
+        encoding = "utf-8-sig" if original_bytes.startswith(b"\xef\xbb\xbf") else "utf-8"
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+            encoding=encoding,
+        )
+
+        changed = discover_shared_backend(selector, "llvm-mingw")
+        changed_root = changed.cache_root(base_cache)
+        if changed.backend_cache_id == original.backend_cache_id:
+            raise RuntimeError("LLVM-MinGW metadata identity change did not change backend-cache-id")
+        if changed_root == original_root:
+            raise RuntimeError("LLVM-MinGW metadata identity change reused the original cache root")
+        if pyd_snapshot(changed_root):
+            raise RuntimeError("changed LLVM-MinGW identity cache root was not initially empty")
+
+        changed_value = shared_cache_probe("llvm-mingw", base_cache)
+        changed_fresh = pyd_snapshot(changed_root)
+        if not changed_fresh:
+            raise RuntimeError("changed LLVM-MinGW identity did not force a fresh compilation")
+        shared_cache_probe("llvm-mingw", base_cache)
+        if pyd_snapshot(changed_root) != changed_fresh:
+            raise RuntimeError("changed LLVM-MinGW same-identity reuse rewrote compiled modules")
+    finally:
+        metadata_path.write_bytes(original_bytes)
+
+    restored = discover_shared_backend(selector, "llvm-mingw")
+    if restored.backend_cache_id != original.backend_cache_id:
+        raise RuntimeError(
+            "LLVM-MinGW backend-cache-id did not restore after the identity-change probe"
+        )
+    if restored.cache_root(base_cache) != original_root:
+        raise RuntimeError("LLVM-MinGW original cache root did not restore after identity probe")
+    if changed is None or changed_root is None or changed_value is None:
+        raise RuntimeError("LLVM-MinGW identity-change probe did not complete")
+
+    common_modules = sorted(
+        {Path(path).name for path in original_fresh}
+        & {Path(path).name for path in changed_fresh}
+    )
+    if not common_modules:
+        raise RuntimeError(
+            "LLVM-MinGW identity change did not compile a common FFCx module in the new namespace"
+        )
+
+    return {
+        "status": "pass",
+        "base_cache": str(base_cache),
+        "original": {
+            "backend_cache_id": original.backend_cache_id,
+            "cache_root": str(original_root),
+            "fresh_module_count": len(original_fresh),
+            "same_identity_reuse_unchanged": True,
+            "value": original_value,
+        },
+        "changed": {
+            "backend_cache_id": changed.backend_cache_id,
+            "cache_root": str(changed_root),
+            "fresh_module_count": len(changed_fresh),
+            "same_identity_reuse_unchanged": True,
+            "value": changed_value,
+        },
+        "metadata_restored": True,
+        "common_module_names": common_modules,
+    }
+
+
+def qualify_shared_cache_isolation(selector, work: Path) -> dict[str, object]:
+    switches = [
+        qualify_switch_direction(selector, "llvm-mingw", "tinycc", work),
+        qualify_switch_direction(selector, "tinycc", "llvm-mingw", work),
+    ]
+    identity_change = qualify_llvm_identity_change(selector, work)
+    return {
+        "status": "pass",
+        "switch_directions": switches,
+        "identity_change": identity_change,
+    }
+
+
 def qualify_shared_runtime_lifecycle(work: Path) -> dict[str, object]:
     selector = load_shared_selector()
     llvm = discover_shared_backend(selector, "llvm-mingw")
@@ -449,6 +689,7 @@ def qualify_shared_runtime_lifecycle(work: Path) -> dict[str, object]:
                 selector, tinycc, llvm, base_cache, diagnostics_root
             ),
         ]
+        cache_isolation = qualify_shared_cache_isolation(selector, work)
         assert_shared_idle(selector, baseline)
     finally:
         if had_sentinel:
@@ -475,6 +716,7 @@ def qualify_shared_runtime_lifecycle(work: Path) -> dict[str, object]:
         "conflicting_nested_backends": conflicts,
         "exception_restoration": exceptions,
         "thread_serialization": threads,
+        "cache_isolation": cache_isolation,
     }
 
 

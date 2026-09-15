@@ -44,7 +44,7 @@ def main() -> int:
             sys.executable,
             str(concurrency),
             "--work-dir",
-            str(Path(work_value).resolve() / "shared JIT concurrency with spaces"),
+            str(Path(work_value).resolve() / "p4bc"),
             "--output",
             str(output.with_name(concurrency_name)),
         ],

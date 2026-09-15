@@ -136,15 +136,10 @@ class ObservedRLock:
 
 
 def load_shared_selector():
-    import dolfinx.jit as dolfinx_jit
-
-    loader = getattr(dolfinx_jit, "_load_fenics_windows_jit_runtime", None)
-    if loader is None:
-        raise RuntimeError("installed DOLFINx does not expose the shared Windows JIT runtime loader")
-    selector = loader()
-    if selector is None:
-        raise RuntimeError("installed DOLFINx shared Windows JIT runtime loader returned no selector")
-    return selector
+    path = Path(sys.prefix) / "Library/fenics-jit/runtime/fenics_jit_selector.py"
+    if not path.is_file():
+        raise RuntimeError(f"installed shared JIT selector is missing: {path}")
+    return load_module(path, "phase4b_shared_jit_selector")
 
 
 def discover_shared_backend(selector, backend: str):
@@ -442,16 +437,24 @@ def clean_cache_base(path: Path) -> Path:
     return path
 
 
-def shared_cache_probe(backend: str, base_cache: Path) -> float:
+def shared_cache_probe(selector, backend: str, base_cache: Path) -> float:
     import ufl
     from dolfinx import fem, mesh
     from mpi4py import MPI
 
-    with selected_backend(backend):
+    runtime = discover_shared_backend(selector, backend)
+    cache = runtime.cache_root(base_cache)
+    diagnostics = (
+        base_cache
+        / "probe diagnostics"
+        / backend
+        / runtime.backend_cache_id
+    )
+    with runtime.activate(cache_root=cache, diagnostics_dir=diagnostics):
         domain = mesh.create_unit_square(MPI.COMM_WORLD, 2, 2)
         form = fem.form(
             fem.Constant(domain, 1.0) * ufl.dx,
-            jit_options={"cache_dir": base_cache},
+            jit_options={"cache_dir": cache},
         )
         value = float(fem.assemble_scalar(form))
     if not math.isclose(value, 1.0, rel_tol=2e-10, abs_tol=2e-10):
@@ -479,11 +482,11 @@ def qualify_switch_direction(
     if pyd_snapshot(first_root) or pyd_snapshot(second_root):
         raise RuntimeError("fresh backend-switch cache roots were not empty")
 
-    first_value = shared_cache_probe(first_backend, base_cache)
+    first_value = shared_cache_probe(selector, first_backend, base_cache)
     first_fresh = pyd_snapshot(first_root)
     if not first_fresh:
         raise RuntimeError(f"{first_backend} switch probe did not produce a compiled module")
-    shared_cache_probe(first_backend, base_cache)
+    shared_cache_probe(selector, first_backend, base_cache)
     first_reuse = pyd_snapshot(first_root)
     if first_reuse != first_fresh:
         raise RuntimeError(f"{first_backend} same-identity cache reuse rewrote compiled modules")
@@ -492,11 +495,11 @@ def qualify_switch_direction(
             f"{second_backend} cache root was populated before switching to that backend"
         )
 
-    second_value = shared_cache_probe(second_backend, base_cache)
+    second_value = shared_cache_probe(selector, second_backend, base_cache)
     second_fresh = pyd_snapshot(second_root)
     if not second_fresh:
         raise RuntimeError(f"{second_backend} switch probe did not produce a compiled module")
-    shared_cache_probe(second_backend, base_cache)
+    shared_cache_probe(selector, second_backend, base_cache)
     second_reuse = pyd_snapshot(second_root)
     if second_reuse != second_fresh:
         raise RuntimeError(f"{second_backend} same-identity cache reuse rewrote compiled modules")
@@ -539,11 +542,11 @@ def qualify_llvm_identity_change(selector, work: Path) -> dict[str, object]:
     metadata_path = original.backend_root / "metadata.json"
     original_bytes = metadata_path.read_bytes()
 
-    original_value = shared_cache_probe("llvm-mingw", base_cache)
+    original_value = shared_cache_probe(selector, "llvm-mingw", base_cache)
     original_fresh = pyd_snapshot(original_root)
     if not original_fresh:
         raise RuntimeError("LLVM-MinGW original identity did not produce a compiled module")
-    shared_cache_probe("llvm-mingw", base_cache)
+    shared_cache_probe(selector, "llvm-mingw", base_cache)
     if pyd_snapshot(original_root) != original_fresh:
         raise RuntimeError("LLVM-MinGW original same-identity cache reuse rewrote compiled modules")
 
@@ -574,11 +577,11 @@ def qualify_llvm_identity_change(selector, work: Path) -> dict[str, object]:
         if pyd_snapshot(changed_root):
             raise RuntimeError("changed LLVM-MinGW identity cache root was not initially empty")
 
-        changed_value = shared_cache_probe("llvm-mingw", base_cache)
+        changed_value = shared_cache_probe(selector, "llvm-mingw", base_cache)
         changed_fresh = pyd_snapshot(changed_root)
         if not changed_fresh:
             raise RuntimeError("changed LLVM-MinGW identity did not force a fresh compilation")
-        shared_cache_probe("llvm-mingw", base_cache)
+        shared_cache_probe(selector, "llvm-mingw", base_cache)
         if pyd_snapshot(changed_root) != changed_fresh:
             raise RuntimeError("changed LLVM-MinGW same-identity reuse rewrote compiled modules")
     finally:

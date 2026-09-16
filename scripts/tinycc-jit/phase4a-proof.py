@@ -1,4 +1,4 @@
-"""Run the qualified Phase-4A proof plus Phase-4B shared JIT qualification."""
+"""Run Phase-4A/4B qualification plus the fresh TinyCC Phase-5 serial corpus."""
 
 from __future__ import annotations
 
@@ -30,7 +30,33 @@ def main() -> int:
     if completed.returncode != 0:
         return completed.returncode
 
-    if argument_value("--mode") != "llvm-mingw":
+    mode = argument_value("--mode")
+    if mode == "tinycc":
+        if "--cache-reload" in sys.argv:
+            return 0
+
+        work_value = argument_value("--work-dir")
+        output_value = argument_value("--output")
+        if work_value is None or output_value is None:
+            raise RuntimeError("fresh TinyCC qualification requires --work-dir and --output")
+
+        work = Path(work_value).resolve()
+        output = Path(output_value).resolve()
+        phase5 = scripts / "phase5-functional-validation.py"
+        phase5_run = subprocess.run(
+            [
+                sys.executable,
+                str(phase5),
+                "--cache-dir",
+                str(work / "p5 integrated cache"),
+                "--diagnostics-dir",
+                str(output.parent / f"{output.stem}-phase5"),
+            ],
+            check=False,
+        )
+        return phase5_run.returncode
+
+    if mode != "llvm-mingw":
         return 0
 
     work_value = argument_value("--work-dir")

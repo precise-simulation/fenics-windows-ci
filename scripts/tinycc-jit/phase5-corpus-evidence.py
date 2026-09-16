@@ -1,4 +1,4 @@
-"""Record version-specific generated-C evidence for TinyCC Phase 5."""
+"""Record and verify version-specific generated-C evidence for TinyCC Phase 5."""
 
 from __future__ import annotations
 
@@ -25,6 +25,13 @@ _REQUIRED_POLICY_INPUTS = (
     "-DMS_WIN64=1",
     "-D__STDC_NO_COMPLEX__=1",
 )
+_CONTRACT_MODULE_KEYS = (
+    "sequence_index",
+    "test_identity",
+    "logical_module",
+    "source_path",
+    "normalized_source_sha256",
+)
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -33,6 +40,11 @@ def _sha256_bytes(data: bytes) -> str:
 
 def _sha256_file(path: Path) -> str:
     return _sha256_bytes(path.read_bytes())
+
+
+def _json_sha256(value: object) -> str:
+    data = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return _sha256_bytes(data)
 
 
 def _normalized_source_sha256(path: Path) -> str:
@@ -72,7 +84,9 @@ def _module_record(
         if required.lower() not in lowered:
             raise RuntimeError(f"corpus command for {case} is missing {required}: {command!r}")
     if any(part.startswith("-std") or part.startswith("/std") for part in lowered):
-        raise RuntimeError(f"corpus command for {case} unexpectedly overrides TinyCC default C11 mode: {command!r}")
+        raise RuntimeError(
+            f"corpus command for {case} unexpectedly overrides TinyCC default C11 mode: {command!r}"
+        )
 
     sources = [Path(part).resolve() for part in command if part.lower().endswith(".c")]
     if len(sources) != 1:
@@ -83,7 +97,9 @@ def _module_record(
     try:
         relative_source = source.relative_to(cache_root)
     except ValueError as exc:
-        raise RuntimeError(f"generated C source escaped the TinyCC physical cache: {source}") from exc
+        raise RuntimeError(
+            f"generated C source escaped the TinyCC physical cache: {source}"
+        ) from exc
 
     extension = record.get("extension")
     if not isinstance(extension, str) or not extension:
@@ -124,9 +140,118 @@ def _package_versions() -> dict[str, str]:
     }
 
 
+def _contract_record(evidence: dict[str, object]) -> dict[str, object]:
+    python_record = evidence.get("python")
+    if not isinstance(python_record, dict):
+        raise RuntimeError("generated-C evidence has no Python identity")
+    major_minor = python_record.get("major_minor")
+    if not isinstance(major_minor, str):
+        raise RuntimeError("generated-C evidence has no Python major/minor identity")
+
+    modules = evidence.get("modules")
+    if not isinstance(modules, list):
+        raise RuntimeError("generated-C evidence has no module list")
+    contract_modules: list[dict[str, object]] = []
+    for module in modules:
+        if not isinstance(module, dict):
+            raise RuntimeError(f"invalid generated-C module record: {module!r}")
+        missing = [key for key in _CONTRACT_MODULE_KEYS if key not in module]
+        if missing:
+            raise RuntimeError(
+                f"generated-C module record is missing contract fields {missing!r}: {module!r}"
+            )
+        contract_modules.append({key: module[key] for key in _CONTRACT_MODULE_KEYS})
+
+    return {
+        "generator_versions": evidence["generator_versions"],
+        "generation_inputs": evidence["generation_inputs"],
+        "validation_inputs": evidence["validation_inputs"],
+        "backend": evidence["backend"],
+        "compile_policy": evidence["compile_policy"],
+        "coverage": evidence["coverage"],
+        "python": major_minor,
+        "module_count": evidence["module_count"],
+        "modules": contract_modules,
+    }
+
+
+def _expected_contract(manifest: dict[str, object], major_minor: str) -> dict[str, object]:
+    if manifest.get("schema") != 1:
+        raise RuntimeError(f"unsupported generated-C corpus manifest schema: {manifest.get('schema')!r}")
+    if manifest.get("kind") != "tinycc-phase5-generated-c-corpus-contract":
+        raise RuntimeError(f"unexpected generated-C corpus manifest kind: {manifest.get('kind')!r}")
+
+    python_versions = manifest.get("python_versions")
+    if not isinstance(python_versions, dict):
+        raise RuntimeError("generated-C corpus manifest has no python_versions mapping")
+    version_record = python_versions.get(major_minor)
+    if not isinstance(version_record, dict):
+        raise RuntimeError(
+            f"generated-C corpus manifest has no contract for Python {major_minor}"
+        )
+
+    return {
+        "generator_versions": manifest["generator_versions"],
+        "generation_inputs": manifest["generation_inputs"],
+        "validation_inputs": manifest["validation_inputs"],
+        "backend": manifest["backend"],
+        "compile_policy": manifest["compile_policy"],
+        "coverage": manifest["coverage"],
+        "python": major_minor,
+        "module_count": version_record["module_count"],
+        "modules": version_record["modules"],
+    }
+
+
+def _verify_contract(
+    evidence: dict[str, object],
+    *,
+    manifest_path: Path,
+    diagnostics: Path,
+) -> None:
+    if not manifest_path.is_file():
+        raise RuntimeError(f"generated-C corpus manifest is missing: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise RuntimeError(f"invalid generated-C corpus manifest: {manifest_path}")
+
+    actual = _contract_record(evidence)
+    expected = _expected_contract(manifest, str(actual["python"]))
+    status = "pass" if actual == expected else "fail"
+    check: dict[str, object] = {
+        "schema": 1,
+        "kind": "tinycc-phase5-generated-c-corpus-check",
+        "status": status,
+        "python": actual["python"],
+        "manifest": manifest_path.as_posix(),
+        "expected_contract_sha256": _json_sha256(expected),
+        "actual_contract_sha256": _json_sha256(actual),
+    }
+    if status != "pass":
+        check["expected"] = expected
+        check["actual"] = actual
+
+    check_path = diagnostics / "generated-corpus-contract-check.json"
+    check_path.write_text(json.dumps(check, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if status != "pass":
+        raise RuntimeError(
+            "generated-C corpus does not match the repository contract; "
+            f"see {check_path}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--diagnostics-dir", type=Path, required=True)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path(__file__).resolve().parents[2]
+        / "tests"
+        / "tinycc"
+        / "generated-corpus"
+        / "manifest.json",
+    )
     args = parser.parse_args()
 
     python_hash_seed = os.environ.get("PYTHONHASHSEED")
@@ -169,7 +294,9 @@ def main() -> int:
                 f"generated-C corpus changed for {command_path.name}: "
                 f"expected {len(cases)} modules, observed {len(records)}"
             )
-        for index, (record, case) in enumerate(zip(records, cases, strict=True), start=len(modules)):
+        for index, (record, case) in enumerate(
+            zip(records, cases, strict=True), start=len(modules)
+        ):
             modules.append(
                 _module_record(
                     record,
@@ -200,10 +327,10 @@ def main() -> int:
     if not isinstance(backend_policy, dict):
         raise RuntimeError("TinyCC backend metadata has no policy object")
 
-    evidence = {
+    evidence: dict[str, object] = {
         "schema": 1,
         "kind": "tinycc-phase5-generated-c-observation",
-        "status": "observed-not-yet-pinned",
+        "status": "observed",
         "python": {
             "version": sys.version,
             "major_minor": f"{sys.version_info.major}.{sys.version_info.minor}",
@@ -234,14 +361,30 @@ def main() -> int:
             "complex_policy": "__STDC_NO_COMPLEX__=1",
             "source_normalization": "utf8-newlines-lf-v1",
         },
-        "compiler_output_capture": "stdout/stderr retained in the Actions job log; per-module capture is not yet part of this observation",
+        "compiler_output_capture": (
+            "stdout/stderr retained in the Actions job log; per-module capture is not yet "
+            "part of this observation"
+        ),
         "coverage": summary.get("coverage", []),
         "module_count": len(modules),
         "modules": modules,
     }
     output = diagnostics / "generated-corpus-observation.json"
     output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"TinyCC Phase 5 generated-C observation recorded: {len(modules)} modules")
+
+    _verify_contract(
+        evidence,
+        manifest_path=args.manifest.resolve(),
+        diagnostics=diagnostics,
+    )
+    evidence["status"] = "verified-repository-contract"
+    evidence["contract_manifest"] = args.manifest.resolve().as_posix()
+    output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    print(
+        "TinyCC Phase 5 generated-C corpus verified: "
+        f"{len(modules)} modules for Python {sys.version_info.major}.{sys.version_info.minor}"
+    )
     return 0
 
 

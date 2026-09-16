@@ -1,0 +1,250 @@
+{
+  "backend": {
+    "adapter_sha256": "3d5ca270e7d8e454720ab4ce30587fa7cf137009d883980c2373235f198d5ef2",
+    "cache_id": "tinycc-0fb54300b565-aaa86e30769a96f90b37",
+    "local_build_patch": "build-tcc-msvc-repro-v3: remove -Zi, enable deterministic source path mapping, and add linker -Brepro",
+    "patched_build_script_sha256": "52e26b204d4c0273980ac057b9066d7e391d855b74f56c3499dd1626dfb3508a",
+    "policy": {
+      "abi": "mingw32-mswin64-msbitfields-longdouble8-v1",
+      "adapter_schema": "tinycc-cffi-adapter-v2",
+      "crt": "msvcrt-owned-allocation-boundary-v1",
+      "external_config": "suppress-all-v1",
+      "pe_hardening": "dynamicbase-highentropyva-nxcompat-v1",
+      "python_link": "stable-abi-python3-def-v1",
+      "system_library": "windows-system-dll-resolution-v1"
+    },
+    "runtime_integration_sha256": "ddd00e13b1bbd89a3cee0a087cdd57128b73bd1a34929bfa17b374686487de70",
+    "source_revision": "0fb54300b56512754221d80adda85ddb9815bceb",
+    "tcc_version": "tcc version 0.9.28rc 2026-09-04_HEAD@0fb5430* (x86_64 Windows)",
+    "upstream_build_script_sha256": "fea97a1ad5e9bdb866394d4e5d0bc1f5ded61d8381379908705f7580025fd958"
+  },
+  "compile_policy": {
+    "c_standard_mode": "tinycc-default-c11",
+    "complex_policy": "__STDC_NO_COMPLEX__=1",
+    "packing_bitfield": "-mms-bitfields",
+    "python_win64_compatibility_definitions": [
+      "__MINGW32__=1",
+      "MS_WIN64=1"
+    ],
+    "source_normalization": "utf8-newlines-lf-v1"
+  },
+  "coverage": [
+    "P1 Poisson (companion scripts/test-poisson.py)",
+    "P2 Poisson",
+    "vector linear elasticity",
+    "cell integrals",
+    "exterior-facet Neumann integrals",
+    "Coefficient and Constant",
+    "nonlinear residual and Jacobian",
+    "fem.Expression",
+    "fresh cache and cache reload",
+    "PE imports and toolchain-free cache module load",
+    "paths containing spaces"
+  ],
+  "generation_inputs": {
+    "python_hash_seed": "0"
+  },
+  "generator_versions": {
+    "basix": "0.11.0",
+    "cffi": "2.1.1",
+    "dolfinx": "0.11.0.post0",
+    "ffcx": "0.11.0",
+    "ufl": "2026.1.0"
+  },
+  "kind": "tinycc-phase5-generated-c-corpus-contract",
+  "python_versions": {
+    "3.12": {
+      "module_count": 8,
+      "modules": [
+        {
+          "logical_module": "libffcx_forms_6eb7ad92149d7e50a722aa45d0b91db6546c3110",
+          "normalized_source_sha256": "287975d9cf50555a0cf2065b428aff9b9397427c6b82e8705f3e70f40e1ace2e",
+          "sequence_index": 0,
+          "source_path": "broad forms cache/libffcx_forms_6eb7ad92149d7e50a722aa45d0b91db6546c3110.c",
+          "test_identity": "p2-poisson-module-1"
+        },
+        {
+          "logical_module": "libffcx_forms_ee2a0047ed6fa6f14e9f7a8c95b5208916cb4a7a",
+          "normalized_source_sha256": "3633edd3aed135752ec4a5b29e20833db82489c71a0481999a1b570a0c4ff503",
+          "sequence_index": 1,
+          "source_path": "broad forms cache/libffcx_forms_ee2a0047ed6fa6f14e9f7a8c95b5208916cb4a7a.c",
+          "test_identity": "p2-poisson-module-2"
+        },
+        {
+          "logical_module": "libffcx_forms_b25a915e476e2cf1aa67a8441398fefeec3b9b52",
+          "normalized_source_sha256": "665864d05f05b7b298f235f2f9acf998467051ff5971671b4a978adfb1c59bbc",
+          "sequence_index": 2,
+          "source_path": "broad forms cache/libffcx_forms_b25a915e476e2cf1aa67a8441398fefeec3b9b52.c",
+          "test_identity": "vector-linear-elasticity"
+        },
+        {
+          "logical_module": "libffcx_forms_1088e7b1b85fb77a28c1d08bee9c4d6f780ace8a",
+          "normalized_source_sha256": "53719584890d1304405e923565012c302b23a1f1ed65e39118ce13f167eeac4b",
+          "sequence_index": 3,
+          "source_path": "broad forms cache/libffcx_forms_1088e7b1b85fb77a28c1d08bee9c4d6f780ace8a.c",
+          "test_identity": "cell-facet-coefficients"
+        },
+        {
+          "logical_module": "libffcx_forms_88f4a3c3282cc8731ad61585f9fff24267abbd2e",
+          "normalized_source_sha256": "5ce8e11d719fe05788dbae069d7b92dd59210e8597ddb51296d4be3784eb07bd",
+          "sequence_index": 4,
+          "source_path": "broad forms cache/libffcx_forms_88f4a3c3282cc8731ad61585f9fff24267abbd2e.c",
+          "test_identity": "nonlinear-residual-jacobian-module-1"
+        },
+        {
+          "logical_module": "libffcx_forms_91fe85a46b8cc7bbd99b58dd41678aac50d0275f",
+          "normalized_source_sha256": "24d457e0b8f2723f1869978c754438743785ccad5bceb4dab3ed02459d56c4d0",
+          "sequence_index": 5,
+          "source_path": "broad forms cache/libffcx_forms_91fe85a46b8cc7bbd99b58dd41678aac50d0275f.c",
+          "test_identity": "nonlinear-residual-jacobian-module-2"
+        },
+        {
+          "logical_module": "libffcx_expressions_040702513f0aa88fc5f950735ecb54826fd81f24",
+          "normalized_source_sha256": "a8e245b615de2f2d3c2abdb56d9a3f47f6a23b9dd84b9325b110ee6188cbf733",
+          "sequence_index": 6,
+          "source_path": "broad forms cache/libffcx_expressions_040702513f0aa88fc5f950735ecb54826fd81f24.c",
+          "test_identity": "fem-expression"
+        },
+        {
+          "logical_module": "libffcx_forms_26dcba108a5eac91f24be8a1cbbfd353cd38e369",
+          "normalized_source_sha256": "4155ba23d7cd3da2baac02525ee8eadfd88ca901a47c1319c8b7770587d230f5",
+          "sequence_index": 7,
+          "source_path": "cache reload proof/libffcx_forms_26dcba108a5eac91f24be8a1cbbfd353cd38e369.c",
+          "test_identity": "fresh-cache-reload-proof"
+        }
+      ]
+    },
+    "3.13": {
+      "module_count": 8,
+      "modules": [
+        {
+          "logical_module": "libffcx_forms_13300974d83b821807a0560961f617d55149bb12",
+          "normalized_source_sha256": "8eab0d2772e8e3ff463ad14fdab7a06f2879a2c5c799d3e9dd99bd514797e6d2",
+          "sequence_index": 0,
+          "source_path": "broad forms cache/libffcx_forms_13300974d83b821807a0560961f617d55149bb12.c",
+          "test_identity": "p2-poisson-module-1"
+        },
+        {
+          "logical_module": "libffcx_forms_2e73573dc550192a41da7aec19ef52e2cae5847c",
+          "normalized_source_sha256": "53b3c4671be5c86b97ae32d95e8db076b3282ff2d470d983ed1a3f1ddfbe63b1",
+          "sequence_index": 1,
+          "source_path": "broad forms cache/libffcx_forms_2e73573dc550192a41da7aec19ef52e2cae5847c.c",
+          "test_identity": "p2-poisson-module-2"
+        },
+        {
+          "logical_module": "libffcx_forms_1480081c0a0dd8613b97bfb3a8efce8d138aef97",
+          "normalized_source_sha256": "03e585cffe8f8564c966d43d026c3f816b065dc25e58c8b92b0c6e01f10f38cc",
+          "sequence_index": 2,
+          "source_path": "broad forms cache/libffcx_forms_1480081c0a0dd8613b97bfb3a8efce8d138aef97.c",
+          "test_identity": "vector-linear-elasticity"
+        },
+        {
+          "logical_module": "libffcx_forms_74c24233bc4833c1619e7708e8e8460338d1509d",
+          "normalized_source_sha256": "03c8e44566c9b6e328a1912e66166d6bd290f1053419033a8893c8845276a39e",
+          "sequence_index": 3,
+          "source_path": "broad forms cache/libffcx_forms_74c24233bc4833c1619e7708e8e8460338d1509d.c",
+          "test_identity": "cell-facet-coefficients"
+        },
+        {
+          "logical_module": "libffcx_forms_e6842bec4ad1e318e407a73eb865e2c09822ac15",
+          "normalized_source_sha256": "1baaa55f63ad15f2f8e4aee83de937dbb275ddf6de0cf108d722fd100e6af5f9",
+          "sequence_index": 4,
+          "source_path": "broad forms cache/libffcx_forms_e6842bec4ad1e318e407a73eb865e2c09822ac15.c",
+          "test_identity": "nonlinear-residual-jacobian-module-1"
+        },
+        {
+          "logical_module": "libffcx_forms_3659e83de52498a0d8cc08f3ee5b50ec6aa119cd",
+          "normalized_source_sha256": "6ebd681e4f8374c301852e8307d6b912ce2332217f52909a088ff6373af1e55f",
+          "sequence_index": 5,
+          "source_path": "broad forms cache/libffcx_forms_3659e83de52498a0d8cc08f3ee5b50ec6aa119cd.c",
+          "test_identity": "nonlinear-residual-jacobian-module-2"
+        },
+        {
+          "logical_module": "libffcx_expressions_cc8b835977d186b985b3242ef7c8f9667444874d",
+          "normalized_source_sha256": "f01fa254de460afb72ac487277824a9495a877d30b3af430781683973945b793",
+          "sequence_index": 6,
+          "source_path": "broad forms cache/libffcx_expressions_cc8b835977d186b985b3242ef7c8f9667444874d.c",
+          "test_identity": "fem-expression"
+        },
+        {
+          "logical_module": "libffcx_forms_fb22ad4922fce551aa31d0de97bee410d22dd653",
+          "normalized_source_sha256": "60387de90422a2462eb5dc065a5986ccbc61924bcded4104fab4b43fef6278e6",
+          "sequence_index": 7,
+          "source_path": "cache reload proof/libffcx_forms_fb22ad4922fce551aa31d0de97bee410d22dd653.c",
+          "test_identity": "fresh-cache-reload-proof"
+        }
+      ]
+    },
+    "3.14": {
+      "module_count": 8,
+      "modules": [
+        {
+          "logical_module": "libffcx_forms_6013a937e09a9b4f5cfc25cc89bd45440b6aa1c8",
+          "normalized_source_sha256": "745715f28186ed8c979b3c9cce9fd4e35457716b4a61e3ae22b1aed46149bdfa",
+          "sequence_index": 0,
+          "source_path": "broad forms cache/libffcx_forms_6013a937e09a9b4f5cfc25cc89bd45440b6aa1c8.c",
+          "test_identity": "p2-poisson-module-1"
+        },
+        {
+          "logical_module": "libffcx_forms_fc231f98fe5f8790b477e7219ded40af32cdf4c4",
+          "normalized_source_sha256": "ff8ea144563ea435b42d1daa10c5dd7e049827ff6267e1f69694ea5b35b2a8a0",
+          "sequence_index": 1,
+          "source_path": "broad forms cache/libffcx_forms_fc231f98fe5f8790b477e7219ded40af32cdf4c4.c",
+          "test_identity": "p2-poisson-module-2"
+        },
+        {
+          "logical_module": "libffcx_forms_5edb7cfc10a82e48211be31dc8ccb3e437ebf863",
+          "normalized_source_sha256": "f34520187348019b6a847e0302bd131cc4f88da27aaeea99f51ff6328baeecbf",
+          "sequence_index": 2,
+          "source_path": "broad forms cache/libffcx_forms_5edb7cfc10a82e48211be31dc8ccb3e437ebf863.c",
+          "test_identity": "vector-linear-elasticity"
+        },
+        {
+          "logical_module": "libffcx_forms_20119ad61dfdde186f576c0ac514168112651bfb",
+          "normalized_source_sha256": "1bfa95df4fd2073ab26e0c156b7eff43071d427f06fd7a12cf03bd36427aa75d",
+          "sequence_index": 3,
+          "source_path": "broad forms cache/libffcx_forms_20119ad61dfdde186f576c0ac514168112651bfb.c",
+          "test_identity": "cell-facet-coefficients"
+        },
+        {
+          "logical_module": "libffcx_forms_4bab796138a8bee971ba208b3e0a1bfbf550700c",
+          "normalized_source_sha256": "4af6fcc58b39b21123ba2269934ab1b81788d9d07d86ee748c31388261f77964",
+          "sequence_index": 4,
+          "source_path": "broad forms cache/libffcx_forms_4bab796138a8bee971ba208b3e0a1bfbf550700c.c",
+          "test_identity": "nonlinear-residual-jacobian-module-1"
+        },
+        {
+          "logical_module": "libffcx_forms_4d17f4e5b3671791e8005eb27ac8ed46ac58e199",
+          "normalized_source_sha256": "980e56931f80b445b0a2c5a8390091b97dfbc77f664cecf9453e2171c7a369bf",
+          "sequence_index": 5,
+          "source_path": "broad forms cache/libffcx_forms_4d17f4e5b3671791e8005eb27ac8ed46ac58e199.c",
+          "test_identity": "nonlinear-residual-jacobian-module-2"
+        },
+        {
+          "logical_module": "libffcx_expressions_4e53faefa2789145e20e0cb5ec99bec15ba89209",
+          "normalized_source_sha256": "186e502f2ca8338b34dea5bfc98d498fc4e63f6ce8b1c0a4bd038487d6d7c82f",
+          "sequence_index": 6,
+          "source_path": "broad forms cache/libffcx_expressions_4e53faefa2789145e20e0cb5ec99bec15ba89209.c",
+          "test_identity": "fem-expression"
+        },
+        {
+          "logical_module": "libffcx_forms_efd0aed2fb811254d4734d64fdfb157899f39323",
+          "normalized_source_sha256": "dbd919244e2ca0e417e7790796a22f9aa05b93facf91c70291c2391bb23fb2cd",
+          "sequence_index": 7,
+          "source_path": "cache reload proof/libffcx_forms_efd0aed2fb811254d4734d64fdfb157899f39323.c",
+          "test_identity": "fresh-cache-reload-proof"
+        }
+      ]
+    }
+  },
+  "qualified_from": {
+    "head_sha": "4542bc0acf10e8ce4a2076ce39ada65576b6b6f1",
+    "run_number": 68,
+    "workflow": "tinycc-jit"
+  },
+  "schema": 1,
+  "validation_inputs": {
+    "reference_validator_sha256": "c9593d797a519f5545dafa749ef90e1551021553ce909c6d8c972044133c962a",
+    "tinycc_validator_sha256": "dc7da6821e295e8ce9197a50895f2571743a63ab0aea42d039b16caead263ff3"
+  }
+}

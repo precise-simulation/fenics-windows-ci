@@ -42,6 +42,7 @@ def main() -> int:
 
         work = Path(work_value).resolve()
         output = Path(output_value).resolve()
+        phase5_diagnostics = output.parent / f"{output.stem}-phase5"
         phase5 = scripts / "phase5-functional-validation.py"
         phase5_run = subprocess.run(
             [
@@ -50,12 +51,25 @@ def main() -> int:
                 "--cache-dir",
                 str(work / "p5 integrated cache"),
                 "--diagnostics-dir",
-                str(output.parent / f"{output.stem}-phase5"),
+                str(phase5_diagnostics),
             ],
             check=False,
         )
         if phase5_run.returncode != 0:
             return phase5_run.returncode
+
+        corpus_evidence = scripts / "phase5-corpus-evidence.py"
+        corpus_run = subprocess.run(
+            [
+                sys.executable,
+                str(corpus_evidence),
+                "--diagnostics-dir",
+                str(phase5_diagnostics),
+            ],
+            check=False,
+        )
+        if corpus_run.returncode != 0:
+            return corpus_run.returncode
 
         phase5_mpi = scripts / "phase5-mpi-functional-validation.py"
         mpi_run = subprocess.run(

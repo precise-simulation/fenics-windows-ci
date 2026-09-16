@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,8 @@ def main() -> int:
 
         work = Path(work_value).resolve()
         output = Path(output_value).resolve()
+        phase5_env = os.environ.copy()
+        phase5_env["PYTHONHASHSEED"] = "0"
         phase5_diagnostics = output.parent / f"{output.stem}-phase5"
         phase5 = scripts / "phase5-functional-validation.py"
         phase5_run = subprocess.run(
@@ -54,6 +57,7 @@ def main() -> int:
                 str(phase5_diagnostics),
             ],
             check=False,
+            env=phase5_env,
         )
         if phase5_run.returncode != 0:
             return phase5_run.returncode
@@ -67,6 +71,7 @@ def main() -> int:
                 str(phase5_diagnostics),
             ],
             check=False,
+            env=phase5_env,
         )
         if corpus_run.returncode != 0:
             return corpus_run.returncode
@@ -82,6 +87,7 @@ def main() -> int:
                 str(output.parent / f"{output.stem}-phase5-mpi"),
             ],
             check=False,
+            env=phase5_env,
         )
         return mpi_run.returncode
 

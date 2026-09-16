@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -128,6 +129,13 @@ def main() -> int:
     parser.add_argument("--diagnostics-dir", type=Path, required=True)
     args = parser.parse_args()
 
+    python_hash_seed = os.environ.get("PYTHONHASHSEED")
+    if python_hash_seed != "0":
+        raise RuntimeError(
+            "TinyCC Phase-5 corpus evidence requires deterministic PYTHONHASHSEED=0, "
+            f"got {python_hash_seed!r}"
+        )
+
     diagnostics = args.diagnostics_dir.resolve()
     summary_path = diagnostics / "summary.json"
     if not summary_path.is_file():
@@ -201,6 +209,9 @@ def main() -> int:
             "major_minor": f"{sys.version_info.major}.{sys.version_info.minor}",
         },
         "generator_versions": _package_versions(),
+        "generation_inputs": {
+            "python_hash_seed": python_hash_seed,
+        },
         "validation_inputs": {
             "reference_validator_sha256": _sha256_file(reference_validator),
             "tinycc_validator_sha256": _sha256_file(tinycc_validator),

@@ -105,6 +105,19 @@ def windows_path_key(value: str | os.PathLike[str]) -> str:
     return ntpath.normcase(ntpath.normpath(text))
 
 
+def normalized_path_identity(
+    record: dict[str, object],
+    path_keys: tuple[str, ...],
+) -> dict[str, object]:
+    """Normalize only path-valued identity fields while retaining raw evidence."""
+    normalized = dict(record)
+    for key in path_keys:
+        value = normalized.get(key)
+        if isinstance(value, str):
+            normalized[key] = windows_path_key(value)
+    return normalized
+
+
 def required_diagnostics_key(record: dict[str, object]) -> str:
     """Return a stable identity key while preserving raw paths in evidence."""
     normalized = dict(record)
@@ -258,7 +271,15 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
 
     with runtime.activate(cache_root=cache, diagnostics_dir=diagnostics):
         active = {key: os.environ.get(key) for key in expected_active}
-        if active != expected_active:
+        active_identity = normalized_path_identity(
+            active,
+            ("FENICS_JIT_CACHE_ROOT", "FENICS_JIT_BACKEND_ROOT"),
+        )
+        expected_active_identity = normalized_path_identity(
+            expected_active,
+            ("FENICS_JIT_CACHE_ROOT", "FENICS_JIT_BACKEND_ROOT"),
+        )
+        if active_identity != expected_active_identity:
             raise RuntimeError(
                 f"rank {rank}: active JIT identity mismatch: "
                 f"expected={expected_active!r}, actual={active!r}"
@@ -291,7 +312,15 @@ def child_probe(backend: str, work: Path, output: Path) -> int:
             "activation_depth": 1,
         }
         actual_record = {key: record.get(key) for key in expected_record}
-        if actual_record != expected_record:
+        actual_record_identity = normalized_path_identity(
+            actual_record,
+            ("backend_root", "cache_root"),
+        )
+        expected_record_identity = normalized_path_identity(
+            expected_record,
+            ("backend_root", "cache_root"),
+        )
+        if actual_record_identity != expected_record_identity:
             raise RuntimeError(
                 f"rank {rank}: shared diagnostics mismatch: "
                 f"expected={expected_record!r}, actual={actual_record!r}"

@@ -1,0 +1,166 @@
+name: tinycc-phase7
+
+on:
+  workflow_run:
+    workflows: ["tinycc-jit"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Successful tinycc-jit run ID containing tinycc-phase3-package"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: tinycc-phase7-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  standalone:
+    name: Phase 7 TinyCC-only Nuitka qualification
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-2022
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Download qualified Phase-3 packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tinycc-phase3-package
+          path: phase7-package-artifact
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id || inputs.source_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Install standalone build environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: phase7-build
+          create-args: >-
+            --override-channels --strict-channel-priority
+            -c precise-simulation -c conda-forge
+            python=3.12
+            libblas=*=*openblas
+            fenics-dolfinx
+            fenics-jit-llvm-mingw
+            cffi=2.1.*
+            setuptools=84.*
+            pefile
+            nuitka=4.1.3
+            ordered-set
+            zstandard
+            c-compiler
+
+      - name: Install branch runtime and TinyCC packages
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/phase7-build"
+          $runtimePackage = Get-ChildItem phase7-package-artifact -Recurse -Filter "fenics-jit-runtime-*.conda" |
+            Select-Object -First 1
+          $tinyccPackage = Get-ChildItem phase7-package-artifact -Recurse -Filter "fenics-jit-tinycc-*.conda" |
+            Select-Object -First 1
+          if (-not $runtimePackage -or -not $tinyccPackage) {
+            throw "Phase-7 branch runtime/TinyCC package artifacts are missing"
+          }
+          & $mamba install -y -p $prefix $runtimePackage.FullName $tinyccPackage.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Phase-7 branch package install failed" }
+
+      - name: Build TinyCC-only standalone bundle
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/phase7-build"
+          ./scripts/fenicsx-nuitka.ps1 `
+            -EntryPoint "scripts/tinycc-jit/phase7-standalone.py" `
+            -OutputDir "phase7 output with spaces" `
+            -ExistingPrefix $prefix `
+            -JitBackend tinycc
+
+      - name: Run hermetic standalone proof
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/phase7-build"
+          $output = Join-Path $PWD "phase7 output with spaces"
+          $dist = Get-ChildItem -LiteralPath $output -Directory -Filter "*.dist" |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "fenicsx.exe") } |
+            Select-Object -First 1
+          if (-not $dist) { throw "Phase-7 Nuitka distribution not found" }
+
+          $llvm = Join-Path $dist.FullName "fenics-jit/backends/llvm-mingw"
+          if (Test-Path -LiteralPath $llvm) {
+            throw "LLVM-MinGW was staged into the TinyCC-only standalone bundle"
+          }
+          $forbiddenNames = @("cl.exe", "clang.exe", "gcc.exe", "g++.exe", "ld.exe")
+          $forbidden = Get-ChildItem -LiteralPath $dist.FullName -Recurse -File |
+            Where-Object { $forbiddenNames -contains $_.Name.ToLowerInvariant() }
+          if ($forbidden) {
+            throw "Standalone bundle contains forbidden host/compiler tools: $($forbidden.FullName -join ', ')"
+          }
+
+          New-Item -ItemType Directory -Force phase7-evidence | Out-Null
+          Get-ChildItem -LiteralPath $dist.FullName -Recurse -File |
+            ForEach-Object {
+              [pscustomobject]@{
+                path = $_.FullName.Substring($dist.FullName.Length + 1).Replace('\','/')
+                bytes = $_.Length
+              }
+            } |
+            Sort-Object path |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -Encoding utf8 phase7-evidence/bundle-files.json
+
+          $hidden = "$prefix-hidden"
+          if (Test-Path -LiteralPath $hidden) { Remove-Item -Recurse -Force $hidden }
+          Move-Item -LiteralPath $prefix -Destination $hidden
+          try {
+            $env:FENICS_PHASE7_BUNDLE_ROOT = $dist.FullName
+            $env:FENICS_PHASE7_ORIGINAL_PREFIX = $prefix
+            $env:FENICS_JIT_ROOT = Join-Path $dist.FullName "fenics-jit"
+            $env:FENICS_JIT_COMPILER = "tinycc"
+            $env:FENICS_JIT_VERBOSE = "1"
+
+            foreach ($name in @(
+              "CC","CXX","CPP","LD","LDSHARED","INCLUDE","LIB","LIBPATH","LIBRARY_PATH",
+              "CPATH","C_INCLUDE_PATH","CPLUS_INCLUDE_PATH","COMPILER_PATH","GCC_EXEC_PREFIX",
+              "VSINSTALLDIR","VCINSTALLDIR","VCToolsInstallDir","WindowsSdkDir",
+              "WindowsSDKVersion","UniversalCRTSdkDir","UCRTVersion","DISTUTILS_USE_SDK","MSSdk"
+            )) {
+              Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+            }
+            Get-ChildItem Env: |
+              Where-Object { $_.Name -like "VSCMD_*" } |
+              ForEach-Object { Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue }
+
+            $env:PATH = "$($dist.FullName);$env:SystemRoot\System32;$env:SystemRoot"
+            $exe = Join-Path $dist.FullName "fenicsx.exe"
+            & $exe `
+              --work-dir (Join-Path $PWD "phase7 standalone work with spaces") `
+              --output (Join-Path $PWD "phase7-evidence/phase7-standalone-summary.json")
+            if ($LASTEXITCODE -ne 0) { throw "Phase-7 standalone executable failed" }
+          } finally {
+            Move-Item -LiteralPath $hidden -Destination $prefix
+          }
+
+      - name: Upload Phase-7 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tinycc-phase7-standalone
+          path: |
+            phase7-evidence/
+            phase7 output with spaces/nuitka-report.xml
+            phase7 standalone work with spaces/diagnostics/
+          if-no-files-found: warn
+          retention-days: 14

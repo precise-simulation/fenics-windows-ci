@@ -245,6 +245,6 @@
   "schema": 1,
   "validation_inputs": {
     "reference_validator_sha256": "c9593d797a519f5545dafa749ef90e1551021553ce909c6d8c972044133c962a",
-    "tinycc_validator_sha256": "dc7da6821e295e8ce9197a50895f2571743a63ab0aea42d039b16caead263ff3"
+    "tinycc_validator_sha256": "d5b5fe8d3753713f0d6dd8454d5f7ac2cfbff6e06faa3bb1d83508438cf3b1af"
   }
 }

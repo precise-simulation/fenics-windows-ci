@@ -15,6 +15,7 @@ from types import ModuleType
 from typing import Iterator
 
 import pefile
+from cffi import FFI
 
 _REQUIRED_DLL_CHARACTERISTICS = 0x20 | 0x40 | 0x100
 _ACTIVE_RUNTIME = None
@@ -190,6 +191,149 @@ def _inspect_tinycc_pyds(cache_dirs: list[Path], diagnostics: Path) -> list[Path
     return pyds
 
 
+def _expect_input_rejection(
+    *,
+    case: str,
+    build_dir: Path,
+    diagnostics_dir: Path,
+    source_kwargs: dict[str, object],
+    expected_fragments: tuple[str, ...],
+) -> str:
+    if _ACTIVE_RUNTIME is None or _ACTIVE_CACHE_ROOT is None:
+        raise RuntimeError("TinyCC Phase-5 runtime was not initialized")
+
+    build_dir.mkdir(parents=True, exist_ok=True)
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    ffi = FFI()
+    ffi.cdef("int phase5_negative_probe(void);")
+    ffi.set_source(
+        f"_tinycc_phase5_negative_{case}",
+        "int phase5_negative_probe(void) { return 1; }\n",
+        **source_kwargs,
+    )
+
+    calls: list[str] = []
+    original_run = subprocess.run
+
+    def logged(cmd, *args, **kwargs):  # noqa: ANN001
+        calls.append(_render_command(cmd))
+        return original_run(cmd, *args, **kwargs)
+
+    message: str | None = None
+    try:
+        with _ACTIVE_RUNTIME.activate(
+            cache_root=_ACTIVE_CACHE_ROOT,
+            diagnostics_dir=diagnostics_dir,
+            verbose=True,
+        ):
+            subprocess.run = logged
+            try:
+                ffi.compile(tmpdir=str(build_dir), verbose=False)
+            finally:
+                subprocess.run = original_run
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc)
+        lowered = message.lower()
+        if not any(fragment.lower() in lowered for fragment in expected_fragments):
+            raise RuntimeError(
+                f"{case} failed for an unexpected reason: {message}"
+            ) from exc
+    finally:
+        subprocess.run = original_run
+
+    if message is None:
+        raise RuntimeError(f"{case} unexpectedly compiled")
+    if calls:
+        raise RuntimeError(
+            f"{case} reached a subprocess before adapter rejection: {calls!r}"
+        )
+    command_log = diagnostics_dir / "compiler-commands.jsonl"
+    if command_log.is_file() and command_log.read_text(encoding="utf-8").strip():
+        raise RuntimeError(f"{case} reached the TinyCC compiler command path")
+    return message
+
+
+def _validate_hostile_inputs(root: Path) -> dict[str, object]:
+    root.mkdir(parents=True, exist_ok=True)
+    inputs = root / "i"
+    inputs.mkdir(parents=True, exist_ok=True)
+
+    foreign_inputs = {
+        "msvc_lib": inputs / "x.lib",
+        "foreign_obj": inputs / "x.obj",
+        "foreign_o": inputs / "x.o",
+        "foreign_archive": inputs / "x.a",
+        "unsupported_extra_objects": inputs / "x.bin",
+    }
+    for path in foreign_inputs.values():
+        path.write_bytes(b"not a qualified TinyCC input\n")
+
+    development_library_dirs = [
+        str(root / "Microsoft Visual Studio" / "VC" / "Lib"),
+        str(root / "Windows Kits" / "10" / "Lib"),
+        str(Path(sys.prefix).resolve() / "libs"),
+    ]
+    cases: list[tuple[str, dict[str, object], tuple[str, ...]]] = [
+        (
+            "versioned_python_library",
+            {"libraries": ["python312"]},
+            ("versioned Python link input", "rejects CFFI libraries"),
+        ),
+        (
+            "unsupported_cffi_library",
+            {"libraries": ["user32"]},
+            ("rejects CFFI libraries",),
+        ),
+        (
+            "msvc_lib",
+            {"extra_objects": [str(foreign_inputs["msvc_lib"])]},
+            ("rejects extra object input",),
+        ),
+        (
+            "foreign_obj",
+            {"extra_objects": [str(foreign_inputs["foreign_obj"])]},
+            ("rejects extra object input",),
+        ),
+        (
+            "foreign_o",
+            {"extra_objects": [str(foreign_inputs["foreign_o"])]},
+            ("rejects extra object input",),
+        ),
+        (
+            "foreign_archive",
+            {"extra_objects": [str(foreign_inputs["foreign_archive"])]},
+            ("rejects extra object input",),
+        ),
+        (
+            "unsupported_extra_objects",
+            {"extra_objects": [str(foreign_inputs["unsupported_extra_objects"])]},
+            ("rejects extra_objects",),
+        ),
+        (
+            "host_development_library_dirs",
+            {"library_dirs": development_library_dirs},
+            ("rejects ambient library directories",),
+        ),
+    ]
+
+    results: dict[str, str] = {}
+    for index, (case, kwargs, expected) in enumerate(cases):
+        results[case] = _expect_input_rejection(
+            case=case,
+            build_dir=root / f"b{index}",
+            diagnostics_dir=root / f"d{index}",
+            source_kwargs=kwargs,
+            expected_fragments=expected,
+        )
+
+    return {
+        "status": "pass",
+        "all_rejected_before_subprocess": True,
+        "development_library_dirs": development_library_dirs,
+        "cases": results,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache-dir", type=Path, required=True)
@@ -217,12 +361,14 @@ def main() -> int:
     validator._inspect_pyds = _inspect_tinycc_pyds
 
     validator._serial_validation(physical_cache, diagnostics)
+    negative_inputs = _validate_hostile_inputs(diagnostics / "neg")
     summary_path = diagnostics / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["selected_backend"] = runtime.selected_backend
     summary["backend_cache_id"] = runtime.backend_cache_id
     summary["backend_root"] = str(runtime.backend_root.resolve())
     summary["physical_cache_root"] = str(physical_cache)
+    summary["negative_inputs"] = negative_inputs
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print("TinyCC Phase 5 integrated serial functional validation passed")
     return 0

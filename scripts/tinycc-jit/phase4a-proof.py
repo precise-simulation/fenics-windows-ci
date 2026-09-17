@@ -131,7 +131,7 @@ def main() -> int:
                 sys.executable,
                 str(phase6),
                 "--cache-dir",
-                str(work / "p6 benchmark cache"),
+                str(output.parent / "p6c"),
                 "--diagnostics-dir",
                 str(output.parent / f"{output.stem}-phase6"),
                 "--package-dir",

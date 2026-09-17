@@ -24,6 +24,11 @@ New-Item -ItemType Directory -Force -Path $output | Out-Null
 
 if ($ExistingPrefix) {
     $envPrefix = (Resolve-Path -LiteralPath $ExistingPrefix -ErrorAction Stop).Path
+    $mamba = if ($env:MAMBA_EXE) {
+        $env:MAMBA_EXE
+    } else {
+        (Get-Command micromamba.exe -ErrorAction Stop).Source
+    }
     Write-Host "== using existing FEniCSx prefix $envPrefix =="
 } else {
     $conda = (Get-Command conda.exe -ErrorAction Stop).Source
@@ -77,9 +82,19 @@ $python = Join-Path $envPrefix "python.exe"
 if (-not (Test-Path -LiteralPath $python)) {
     throw "Python executable missing from FEniCSx prefix: $python"
 }
-& $python -c "import nuitka, dolfinx, ffcx, cffi; print('Nuitka/FEniCSx standalone inputs available')"
+
+# Run Python through the environment runner rather than invoking python.exe
+# directly. Windows FEniCSx runtime packages rely on activation-provided DLL and
+# MPI environment state even while Nuitka is inspecting/importing modules.
+if ($ExistingPrefix) {
+    & $mamba run -p $envPrefix --no-capture-output python -c `
+        "import nuitka, ffcx, cffi; print('Nuitka/FEniCSx standalone inputs available')"
+} else {
+    & $conda run --name $environmentName --no-capture-output python -c `
+        "import nuitka, ffcx, cffi; print('Nuitka/FEniCSx standalone inputs available')"
+}
 if ($LASTEXITCODE -ne 0) {
-    throw "Existing prefix does not contain the required Nuitka/FEniCSx build inputs"
+    throw "FEniCSx prefix does not contain the required Nuitka build inputs"
 }
 
 $dllNames = @(
@@ -143,7 +158,7 @@ if ($JitBackend) {
     $nuitkaArgs += "--include-data-dir=$backendRoot=fenics-jit/backends/$JitBackend"
 
     # CFFI-generated modules require CPython development headers at runtime.
-    # Put them at the standalone prefix include location so sysconfig resolves
+    # Put them at the standalone prefix include location so sysconfig can resolve
     # them from the bundle rather than from the build environment.
     $pythonInclude = Join-Path $envPrefix "Include"
     if (-not (Test-Path -LiteralPath (Join-Path $pythonInclude "Python.h"))) {
@@ -154,8 +169,18 @@ if ($JitBackend) {
     # FFCx passes its package-owned UFCx include directory into CFFI. Make the
     # header explicit in the standalone bundle even if package-data discovery
     # changes in a future Nuitka release.
-    $ffcxRoot = (& $python -c "from pathlib import Path; import ffcx; print(Path(ffcx.__file__).resolve().parent)" |
-        Select-Object -Last 1).Trim()
+    if ($ExistingPrefix) {
+        $ffcxRoot = (& $mamba run -p $envPrefix python -c `
+            "from pathlib import Path; import ffcx; print(Path(ffcx.__file__).resolve().parent)" |
+            Select-Object -Last 1).Trim()
+    } else {
+        $ffcxRoot = (& $conda run --name $environmentName python -c `
+            "from pathlib import Path; import ffcx; print(Path(ffcx.__file__).resolve().parent)" |
+            Select-Object -Last 1).Trim()
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $ffcxRoot) {
+        throw "Could not resolve the FFCx package root"
+    }
     $ufcxHeader = Join-Path $ffcxRoot "codegeneration\ufcx.h"
     if (-not (Test-Path -LiteralPath $ufcxHeader)) {
         throw "UFCx header missing from build prefix: $ufcxHeader"
@@ -169,7 +194,11 @@ $nuitkaArgs += @(
 )
 
 Write-Host "== Nuitka build =="
-& $python -m nuitka @nuitkaArgs
+if ($ExistingPrefix) {
+    & $mamba run -p $envPrefix --no-capture-output python -m nuitka @nuitkaArgs
+} else {
+    & $conda run --name $environmentName --no-capture-output python -m nuitka @nuitkaArgs
+}
 if ($LASTEXITCODE -ne 0) { throw "Nuitka build failed" }
 
 $dist = Get-ChildItem -LiteralPath $output -Directory -Filter "*.dist" |

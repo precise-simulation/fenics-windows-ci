@@ -1,4 +1,4 @@
-"""Run Phase-4A/4B qualification plus the fresh TinyCC Phase-5 corpus."""
+"""Run Phase-4A/4B qualification plus fresh TinyCC Phase-5/6 validation."""
 
 from __future__ import annotations
 
@@ -121,7 +121,26 @@ def main() -> int:
             check=False,
             env=phase5_env,
         )
-        return mpi_run.returncode
+        if mpi_run.returncode != 0:
+            return mpi_run.returncode
+
+        phase6 = scripts / "phase6-benchmark.py"
+        package_dir = Path.cwd() / "phase4a-package-artifact"
+        phase6_run = subprocess.run(
+            [
+                sys.executable,
+                str(phase6),
+                "--cache-dir",
+                str(work / "p6 benchmark cache"),
+                "--diagnostics-dir",
+                str(output.parent / f"{output.stem}-phase6"),
+                "--package-dir",
+                str(package_dir),
+            ],
+            check=False,
+            env=phase5_env,
+        )
+        return phase6_run.returncode
 
     if mode != "llvm-mingw":
         return 0

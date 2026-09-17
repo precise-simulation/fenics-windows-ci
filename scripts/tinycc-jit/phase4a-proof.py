@@ -76,6 +76,22 @@ def main() -> int:
         if corpus_run.returncode != 0:
             return corpus_run.returncode
 
+        phase5_stress = scripts / "phase5-stress-validation.py"
+        stress_run = subprocess.run(
+            [
+                sys.executable,
+                str(phase5_stress),
+                "--work-dir",
+                str(work / "p5 integrated stress"),
+                "--output",
+                str(output.parent / f"{output.stem}-phase5-stress.json"),
+            ],
+            check=False,
+            env=phase5_env,
+        )
+        if stress_run.returncode != 0:
+            return stress_run.returncode
+
         phase5_mpi = scripts / "phase5-mpi-functional-validation.py"
         mpi_run = subprocess.run(
             [

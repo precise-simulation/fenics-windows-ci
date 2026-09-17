@@ -92,6 +92,22 @@ def main() -> int:
         if stress_run.returncode != 0:
             return stress_run.returncode
 
+        phase5_activation = scripts / "phase5-activation-validation.py"
+        activation_run = subprocess.run(
+            [
+                sys.executable,
+                str(phase5_activation),
+                "--work-dir",
+                str(work / "p5 activation validation"),
+                "--output",
+                str(output.parent / f"{output.stem}-phase5-activation.json"),
+            ],
+            check=False,
+            env=phase5_env,
+        )
+        if activation_run.returncode != 0:
+            return activation_run.returncode
+
         phase5_mpi = scripts / "phase5-mpi-functional-validation.py"
         mpi_run = subprocess.run(
             [

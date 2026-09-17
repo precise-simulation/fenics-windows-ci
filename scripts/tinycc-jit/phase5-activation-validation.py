@@ -196,8 +196,9 @@ def _failure_restoration(
     baseline_environment: dict[str, str],
     original_distribution: object,
 ) -> dict[str, object]:
-    failure_cache = tinycc.cache_root(root / "failure-cache")
-    failure_dir = root / "failure-build"
+    baseline_cwd = Path.cwd().resolve()
+    failure_cache = tinycc.cache_root(root / "fc")
+    failure_dir = root / "fb"
     ffi = FFI()
     ffi.cdef("int phase5_failure_probe(void);")
     ffi.set_source(
@@ -209,7 +210,7 @@ def _failure_restoration(
     try:
         with tinycc.activate(
             cache_root=failure_cache,
-            diagnostics_dir=root / "failure-diagnostics",
+            diagnostics_dir=root / "fd",
         ):
             ffi.compile(tmpdir=str(failure_dir), verbose=False)
     except BaseException as exc:
@@ -218,10 +219,15 @@ def _failure_restoration(
         raise RuntimeError("intentional TinyCC compilation failure unexpectedly succeeded")
 
     _assert_idle(selector, baseline_environment, original_distribution)
+    if Path.cwd().resolve() != baseline_cwd:
+        raise RuntimeError(
+            "working directory was not restored after failed compilation: "
+            f"{Path.cwd()} != {baseline_cwd}"
+        )
     recovery = _fresh_ffcx_compile(
         tinycc,
-        base_cache=root / "recovery-cache",
-        diagnostics=root / "recovery-diagnostics",
+        base_cache=root / "rc",
+        diagnostics=root / "rd",
         scale=3.25,
     )
     _assert_idle(selector, baseline_environment, original_distribution)
@@ -229,6 +235,7 @@ def _failure_restoration(
         "status": "pass",
         "failure_type": failure_type,
         "state_restored_after_failure": True,
+        "cwd_restored_after_failure": True,
         "successful_jit_after_failure": recovery,
     }
 
@@ -298,7 +305,7 @@ def main() -> int:
     failure = _failure_restoration(
         selector,
         tinycc,
-        root=work / "failure-restoration",
+        root=work / "fr",
         baseline_environment=baseline_environment,
         original_distribution=original_distribution,
     )

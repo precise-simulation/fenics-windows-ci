@@ -97,6 +97,28 @@ if ($LASTEXITCODE -ne 0) {
     throw "FEniCSx prefix does not contain the required Nuitka build inputs"
 }
 
+# Setuptools exposes several vendored dependencies (jaraco, more_itertools,
+# packaging, etc.) by adding its physical _vendor directory to sys.path.
+# Nuitka embeds Python modules and does not materialize that directory, so keep
+# its source location for explicit post-build staging when runtime CFFI support
+# is requested.
+if ($ExistingPrefix) {
+    $setuptoolsRoot = (& $mamba run -p $envPrefix python -c `
+        "from pathlib import Path; import setuptools; print(Path(setuptools.__file__).resolve().parent)" |
+        Select-Object -Last 1).Trim()
+} else {
+    $setuptoolsRoot = (& $conda run --name $environmentName python -c `
+        "from pathlib import Path; import setuptools; print(Path(setuptools.__file__).resolve().parent)" |
+        Select-Object -Last 1).Trim()
+}
+if ($LASTEXITCODE -ne 0 -or -not $setuptoolsRoot) {
+    throw "Could not resolve the setuptools package root"
+}
+$setuptoolsVendor = Join-Path $setuptoolsRoot "_vendor"
+if (-not (Test-Path -LiteralPath $setuptoolsVendor)) {
+    throw "Setuptools vendored dependency directory is missing: $setuptoolsVendor"
+}
+
 $dllNames = @(
     "dolfinx.dll",
     "basix.dll",
@@ -229,6 +251,16 @@ if ($JitBackend) {
     # owned by their original conda packages.
     Copy-Item -LiteralPath $runtimeRoot -Destination $stagedJit -Recurse -Force
     Copy-Item -LiteralPath $backendRoot -Destination $stagedBackends -Recurse -Force
+
+    # Preserve setuptools' physical vendoring contract. Its __init__.py adds
+    # <bundle>/setuptools/_vendor to sys.path, and CFFI's shim imports through
+    # that path on Python 3.12+.
+    $stagedSetuptools = Join-Path $dist.FullName "setuptools"
+    New-Item -ItemType Directory -Force -Path $stagedSetuptools | Out-Null
+    Copy-Item -LiteralPath $setuptoolsVendor -Destination $stagedSetuptools -Recurse -Force
+    if (-not (Test-Path -LiteralPath (Join-Path $stagedSetuptools "_vendor\jaraco\functools\__init__.py"))) {
+        throw "staged setuptools vendored dependencies are incomplete"
+    }
 
     if (-not (Test-Path -LiteralPath (Join-Path $stagedJit "runtime\fenics_jit_selector.py"))) {
         throw "staged common JIT runtime missing from standalone distribution"

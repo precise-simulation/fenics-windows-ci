@@ -2,11 +2,11 @@
 
 ## Status
 
-**Status:** proposed — experimental alternative to the qualified LLVM-MinGW runtime JIT path.
+**Status:** complete — Phase 7 selects **Option B: TinyCC compact standalone backend, LLVM-MinGW normal/reference runtime**.
 
-The current Windows FFCx/CFFI runtime compiler is the bundled LLVM-MinGW package. This epic investigates whether TinyCC (TCC) can provide a much smaller self-contained alternative without changing the VS2022 toolchain used to build PETSc, DOLFINx, Basix, or other native packages.
+The Windows FFCx/CFFI normal runtime compiler remains the bundled LLVM-MinGW package. This epic qualified TinyCC (TCC) as a much smaller self-contained backend without changing the VS2022 toolchain used to build PETSc, DOLFINx, Basix, or other native packages.
 
-TinyCC remains opt-in until all functional, ABI, security, performance, packaging, and licensing gates pass. LLVM-MinGW remains the reference implementation and fallback throughout this work.
+TinyCC remains explicit/opt-in for normal installs and is qualified for the compact standalone profile. No automatic fallback or default-backend switch is part of this epic; see [07-qualification-result.md](07-qualification-result.md).
 
 ## Goal
 

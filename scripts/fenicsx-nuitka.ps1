@@ -149,7 +149,8 @@ $nuitkaArgs = @(
     "--include-package-data=dolfinx",
     "--include-package-data=basix",
     "--include-package-data=petsc4py",
-    "--include-package-data=ffcx"
+    "--include-package-data=ffcx",
+    "--include-package-data=cffi"
 ) + $includeDlls
 
 if ($JitBackend) {

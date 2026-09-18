@@ -165,6 +165,10 @@ if ($JitBackend) {
     # resolves back to the shim and stack-overflows. Leave that module for the
     # package-owned PETSc.pyd loader and prime it via the package config hook.
     $nuitkaArgs += "--nofollow-import-to=petsc4py.PETSc"
+    # The excluded-module deployment guard normally turns any runtime lookup of
+    # an excluded module into ImportError. Here that lookup is intentional:
+    # petsc4py.lib.PathFinder must continue on to the staged native PETSc.pyd.
+    $nuitkaArgs += "--no-deployment-flag=excluded-module-usage"
 
     # Runtime FFCx JIT intentionally calls cffi.FFI.compile(). Nuitka 4.1.3
     # disables the CFFI recompiler by default through its anti-bloat plugin;

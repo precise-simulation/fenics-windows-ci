@@ -96,7 +96,7 @@ def _runtime_record() -> dict[str, object]:
     runtime = _load_runtime()
     config = runtime.RuntimeConfig.discover()
     record = config.diagnostic_record()
-    expected_root = Path(sys.prefix).resolve() / "Library" / "fenics-jit"
+    expected_root = Path(sys.prefix).resolve() / "Library" / "fenics-jit" / "backends" / "llvm-mingw"
     if Path(str(record["toolchain_root"])).resolve() != expected_root:
         raise RuntimeError(f"JIT helper selected wrong toolchain root: {record['toolchain_root']}")
     if record["backend"] != "mingw32" or record["crt"] != "UCRT":
@@ -104,6 +104,38 @@ def _runtime_record() -> dict[str, object]:
     if not re.match(r"(?i)^x86_64-w64-(?:mingw32|windows-gnu)$", str(record["clang_reported_target"])):
         raise RuntimeError(f"Unexpected JIT target: {record['clang_reported_target']}")
     return record
+
+
+def _runtime_identity(record: dict[str, object]) -> dict[str, object]:
+    backend = record.get("backend")
+    if isinstance(backend, dict):
+        return {
+            "selected_backend": record["selected_backend"],
+            "backend_root": record["backend_root"],
+            "backend_cache_id": record["backend_cache_id"],
+            "adapter": backend["adapter"],
+            "compiler_revision": backend["compiler_revision"],
+            "crt_identity": backend["crt_identity"],
+            "external_config_policy": backend["external_config_policy"],
+            "python_abi_definition": backend["python_abi_definition"],
+            "system_library_policy": backend["system_library_policy"],
+            "windows_abi_policy": backend["windows_abi_policy"],
+            "policy": backend.get("policy"),
+        }
+    return {
+        key: record[key]
+        for key in (
+            "backend",
+            "target",
+            "crt",
+            "clang_reported_target",
+            "toolchain_root",
+            "clang",
+            "python_include",
+            "python_import_library",
+            "ffcx_include",
+        )
+    }
 
 
 def _assert_compiler_commands(calls: list[str], record: dict[str, object], *, require_compile: bool) -> None:
@@ -128,7 +160,7 @@ def _assert_compiler_commands(calls: list[str], record: dict[str, object], *, re
 
 
 def _inspect_pyds(cache_dirs: list[Path], diagnostics: Path) -> list[Path]:
-    readobj = Path(sys.prefix) / "Library" / "fenics-jit" / "bin" / "llvm-readobj.exe"
+    readobj = Path(sys.prefix) / "Library" / "fenics-jit" / "backends" / "llvm-mingw" / "bin" / "llvm-readobj.exe"
     if not readobj.is_file():
         raise RuntimeError(f"Packaged llvm-readobj missing: {readobj}")
     pyds = sorted({path.resolve() for cache_dir in cache_dirs for path in cache_dir.rglob("*.pyd")})
@@ -385,7 +417,7 @@ def _mpi_validation(cache_root: Path, diagnostics: Path) -> None:
     _poison_compiler_environment(diagnostics)
     os.environ["FENICS_JIT_VERBOSE"] = "1"
     record = _runtime_record()
-    selected = {key: record[key] for key in ("backend", "target", "crt", "clang_reported_target", "toolchain_root", "clang", "python_include", "python_import_library", "ffcx_include")}
+    selected = _runtime_identity(record)
     gathered_config = comm.allgather(selected)
     if any(item != gathered_config[0] for item in gathered_config[1:]):
         raise RuntimeError(f"MPI ranks selected different JIT configurations: {gathered_config}")
@@ -447,7 +479,7 @@ def main() -> None:
         try:
             _mpi_validation(cache_root, diagnostics)
         except BaseException:
-            # DOLFINx\'s mpi_jit protocol can leave peer ranks blocked in a
+            # DOLFINx's mpi_jit protocol can leave peer ranks blocked in a
             # collective when one rank fails before cache publication. Abort
             # the communicator so a test failure is reported immediately
             # instead of waiting for the workflow-level timeout.

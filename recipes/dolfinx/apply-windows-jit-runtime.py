@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch DOLFINx's Windows JIT entry point to use fenics-jit-llvm-mingw."""
+"""Patch DOLFINx's Windows JIT entry point to use the shared FEniCS JIT runtime."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ from pathlib import Path
 
 @functools.cache
 def _load_fenics_windows_jit_runtime():
-    """Load the packaged Windows JIT helper without requiring PYTHONPATH."""
+    """Load the packaged Windows JIT selector without requiring PYTHONPATH."""
     if not sys.platform.startswith("win32"):
         return None
 
@@ -50,11 +50,11 @@ def _load_fenics_windows_jit_runtime():
         if configured_root
         else Path(sys.prefix) / "Library" / "fenics-jit"
     )
-    helper_path = root / "runtime" / "fenics_jit_runtime.py"
+    helper_path = root / "runtime" / "fenics_jit_selector.py"
     if not helper_path.is_file():
         raise RuntimeError(
-            "FEniCS Windows JIT runtime is missing. Expected "
-            f"{helper_path}; install fenics-jit-llvm-mingw."
+            "FEniCS Windows JIT shared runtime is missing. Expected "
+            f"{helper_path}; install fenics-jit-runtime."
         )
 
     module_name = "_fenics_windows_jit_runtime"
@@ -70,16 +70,18 @@ def _load_fenics_windows_jit_runtime():
 
 
 @contextlib.contextmanager
-def _fenics_windows_jit_runtime():
-    """Activate the packaged compiler only around one local JIT operation."""
+def _fenics_windows_jit_runtime(jit_options):
+    """Select cache/backend before one local FFCx JIT operation."""
     if not sys.platform.startswith("win32"):
         yield
         return
 
     runtime = _load_fenics_windows_jit_runtime()
-    config = runtime.RuntimeConfig.discover()
+    selection = runtime.discover_runtime()
+    cache_root = selection.cache_root(jit_options["cache_dir"])
+    jit_options["cache_dir"] = cache_root
     verbose = os.getenv("FENICS_JIT_VERBOSE", "").lower() in {"1", "true", "yes", "on"}
-    with config.activate(verbose=verbose):
+    with selection.activate(cache_root=cache_root, verbose=verbose):
         yield
 '''
     if insertion_anchor not in text:
@@ -96,9 +98,9 @@ def _fenics_windows_jit_runtime():
 
     return (r[0][0], r[1], r[2])
 """
-    compile_new = """    # Switch on type and compile, returning cffi object. On Windows the
-    # packaged runtime helper owns compiler/backend/include/library selection.
-    with _fenics_windows_jit_runtime():
+    compile_new = """    # Select the backend and its physical cache namespace before FFCx
+    # performs its first cache lookup. The shared runtime owns lifecycle state.
+    with _fenics_windows_jit_runtime(p_jit):
         if isinstance(ufl_object, ufl.Form):
             r = ffcx.codegeneration.jit.compile_forms([ufl_object], options=p_ffcx, **p_jit)
         elif isinstance(ufl_object, tuple) and isinstance(ufl_object[0], ufl.core.expr.Expr):
@@ -113,7 +115,7 @@ def _fenics_windows_jit_runtime():
     text = text.replace(compile_old, compile_new, 1)
 
     path.write_text(text, encoding="utf-8")
-    print(f"Applied Windows LLVM-MinGW JIT runtime patch: {path}")
+    print(f"Applied Windows shared JIT runtime patch: {path}")
     return path
 
 

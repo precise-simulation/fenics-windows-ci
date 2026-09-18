@@ -112,12 +112,22 @@ $dllNames = @(
     "libexpat.dll",
     "szip.dll"
 )
-$includeDlls = foreach ($dllName in $dllNames) {
-    $dllPath = Join-Path $envPrefix "Library\bin\$dllName"
-    if (-not (Test-Path -LiteralPath $dllPath)) {
-        throw "Missing channel-installed runtime DLL: $dllPath"
-    }
-    "--include-data-files=$dllPath=$dllName"
+# Nuitka's dependency scanner discovers these DLLs from the extension modules
+# when building an existing, fully resolved prefix. Adding the same binaries as
+# data files creates a fatal data-file/DLL destination conflict. Preserve the
+# legacy explicit staging for the self-created environment path only.
+$includeDlls = if ($ExistingPrefix) {
+    @()
+} else {
+    @(
+        foreach ($dllName in $dllNames) {
+            $dllPath = Join-Path $envPrefix "Library\bin\$dllName"
+            if (-not (Test-Path -LiteralPath $dllPath)) {
+                throw "Missing channel-installed runtime DLL: $dllPath"
+            }
+            "--include-data-files=$dllPath=$dllName"
+        }
+    )
 }
 
 $nuitkaArgs = @(

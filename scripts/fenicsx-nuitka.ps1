@@ -87,7 +87,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 # directly. Windows FEniCSx runtime packages rely on activation-provided DLL and
 # MPI environment state even while Nuitka is inspecting/importing modules.
 if ($ExistingPrefix) {
-    & $mamba run -p $envPrefix --no-capture-output python -c `
+    & $mamba run -p $envPrefix python -c `
         "import nuitka, ffcx, cffi; print('Nuitka/FEniCSx standalone inputs available')"
 } else {
     & $conda run --name $environmentName --no-capture-output python -c `
@@ -195,7 +195,7 @@ $nuitkaArgs += @(
 
 Write-Host "== Nuitka build =="
 if ($ExistingPrefix) {
-    & $mamba run -p $envPrefix --no-capture-output python -m nuitka @nuitkaArgs
+    & $mamba run -p $envPrefix python -m nuitka @nuitkaArgs
 } else {
     & $conda run --name $environmentName --no-capture-output python -m nuitka @nuitkaArgs
 }

@@ -314,6 +314,13 @@ class RuntimeConfig:
                     # CFFI's temporary Distribution has no package metadata that
                     # needs ambient setup.cfg/pydistutils.cfg input. Ignore such
                     # files completely and own build_ext selection here.
+                    #
+                    # CFFI has already changed into its tmpdir before this hook.
+                    # setuptools' MinGW compiler emits object files below a
+                    # relative Release directory on Windows but can fail to
+                    # create that directory itself. Create it at the exact
+                    # build cwd before build_ext is configured.
+                    Path("Release").mkdir(parents=True, exist_ok=True)
                     options = self.get_option_dict("build_ext")
                     options.clear()
                     options["compiler"] = ("fenics-jit-runtime", config.backend)

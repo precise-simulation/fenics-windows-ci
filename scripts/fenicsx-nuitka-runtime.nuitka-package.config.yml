@@ -1,0 +1,19 @@
+# Nuitka 4.1.3 knows that setuptools exposes its _vendor directory as a
+# global import path, but the distutils alias can be analyzed before that path
+# is active when setuptools is included as a root package. Apply the same
+# compile-time import path directly to both distutils package identities so
+# absolute imports such as jaraco.functools and more_itertools are compiled
+# into the standalone application rather than discovered dynamically at run
+# time.
+---
+- module-name: 'distutils'
+  import-hacks:
+    - global-sys-path:
+        - '../_vendor'
+      when: 'standalone and win32'
+
+- module-name: 'setuptools._distutils'
+  import-hacks:
+    - global-sys-path:
+        - '../_vendor'
+      when: 'standalone and win32'

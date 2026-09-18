@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/tinycc-phase7.yml"
       - "scripts/fenicsx-nuitka.ps1"
+      - "scripts/fenicsx-nuitka-runtime.nuitka-package.config.yml"
       - "scripts/tinycc-phase7-standalone.py"
       - "recipes/fenics-jit-runtime/**"
       - "recipes/fenics-jit-tinycc/**"

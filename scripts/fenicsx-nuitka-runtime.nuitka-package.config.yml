@@ -46,6 +46,23 @@
           import os as _fenics_os
           import sys as _fenics_sys
           import petsc4py as _fenics_petsc4py
+          import petsc4py.lib as _fenics_petsc4py_lib
+
+          _fenics_petsc4py.lib = _fenics_petsc4py_lib
+          _fenics_bundle_root = _fenics_os.path.dirname(
+              _fenics_os.path.dirname(_fenics_petsc4py.__file__)
+          )
+          _fenics_original_get_config = _fenics_petsc4py.get_config
+
+          def _fenics_bundle_get_config(
+              _original=_fenics_original_get_config,
+              _root=_fenics_bundle_root,
+          ):
+              _config = dict(_original())
+              _config['PETSC_DIR'] = _root
+              return _config
+
+          _fenics_petsc4py.get_config = _fenics_bundle_get_config
 
           _fenics_petsc_path = _fenics_os.path.join(
               _fenics_os.path.dirname(_fenics_petsc4py.__file__),
@@ -75,9 +92,13 @@
           del _fenics_spec
           del _fenics_petsc
           del _fenics_petsc_path
+          del _fenics_bundle_get_config
+          del _fenics_bundle_root
           del _fenics_import_util
           del _fenics_machinery
+          del _fenics_original_get_config
           del _fenics_os
           del _fenics_petsc4py
+          del _fenics_petsc4py_lib
           del _fenics_sys
       when: 'standalone and win32'

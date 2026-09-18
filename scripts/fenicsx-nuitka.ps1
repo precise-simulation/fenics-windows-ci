@@ -264,6 +264,27 @@ if (-not $dist) {
 }
 Write-Host "== standalone distribution $($dist.FullName) =="
 
+# DOLFINx resolves PETSc for its ctypes helpers via
+# petsc4py.get_config()["PETSC_DIR"] and the Windows <PETSC_DIR>/bin layout.
+# The post-load hook points PETSC_DIR at the standalone bundle root, so mirror
+# the already bundled libpetsc.dll into bin without changing its bytes.
+$bundledPetsc = Join-Path $dist.FullName "libpetsc.dll"
+if (-not (Test-Path -LiteralPath $bundledPetsc -PathType Leaf)) {
+    throw "Nuitka standalone distribution is missing libpetsc.dll"
+}
+$stagedPetscBin = Join-Path $dist.FullName "bin"
+New-Item -ItemType Directory -Force -Path $stagedPetscBin | Out-Null
+$stagedPetscDll = Join-Path $stagedPetscBin "libpetsc.dll"
+$bundledPetscHash = (Get-FileHash -LiteralPath $bundledPetsc -Algorithm SHA256).Hash
+if (Test-Path -LiteralPath $stagedPetscDll -PathType Leaf) {
+    $stagedPetscHash = (Get-FileHash -LiteralPath $stagedPetscDll -Algorithm SHA256).Hash
+    if ($stagedPetscHash -ne $bundledPetscHash) {
+        throw "bundle/bin/libpetsc.dll differs from the Nuitka-staged PETSc runtime"
+    }
+} else {
+    Copy-Item -LiteralPath $bundledPetsc -Destination $stagedPetscDll
+}
+
 if ($JitBackend) {
     # The petsc4py bootstrap hook above depends on the native extension
     # remaining a physical file so PathFinder can load it dynamically.

@@ -159,6 +159,11 @@ if ($JitBackend) {
     }
     $nuitkaArgs += "--user-package-configuration-file=$nuitkaRuntimeConfig"
 
+    # Runtime FFCx JIT intentionally calls cffi.FFI.compile(). Nuitka 4.1.3
+    # disables the CFFI recompiler by default through its anti-bloat plugin;
+    # opt this standalone JIT build back into the supported recompiler path.
+    $nuitkaArgs += "--noinclude-custom-mode=cffi_recompiler:allow"
+
     # Nuitka 4.1.3's setuptools import hack discovers most top-level vendored
     # packages, but jaraco.functools is still omitted from the frozen module
     # graph. Put the vendor root on Python's initial search path and force this

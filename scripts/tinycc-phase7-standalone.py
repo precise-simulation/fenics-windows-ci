@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import importlib.util
 import json
 import math
@@ -16,6 +17,16 @@ import pefile
 from cffi import FFI
 
 REQUIRED_DLL_CHARACTERISTICS = 0x40 | 0x20 | 0x100
+
+
+def _progress(work: Path, stage: str) -> None:
+    diagnostics = work / "diagnostics"
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    record = {"stage": stage, "time": time.time()}
+    with (diagnostics / "phase7-progress.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.flush()
+    print(f"PHASE7: {stage}", flush=True)
 
 
 def _load_python_module(name: str, path: Path):
@@ -122,14 +133,33 @@ def _minimal_cffi(runtime, work: Path) -> tuple[Path, str]:
 
 
 def _run_forms(work: Path) -> dict[str, object]:
+    _progress(work, "forms:import-numpy")
     import numpy as np
-    import ufl
-    from dolfinx import fem, mesh
-    from dolfinx.fem.petsc import LinearProblem
-    from mpi4py import MPI
-    from petsc4py import PETSc
+    _progress(work, "forms:import-numpy:ok")
 
+    _progress(work, "forms:import-ufl")
+    import ufl
+    _progress(work, "forms:import-ufl:ok")
+
+    _progress(work, "forms:import-dolfinx")
+    from dolfinx import fem, mesh
+    _progress(work, "forms:import-dolfinx:ok")
+
+    _progress(work, "forms:import-linear-problem")
+    from dolfinx.fem.petsc import LinearProblem
+    _progress(work, "forms:import-linear-problem:ok")
+
+    _progress(work, "forms:import-mpi4py")
+    from mpi4py import MPI
+    _progress(work, "forms:import-mpi4py:ok")
+
+    _progress(work, "forms:import-petsc4py")
+    from petsc4py import PETSc
+    _progress(work, "forms:import-petsc4py:ok")
+
+    _progress(work, "forms:create-mesh")
     domain = mesh.create_unit_square(MPI.COMM_SELF, 12, 12)
+    _progress(work, "forms:create-mesh:ok")
     V = fem.functionspace(domain, ("Lagrange", 1))
     u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
     fdim = domain.topology.dim - 1
@@ -142,6 +172,7 @@ def _run_forms(work: Path) -> dict[str, object]:
     a = ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
     L = fem.Constant(domain, PETSc.ScalarType(1.0)) * v * ufl.dx
 
+    _progress(work, "forms:construct-poisson")
     started = time.perf_counter()
     problem = LinearProblem(
         a,
@@ -151,7 +182,10 @@ def _run_forms(work: Path) -> dict[str, object]:
         petsc_options_prefix="phase7_standalone_",
         jit_options={"cache_dir": cache},
     )
+    _progress(work, "forms:construct-poisson:ok")
+    _progress(work, "forms:solve-poisson")
     solution = problem.solve()
+    _progress(work, "forms:solve-poisson:ok")
     first_s = time.perf_counter() - started
     norm = float(np.linalg.norm(solution.x.array))
     if not math.isfinite(norm) or norm <= 0:
@@ -288,21 +322,27 @@ def main() -> int:
 
     work = args.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=True)
+    faulthandler.enable(all_threads=True)
     diagnostics = work / "diagnostics"
     diagnostics.mkdir(parents=True, exist_ok=True)
     os.environ["TEMP"] = str(diagnostics)
     os.environ["TMP"] = str(diagnostics)
     tempfile.tempdir = str(diagnostics)
 
+    _progress(work, "selector:load")
     selector = _load_selector(jit_root)
     runtime = selector.discover_runtime()
+    _progress(work, "selector:load:ok")
     if runtime.selected_backend != "tinycc":
         raise RuntimeError(f"unexpected standalone backend: {runtime.selected_backend}")
     if not runtime.backend_root.resolve().is_relative_to(bundle):
         raise RuntimeError(f"TinyCC backend escaped bundle: {runtime.backend_root}")
 
+    _progress(work, "cffi:minimal")
     cffi_module, rejection = _minimal_cffi(runtime, work)
+    _progress(work, "cffi:minimal:ok")
     forms = _run_forms(work)
+    _progress(work, "forms:ok")
     commands = _read_commands(diagnostics)
     hermetic = _assert_hermetic_commands(
         commands, bundle=bundle, original_prefix=original_prefix

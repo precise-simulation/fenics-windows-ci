@@ -45,9 +45,12 @@
           import importlib.util as _fenics_import_util
           import os as _fenics_os
           import sys as _fenics_sys
+          import petsc4py as _fenics_petsc4py
 
           _fenics_petsc_path = _fenics_os.path.join(
-              _fenics_os.path.dirname(__file__), 'lib', 'PETSc.pyd'
+              _fenics_os.path.dirname(_fenics_petsc4py.__file__),
+              'lib',
+              'PETSc.pyd',
           )
           if not _fenics_os.path.isfile(_fenics_petsc_path):
               raise ImportError(
@@ -67,7 +70,7 @@
           _fenics_sys.modules['petsc4py.PETSc'] = _fenics_petsc
           _fenics_loader.exec_module(_fenics_petsc)
           _fenics_petsc._initialize()
-          PETSc = _fenics_petsc
+          _fenics_petsc4py.PETSc = _fenics_petsc
           del _fenics_loader
           del _fenics_spec
           del _fenics_petsc
@@ -75,5 +78,6 @@
           del _fenics_import_util
           del _fenics_machinery
           del _fenics_os
+          del _fenics_petsc4py
           del _fenics_sys
       when: 'standalone and win32'

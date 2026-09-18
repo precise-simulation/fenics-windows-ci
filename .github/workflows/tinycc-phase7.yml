@@ -157,6 +157,22 @@ jobs:
               --work-dir (Join-Path $PWD "phase7 standalone work with spaces") `
               --output (Join-Path $PWD "phase7-evidence/phase7-standalone-summary.json")
             if ($LASTEXITCODE -ne 0) { throw "Phase-7 standalone executable failed" }
+
+            $mpiexec = Join-Path $dist.FullName "mpiexec.exe"
+            if (-not (Test-Path -LiteralPath $mpiexec -PathType Leaf)) {
+              throw "Phase-7 standalone bundle is missing mpiexec.exe"
+            }
+            & $mpiexec -localonly -n 2 `
+              -env PATH $env:PATH `
+              -env FENICS_PHASE7_BUNDLE_ROOT $dist.FullName `
+              -env FENICS_PHASE7_ORIGINAL_PREFIX $prefix `
+              -env FENICS_JIT_ROOT $env:FENICS_JIT_ROOT `
+              -env FENICS_JIT_COMPILER tinycc `
+              $exe `
+              --mpi-child `
+              --work-dir (Join-Path $PWD "phase7 standalone mpi work with spaces") `
+              --output (Join-Path $PWD "phase7-evidence/phase7-standalone-mpi-summary.json")
+            if ($LASTEXITCODE -ne 0) { throw "Phase-7 standalone MPI proof failed" }
           } finally {
             Move-Item -LiteralPath $hidden -Destination $prefix
           }
@@ -170,5 +186,6 @@ jobs:
             phase7-evidence/
             phase7 output with spaces/nuitka-report.xml
             phase7 standalone work with spaces/diagnostics/
+            phase7 standalone mpi work with spaces/diagnostics/
           if-no-files-found: warn
           retention-days: 14

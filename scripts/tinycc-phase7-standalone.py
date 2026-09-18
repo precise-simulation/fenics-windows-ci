@@ -11,6 +11,7 @@ import os
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 
 import pefile
@@ -288,10 +289,133 @@ def _assert_hermetic_commands(
     }
 
 
+
+def _run_mpi_child(runtime, work: Path, output: Path, bundle: Path, original_prefix: Path) -> int:
+    import ufl
+    from dolfinx import fem, mesh
+    from dolfinx.jit import ffcx_jit
+    from mpi4py import MPI
+    from petsc4py import PETSc
+
+    comm = MPI.COMM_WORLD
+    try:
+        if comm.size != 2:
+            raise RuntimeError(f"Phase 7 standalone MPI proof requires exactly 2 ranks, got {comm.size}")
+
+        identity = {
+            "selected_backend": runtime.selected_backend,
+            "backend_cache_id": runtime.backend_cache_id,
+            "backend_root": str(runtime.backend_root.resolve()),
+        }
+        identities = comm.allgather(identity)
+        if any(item != identities[0] for item in identities[1:]):
+            raise RuntimeError(f"standalone MPI ranks selected different JIT runtimes: {identities!r}")
+
+        cache = runtime.cache_root(work / "mpi ffcx cache with spaces")
+        if " " not in str(cache):
+            raise RuntimeError(f"standalone MPI cache path must contain spaces: {cache}")
+
+        diagnostics = work / "diagnostics" / "mpi" / f"rank-{comm.rank}"
+        diagnostics.mkdir(parents=True, exist_ok=True)
+
+        domain = mesh.create_unit_square(comm, 3, 3)
+        V = fem.functionspace(domain, ("Lagrange", 2))
+        u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
+        beta = fem.Constant(domain, PETSc.ScalarType(4.375))
+        mpi_form = (
+            ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
+            + beta * u * v * ufl.dx
+            + beta * u * v * ufl.ds
+        )
+
+        with runtime.activate(cache_root=cache, diagnostics_dir=diagnostics):
+            ffcx_jit(
+                comm,
+                mpi_form,
+                jit_options={"cache_dir": cache, "cffi_verbose": True},
+            )
+
+        records = _read_commands(diagnostics)
+        compile_counts = comm.allgather(len(records))
+        if compile_counts[0] == 0:
+            raise RuntimeError("standalone MPI rank 0 did not compile the fresh JIT form")
+        if compile_counts[1] != 0:
+            raise RuntimeError(
+                f"standalone MPI non-root rank started an independent compile: {compile_counts}"
+            )
+
+        hermetic = None
+        if comm.rank == 0:
+            hermetic = _assert_hermetic_commands(
+                records,
+                bundle=bundle,
+                original_prefix=original_prefix,
+            )
+        elif records:
+            raise RuntimeError(f"standalone MPI rank 1 captured compiler commands: {records!r}")
+
+        comm.Barrier()
+        modules = sorted(cache.rglob("*.pyd"))
+        visible = comm.allgather([path.name for path in modules])
+        if not visible[0] or any(item != visible[0] for item in visible[1:]):
+            raise RuntimeError(
+                f"standalone MPI ranks do not see the same JIT cache artifacts: {visible!r}"
+            )
+
+        rank_record = {
+            "rank": comm.rank,
+            "compile_commands": len(records),
+            "cache_modules": [str(path.resolve()) for path in modules],
+            "runtime": identity,
+        }
+        (diagnostics / "rank-summary.json").write_text(
+            json.dumps(rank_record, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        comm.Barrier()
+
+        if comm.rank == 0:
+            pe_records = [_inspect_pe(path) for path in modules]
+            summary = {
+                "schema": 1,
+                "kind": "tinycc-phase7-standalone-mpi-qualification",
+                "status": "pass",
+                "ranks": comm.size,
+                "bundle_root": str(bundle),
+                "original_prefix": str(original_prefix),
+                "original_prefix_accessible": original_prefix.exists(),
+                "selected_backend": runtime.selected_backend,
+                "backend_cache_id": runtime.backend_cache_id,
+                "cache_root": str(cache),
+                "compile_commands_by_rank": compile_counts,
+                "cache_modules_by_rank": visible,
+                "generated_pyd_count": len(modules),
+                "generated_pyd": [str(path.resolve()) for path in modules],
+                "compiler_hermeticity": hermetic,
+                "pe": pe_records,
+            }
+            output = output.resolve()
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                json.dumps(summary, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            print(json.dumps(summary, indent=2, sort_keys=True), flush=True)
+        comm.Barrier()
+        return 0
+    except BaseException:
+        traceback.print_exc()
+        sys.stderr.flush()
+        try:
+            comm.Abort(1)
+        finally:
+            os._exit(1)
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--work-dir", type=Path, default=Path("phase7 standalone work"))
     parser.add_argument("--output", type=Path, default=Path("phase7-standalone-summary.json"))
+    parser.add_argument("--mpi-child", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     bundle = _bundle_root()
@@ -328,6 +452,15 @@ def main() -> int:
     os.environ["TEMP"] = str(diagnostics)
     os.environ["TMP"] = str(diagnostics)
     tempfile.tempdir = str(diagnostics)
+
+    if args.mpi_child:
+        selector = _load_selector(jit_root)
+        runtime = selector.discover_runtime()
+        if runtime.selected_backend != "tinycc":
+            raise RuntimeError(f"unexpected standalone backend: {runtime.selected_backend}")
+        if not runtime.backend_root.resolve().is_relative_to(bundle):
+            raise RuntimeError(f"TinyCC backend escaped bundle: {runtime.backend_root}")
+        return _run_mpi_child(runtime, work, args.output, bundle, original_prefix)
 
     _progress(work, "selector:load")
     selector = _load_selector(jit_root)

@@ -157,6 +157,16 @@ if ($JitBackend) {
     }
     $nuitkaArgs += "--user-package-configuration-file=$nuitkaRuntimeConfig"
 
+    # Nuitka 4.1.3's setuptools import hack discovers most top-level vendored
+    # packages, but jaraco.functools is still omitted from the frozen module
+    # graph. Put the vendor root on Python's initial search path and force this
+    # one package as a root so CFFI/setuptools can import it at runtime.
+    $setuptoolsVendor = Join-Path $envPrefix "Lib\site-packages\setuptools\_vendor"
+    if (-not (Test-Path -LiteralPath (Join-Path $setuptoolsVendor "jaraco\functools\__init__.py"))) {
+        throw "Setuptools jaraco.functools vendor package is missing: $setuptoolsVendor"
+    }
+    $nuitkaArgs += "--include-package=jaraco.functools"
+
     $jitRoot = Join-Path $envPrefix "Library\fenics-jit"
     $runtimeRoot = Join-Path $jitRoot "runtime"
     $backendRoot = Join-Path $jitRoot "backends\$JitBackend"
@@ -208,12 +218,29 @@ $nuitkaArgs += @(
 )
 
 Write-Host "== Nuitka build =="
-if ($ExistingPrefix) {
-    & $mamba run -p $envPrefix python -m nuitka @nuitkaArgs
-} else {
-    & $conda run --name $environmentName --no-capture-output python -m nuitka @nuitkaArgs
+$previousPythonPath = $env:PYTHONPATH
+try {
+    if ($JitBackend) {
+        $env:PYTHONPATH = if ($previousPythonPath) {
+            "$setuptoolsVendor$([IO.Path]::PathSeparator)$previousPythonPath"
+        } else {
+            $setuptoolsVendor
+        }
+    }
+
+    if ($ExistingPrefix) {
+        & $mamba run -p $envPrefix python -m nuitka @nuitkaArgs
+    } else {
+        & $conda run --name $environmentName --no-capture-output python -m nuitka @nuitkaArgs
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Nuitka build failed" }
+} finally {
+    if ($null -eq $previousPythonPath) {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONPATH = $previousPythonPath
+    }
 }
-if ($LASTEXITCODE -ne 0) { throw "Nuitka build failed" }
 
 $dist = Get-ChildItem -LiteralPath $output -Directory -Filter "*.dist" |
     Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "fenicsx.exe") } |

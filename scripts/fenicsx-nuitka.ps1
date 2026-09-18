@@ -161,11 +161,9 @@ if ($JitBackend) {
         throw "Requested FEniCS JIT backend missing: $backendRoot"
     }
 
-    # Stage common runtime and exactly one backend. This keeps backend ownership
-    # independent and permits TinyCC-only bundles even when the build prefix also
-    # contains LLVM-MinGW because of the normal fenics-dolfinx dependency.
-    $nuitkaArgs += "--include-data-dir=$runtimeRoot=fenics-jit/runtime"
-    $nuitkaArgs += "--include-data-dir=$backendRoot=fenics-jit/backends/$JitBackend"
+    # Keep common runtime and backend ownership independent. Python source files
+    # and compiler executables are intentionally copied into the finished .dist
+    # tree below because Nuitka filters those file types from --include-data-dir.
 
     # CFFI-generated modules require CPython development headers at runtime.
     # Put them at the standalone prefix include location so sysconfig can resolve
@@ -221,8 +219,22 @@ Write-Host "== standalone distribution $($dist.FullName) =="
 
 if ($JitBackend) {
     $stagedJit = Join-Path $dist.FullName "fenics-jit"
+    $stagedBackends = Join-Path $stagedJit "backends"
+    New-Item -ItemType Directory -Force -Path $stagedJit, $stagedBackends | Out-Null
+
+    # Nuitka treats .py and .exe as code/binaries rather than ordinary data and
+    # filters them from --include-data-dir. Stage the package-owned JIT payload
+    # explicitly after the standalone tree is created so tcc.exe, the selector,
+    # adapters, metadata, headers, libraries, and licenses remain byte-for-byte
+    # owned by their original conda packages.
+    Copy-Item -LiteralPath $runtimeRoot -Destination $stagedJit -Recurse -Force
+    Copy-Item -LiteralPath $backendRoot -Destination $stagedBackends -Recurse -Force
+
     if (-not (Test-Path -LiteralPath (Join-Path $stagedJit "runtime\fenics_jit_selector.py"))) {
         throw "staged common JIT runtime missing from standalone distribution"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $stagedJit "backends\$JitBackend\tcc.exe")) -and $JitBackend -eq "tinycc") {
+        throw "staged TinyCC executable missing from standalone distribution"
     }
     if (-not (Test-Path -LiteralPath (Join-Path $stagedJit "backends\$JitBackend"))) {
         throw "staged JIT backend missing from standalone distribution"

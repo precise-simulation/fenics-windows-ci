@@ -132,7 +132,7 @@ def _minimal_cffi(runtime, work: Path) -> tuple[Path, str]:
     return output, rejected
 
 
-def _run_forms(work: Path) -> dict[str, object]:
+def _run_forms(work: Path, cache: Path) -> dict[str, object]:
     _progress(work, "forms:import-numpy")
     import numpy as np
     _progress(work, "forms:import-numpy:ok")
@@ -168,7 +168,6 @@ def _run_forms(work: Path) -> dict[str, object]:
     )
     bc = fem.dirichletbc(0.0, fem.locate_dofs_topological(V, fdim, facets), V)
 
-    cache = work / "ffcx cache with spaces"
     a = ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
     L = fem.Constant(domain, PETSc.ScalarType(1.0)) * v * ufl.dx
 
@@ -229,6 +228,7 @@ def _run_forms(work: Path) -> dict[str, object]:
 
     modules = sorted(cache.rglob("*.pyd"))
     return {
+        "cache_root": str(cache.resolve()),
         "solution_norm": norm,
         "first_use_s": first_s,
         "cache_reuse_s": second_s,
@@ -341,7 +341,12 @@ def main() -> int:
     _progress(work, "cffi:minimal")
     cffi_module, rejection = _minimal_cffi(runtime, work)
     _progress(work, "cffi:minimal:ok")
-    forms = _run_forms(work)
+    forms_cache = runtime.cache_root(work / "ffcx cache with spaces")
+    with runtime.activate(
+        cache_root=forms_cache,
+        diagnostics_dir=diagnostics / "forms",
+    ):
+        forms = _run_forms(work, forms_cache)
     _progress(work, "forms:ok")
     commands = _read_commands(diagnostics)
     hermetic = _assert_hermetic_commands(

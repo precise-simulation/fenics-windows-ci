@@ -258,6 +258,56 @@ if (-not $dist) {
 }
 Write-Host "== standalone distribution $($dist.FullName) =="
 
+# Intel MPI loads part of its runtime dynamically, so Nuitka's PE dependency
+# scan only sees impi.dll and can omit package-owned fabric/launcher binaries.
+# Stage every DLL/EXE owned by the installed impi_rt package into the .dist root.
+# Keep Nuitka-owned files when they are byte-identical and reject collisions.
+$impiMeta = Get-ChildItem -LiteralPath (Join-Path $envPrefix "conda-meta") `
+    -Filter "impi_rt-*.json" -File | Select-Object -First 1
+if (-not $impiMeta) {
+    throw "installed impi_rt conda metadata was not found"
+}
+$impiRecord = Get-Content -LiteralPath $impiMeta.FullName -Raw | ConvertFrom-Json
+$impiRuntimeFiles = @(
+    $impiRecord.files |
+        Where-Object {
+            $extension = [IO.Path]::GetExtension([string]$_).ToLowerInvariant()
+            $extension -eq ".dll" -or $extension -eq ".exe"
+        }
+)
+if (-not $impiRuntimeFiles) {
+    throw "impi_rt metadata contains no runtime DLL/EXE payload"
+}
+
+$stagedImpi = @()
+foreach ($relative in $impiRuntimeFiles) {
+    $relativeText = [string]$relative
+    $source = Join-Path $envPrefix ($relativeText -replace '/', '\\')
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "impi_rt-owned runtime file is missing from prefix: $relativeText"
+    }
+    $destination = Join-Path $dist.FullName ([IO.Path]::GetFileName($source))
+    $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+    if (Test-Path -LiteralPath $destination -PathType Leaf) {
+        $destinationHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($destinationHash -ne $sourceHash) {
+            throw "impi_rt runtime collision for $destination"
+        }
+    } else {
+        Copy-Item -LiteralPath $source -Destination $destination
+    }
+    $stagedImpi += [pscustomobject]@{
+        package_path = $relativeText.Replace('\\','/')
+        bundle_name = [IO.Path]::GetFileName($destination)
+        bytes = (Get-Item -LiteralPath $destination).Length
+        sha256 = $sourceHash
+    }
+}
+$stagedImpi |
+    Sort-Object package_path |
+    ConvertTo-Json -Depth 4 |
+    Set-Content -LiteralPath (Join-Path $dist.FullName "impi-runtime-files.json") -Encoding utf8
+
 if ($JitBackend) {
     $stagedJit = Join-Path $dist.FullName "fenics-jit"
     $stagedBackends = Join-Path $stagedJit "backends"

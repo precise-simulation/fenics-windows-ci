@@ -33,14 +33,47 @@
 # petsc4py's public PETSc.py module is a bootstrap shim that asks
 # petsc4py.lib to load the native extension from petsc4py/lib/PETSc.pyd.
 # When Nuitka freezes that shim as petsc4py.PETSc, the dynamic loader resolves
-# back to the frozen shim and recurses. The build excludes that shim separately;
-# prime the normal package attribute with the package-owned native extension.
+# back to the frozen shim and recurses. The build excludes that shim separately.
+# Nuitka's frozen PathFinder does not discover the physical PETSc.pyd reliably,
+# so load that known bundle-local extension explicitly and publish it under the
+# normal petsc4py.PETSc name before DOLFINx imports it.
 - module-name: 'petsc4py'
   implicit-imports:
     - post-import-code:
         - |
-          from petsc4py.lib import ImportPETSc as _fenics_import_petsc
-          PETSc = _fenics_import_petsc()
-          PETSc._initialize()
-          del _fenics_import_petsc
+          import importlib.machinery as _fenics_machinery
+          import importlib.util as _fenics_import_util
+          import os as _fenics_os
+          import sys as _fenics_sys
+
+          _fenics_petsc_path = _fenics_os.path.join(
+              _fenics_os.path.dirname(__file__), 'lib', 'PETSc.pyd'
+          )
+          if not _fenics_os.path.isfile(_fenics_petsc_path):
+              raise ImportError(
+                  f'bundle-local petsc4py PETSc extension missing: {_fenics_petsc_path}'
+              )
+          _fenics_loader = _fenics_machinery.ExtensionFileLoader(
+              'petsc4py.PETSc', _fenics_petsc_path
+          )
+          _fenics_spec = _fenics_import_util.spec_from_file_location(
+              'petsc4py.PETSc', _fenics_petsc_path, loader=_fenics_loader
+          )
+          if _fenics_spec is None:
+              raise ImportError(
+                  f'cannot create petsc4py PETSc extension spec: {_fenics_petsc_path}'
+              )
+          _fenics_petsc = _fenics_import_util.module_from_spec(_fenics_spec)
+          _fenics_sys.modules['petsc4py.PETSc'] = _fenics_petsc
+          _fenics_loader.exec_module(_fenics_petsc)
+          _fenics_petsc._initialize()
+          PETSc = _fenics_petsc
+          del _fenics_loader
+          del _fenics_spec
+          del _fenics_petsc
+          del _fenics_petsc_path
+          del _fenics_import_util
+          del _fenics_machinery
+          del _fenics_os
+          del _fenics_sys
       when: 'standalone and win32'

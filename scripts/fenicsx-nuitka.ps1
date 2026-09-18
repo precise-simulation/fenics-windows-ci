@@ -160,6 +160,12 @@ if ($JitBackend) {
     }
     $nuitkaArgs += "--user-package-configuration-file=$nuitkaRuntimeConfig"
 
+    # petsc4py/PETSc.py is only a bootstrap shim. If Nuitka freezes it under
+    # the public petsc4py.PETSc name, petsc4py's dynamic extension loader
+    # resolves back to the shim and stack-overflows. Leave that module for the
+    # package-owned PETSc.pyd loader and prime it via the package config hook.
+    $nuitkaArgs += "--nofollow-import-to=petsc4py.PETSc"
+
     # Runtime FFCx JIT intentionally calls cffi.FFI.compile(). Nuitka 4.1.3
     # disables the CFFI recompiler by default through its anti-bloat plugin;
     # opt this standalone JIT build back into the supported recompiler path.
@@ -257,6 +263,28 @@ if (-not $dist) {
     throw "Nuitka standalone distribution containing fenicsx.exe was not found under $output"
 }
 Write-Host "== standalone distribution $($dist.FullName) =="
+
+if ($JitBackend) {
+    # The petsc4py bootstrap hook above depends on the native extension
+    # remaining a physical file so PathFinder can load it dynamically.
+    $sourcePetsc4py = Get-ChildItem -LiteralPath (Join-Path $envPrefix "Lib\site-packages\petsc4py\lib") `
+        -Filter "PETSc*.pyd" -File | Select-Object -First 1
+    if (-not $sourcePetsc4py) {
+        throw "petsc4py native PETSc extension was not found in the build prefix"
+    }
+    $stagedPetsc4pyDir = Join-Path $dist.FullName "petsc4py\lib"
+    New-Item -ItemType Directory -Force -Path $stagedPetsc4pyDir | Out-Null
+    $stagedPetsc4py = Join-Path $stagedPetsc4pyDir $sourcePetsc4py.Name
+    $sourcePetsc4pyHash = (Get-FileHash -LiteralPath $sourcePetsc4py.FullName -Algorithm SHA256).Hash
+    if (Test-Path -LiteralPath $stagedPetsc4py -PathType Leaf) {
+        $stagedPetsc4pyHash = (Get-FileHash -LiteralPath $stagedPetsc4py -Algorithm SHA256).Hash
+        if ($stagedPetsc4pyHash -ne $sourcePetsc4pyHash) {
+            throw "Nuitka-staged petsc4py PETSc extension differs from the package-owned extension"
+        }
+    } else {
+        Copy-Item -LiteralPath $sourcePetsc4py.FullName -Destination $stagedPetsc4py
+    }
+}
 
 # Intel MPI loads part of its runtime dynamically, so Nuitka's PE dependency
 # scan only sees impi.dll and can omit package-owned fabric/launcher binaries.

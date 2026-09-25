@@ -61,11 +61,20 @@ cat > "$LLVM_SRC/.git/info/sparse-checkout" <<'EOF'
 /libunwind/
 /libcxx/
 /libcxxabi/
+/libc/
 EOF
 git -C "$LLVM_SRC" fetch --depth 1 origin "$LLVM_COMMIT"
 git -C "$LLVM_SRC" checkout --detach FETCH_HEAD
 actual_llvm="$(git -C "$LLVM_SRC" rev-parse HEAD)"
 [[ "$actual_llvm" == "$LLVM_COMMIT" ]]
+
+# LLVM 23's top-level configure always imports FindLibcCommonUtils, even when
+# the libc project is disabled. Keep libc in the source checkout so configure
+# can create the interface target; this does not enable or build LLVM libc.
+if [[ ! -d "$LLVM_SRC/libc" ]]; then
+    echo "LLVM libc source directory is required by LLVM 23 configure" >&2
+    exit 1
+fi
 
 export PATH="$BOOTSTRAP/bin:$PATH"
 export TOOLCHAIN_ARCHS=x86_64

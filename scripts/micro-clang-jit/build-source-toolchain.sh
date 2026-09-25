@@ -136,15 +136,26 @@ if ! PATH="$STAGE/bin:$BOOTSTRAP/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 TARGET_OSES=m
     exit 1
 fi
 
-# Archive creation is the only llvm-wrapper path that failed qualification.
-# Exercise the source-built tools directly and provide them to Autoconf through
-# AR/RANLIB, avoiding the target-prefixed llvm-wrapper dispatch entirely.
-for tool in llvm-ar llvm-ranlib; do
-    if [[ ! -x "$STAGE/bin/$tool.exe" ]]; then
-        echo "required source-built archive tool is missing: $STAGE/bin/$tool.exe" >&2
+# Native Windows llvm-ar from this LLVM 23 revision cannot create a new
+# archive on this runner: MemoryBuffer::getFile reports ENOENT through a Windows
+# error category that the tool treats as fatal before honoring the 'c'
+# modifier. Runtime archives are build products, not shipped host tools, so use
+# the already-provisioned MSYS2/UCRT GNU binutils ar/ranlib for runtime builds.
+# They are copied under the names hard-coded by the upstream compiler-rt/libc++
+# build scripts and are pruned from the final micro-Clang payload.
+UCRT_BIN="${MINGW_PREFIX:-/ucrt64}/bin"
+BUILD_AR="$UCRT_BIN/ar.exe"
+BUILD_RANLIB="$UCRT_BIN/ranlib.exe"
+for tool in "$BUILD_AR" "$BUILD_RANLIB"; do
+    if [[ ! -x "$tool" ]]; then
+        echo "required MSYS2/UCRT archive tool is missing: $tool" >&2
         exit 1
     fi
 done
+
+SOURCE_LLVM_AR_VERSION="$("$STAGE/bin/llvm-ar.exe" --version | head -n1)"
+cp "$BUILD_AR" "$STAGE/bin/llvm-ar.exe"
+cp "$BUILD_RANLIB" "$STAGE/bin/llvm-ranlib.exe"
 
 cat > "$WORK/archive-smoke.c" <<'EOF'
 int micro_clang_archive_smoke(void) { return 7; }
@@ -156,10 +167,13 @@ rm -f "$WORK/archive-smoke.a"
 [[ -s "$WORK/archive-smoke.a" ]]
 
 {
-    echo "source-built llvm-ar:"
+    echo "source-built llvm-ar (not used for runtime archives):"
+    echo "$SOURCE_LLVM_AR_VERSION"
+    echo
+    echo "runtime-build ar:"
     "$STAGE/bin/llvm-ar.exe" --version
     echo
-    echo "source-built llvm-ranlib:"
+    echo "runtime-build ranlib:"
     "$STAGE/bin/llvm-ranlib.exe" --version
     echo
     echo "archive smoke:"
@@ -320,7 +334,7 @@ provenance = {
         "llvm-mingw-build-source-toolchain-diff": mingw_build_patch_sha,
     },
     "bootstrap_archive_sha256": archive_sha,
-    "runtime_build_archive_tools": "source-built llvm-ar/llvm-ranlib invoked directly",
+    "runtime_build_archive_tools": "MSYS2/UCRT GNU binutils ar/ranlib, build-time only",
     "bootstrap_compiler": bootstrap.strip(),
     "cmake": cmake.strip(),
     "ninja": ninja.strip(),

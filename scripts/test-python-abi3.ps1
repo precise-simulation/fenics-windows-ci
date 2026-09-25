@@ -145,7 +145,7 @@ foreach ($pythonVersion in $pythonVersions) {
             if ($jitText -notmatch "FFCx JIT compiler:\s+LLVM-MinGW") {
                 throw "Direct DOLFINx JIT did not report automatic LLVM-MinGW helper activation"
             }
-            $jitModules = @(Get-ChildItem (Join-Path $jitCache "fenics") -Filter "*.pyd" -File -ErrorAction SilentlyContinue)
+            $jitModules = @(Get-ChildItem (Join-Path $jitCache "fenics") -Filter "*.pyd" -File -Recurse -ErrorAction SilentlyContinue)
             if ($jitModules.Count -eq 0) {
                 throw "Phase 4 fresh Poisson solve produced no JIT modules"
             }

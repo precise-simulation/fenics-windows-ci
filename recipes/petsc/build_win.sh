@@ -59,7 +59,7 @@ mumps_url="https://mumps-solver.org/MUMPS_5.7.3.tar.gz"
 mumps_sha="84a47f7c4231b9efdf4d4f631a2cae2bdd9adeaabc088261d15af040143ed112"
 
 python - "$source_dir" "$scalapack_url" "$scalapack_sha" "$mumps_url" "$mumps_sha" <<'PY'
-import hashlib, pathlib, sys, tarfile, urllib.request, zipfile
+import hashlib, pathlib, sys, tarfile, time, urllib.error, urllib.request, zipfile
 
 work = pathlib.Path(sys.argv[1])
 
@@ -68,18 +68,37 @@ def fetch(url, sha, name):
     if dest.exists():
         return
     tmp = dest.with_suffix(dest.suffix + ".part")
-    h = hashlib.sha256()
-    with urllib.request.urlopen(url) as r, open(tmp, "wb") as f:
-        while True:
-            chunk = r.read(1 << 20)
-            if not chunk:
-                break
-            f.write(chunk)
-            h.update(chunk)
-    if h.hexdigest() != sha:
+    last_error = None
+    for attempt in range(1, 4):
         tmp.unlink(missing_ok=True)
-        raise SystemExit(f"sha256 mismatch for {url}")
-    tmp.rename(dest)
+        h = hashlib.sha256()
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as f:
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    h.update(chunk)
+        except (urllib.error.URLError, OSError) as exc:
+            tmp.unlink(missing_ok=True)
+            last_error = exc
+            if attempt == 3:
+                break
+            delay = 5 * attempt
+            print(
+                f"download attempt {attempt}/3 failed for {url}: {exc}; "
+                f"retrying in {delay}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+            continue
+        if h.hexdigest() != sha:
+            tmp.unlink(missing_ok=True)
+            raise SystemExit(f"sha256 mismatch for {url}")
+        tmp.replace(dest)
+        return
+    raise SystemExit(f"failed to download {url} after 3 attempts: {last_error}")
 
 fetch(sys.argv[2], sys.argv[3], "scalapack-2.2.0-src.zip")
 fetch(sys.argv[4], sys.argv[5], "MUMPS_5.7.3.tar.gz")

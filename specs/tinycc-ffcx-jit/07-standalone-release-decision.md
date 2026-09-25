@@ -1,6 +1,6 @@
 # Phase 7: standalone proof and release decision
 
-**Status:** proposed.
+**Status:** done — **Option B selected**. See [07-qualification-result.md](07-qualification-result.md).
 
 ## Objective
 

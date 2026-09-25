@@ -1,7 +1,7 @@
 context:
   name: fenics-dolfinx
   version: "0.11.0"
-  build: 10
+  build: 11
   major_minor: ${{ (version | split('.'))[:2] | join('.') }}.*
   ufl_version: "2026.1.*"
   # Python Stable ABI (SABI with nanobind requires 3.12)
@@ -228,10 +228,12 @@ outputs:
         # on Windows below so no libboost reaches runtime metadata.
         - libboost-devel
       run:
-        # Windows runtime JIT uses the dedicated hermetic LLVM-MinGW package.
-        # Native DOLFINx/PETSc build requirements above remain on VS2022.
+        # Windows runtime JIT uses the backend-neutral shared runtime plus the
+        # dedicated hermetic LLVM-MinGW compiler backend by default. Native
+        # DOLFINx/PETSc build requirements above remain on VS2022.
         - if: win
           then:
+            - fenics-jit-runtime ==0.1.0
             - fenics-jit-llvm-mingw ==20260826
             # CFFI on Python 3.12+ uses setuptools' vendored distutils backend.
             - setuptools
@@ -293,7 +295,6 @@ outputs:
                 - libgl-devel
             - if: linux and target_platform != build_platform
               then:
-                # __glibc virtual package seems to resolve wrong on emulated linux
                 - ${{ stdlib("c") }}
             - sympy
             - scipy

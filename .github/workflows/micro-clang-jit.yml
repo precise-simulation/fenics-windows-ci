@@ -1,0 +1,174 @@
+name: micro-clang-jit
+
+# Experimental source-build qualification. This workflow is deliberately
+# path-scoped so it does not add a second automatic run to unrelated PRs.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/micro-clang-jit.yml"
+      - "scripts/micro-clang-jit/**"
+      - "specs/micro-clang-ffcx-jit/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: micro-clang-jit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  phase0-reference:
+    name: Phase 0 Stage-AW reference
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install reference-analysis tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase0
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            zstandard
+
+      - name: Capture immutable Stage-AW identity, defaults, ABI and payload decomposition
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/micro-clang-phase0"
+          ./scripts/micro-clang-jit/run-phase0.ps1 -PythonPrefix $prefix
+
+      - name: Upload Phase-0 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase0-reference
+          path: micro-clang-phase0-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  phase1-build:
+    name: Phase 1 source build
+    needs: phase0-reference
+    runs-on: windows-2022
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install UCRT source-build environment
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            make
+            diffutils
+            patch
+            autoconf
+            automake
+            libtool
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+
+      - name: Build X86-only Clang/LLD plus source-matched MinGW/UCRT runtime
+        shell: msys2 {0}
+        run: |
+          ./scripts/micro-clang-jit/build-source-toolchain.sh "$PWD/micro-clang-build" "$PWD/micro-clang-stage" "$PWD/micro-clang-build-evidence"
+
+      - name: Upload source-built toolchain
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase1-toolchain
+          path: micro-clang-stage/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+
+      - name: Upload source-build evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase1-build-evidence
+          path: micro-clang-build-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  phase1-private-proof:
+    name: Phase 1 private proof (Python ${{ matrix.python }})
+    needs: [phase0-reference, phase1-build]
+    runs-on: windows-2022
+    timeout-minutes: 75
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.12"
+            experimental: false
+          - python: "3.13"
+            experimental: false
+          - python: "3.14"
+            experimental: false
+          - python: "3.15"
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download source-built toolchain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase1-toolchain
+          path: micro-clang-artifact
+
+      - name: Download Phase-0 reference
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase0-reference
+          path: micro-clang-phase0-reference
+
+      - name: Install isolated FEniCS runtime
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-proof
+          create-args: >-
+            --override-channels --strict-channel-priority
+            -c precise-simulation -c conda-forge
+            python=${{ matrix.python }}
+            libblas=*=*openblas
+            fenics-dolfinx
+            cffi
+            setuptools
+            pefile
+
+      - name: Run private CFFI/FFCx proof with the production backend disabled
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/micro-clang-proof"
+          $compiler = Get-ChildItem "micro-clang-artifact" -Recurse -Filter "x86_64-w64-mingw32-clang.exe" -File | Select-Object -First 1
+          if (-not $compiler) { throw "source-built target clang not found in downloaded artifact" }
+          $sourceRoot = Split-Path -Parent (Split-Path -Parent $compiler.FullName)
+          $toolchain = Join-Path $PWD "micro clang toolchain py${{ matrix.python }} with spaces"
+          Copy-Item -Recurse -Force $sourceRoot $toolchain
+          $reference = (Resolve-Path "micro-clang-phase0-reference/driver-evidence.json").Path
+          ./scripts/micro-clang-jit/run-phase1.ps1 -PythonPrefix $prefix -ToolchainRoot $toolchain -ReferenceDriver $reference -WorkDir "micro clang proof py${{ matrix.python }} with spaces" -DiagnosticsDir "micro-clang-phase1-py${{ matrix.python }}"
+
+      - name: Upload Phase-1 qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase1-py${{ matrix.python }}
+          path: |
+            micro-clang-phase1-py${{ matrix.python }}/
+            micro clang proof py${{ matrix.python }} with spaces/
+          if-no-files-found: warn
+          retention-days: 14

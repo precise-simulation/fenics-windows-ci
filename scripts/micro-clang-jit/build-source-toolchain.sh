@@ -98,11 +98,45 @@ pushd "$WORK/llvm-mingw" >/dev/null
 PATH="$STAGE/bin:$BOOTSTRAP/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 TARGET_OSES=mingw32 CC=gcc \
     ./install-wrappers.sh "$STAGE"
 
-PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
+# install-wrappers.sh uses symlinks for target-prefixed llvm-wrapper tools.
+# Native Windows wrapper dispatch derives the real tool name from
+# GetModuleFileName(), so an NTFS/MSYS symlink can resolve back to
+# llvm-wrapper.exe and lose the requested "ar"/"ranlib" basename. Materialize
+# the temporary archive wrappers as real executables before Autoconf probes
+# them. These target-prefixed helpers are removed from the final payload below.
+for tool in ar ranlib; do
+    wrapper="$STAGE/bin/x86_64-w64-mingw32-$tool.exe"
+    if [[ ! -e "$wrapper" ]]; then
+        echo "required target wrapper is missing: $wrapper" >&2
+        exit 1
+    fi
+    cp -L "$wrapper" "$wrapper.materialized"
+    rm -f "$wrapper"
+    mv "$wrapper.materialized" "$wrapper"
+done
+
+{
+    echo "llvm-ar:"
+    "$STAGE/bin/llvm-ar.exe" --version
+    echo
+    echo "target ar:"
+    "$STAGE/bin/x86_64-w64-mingw32-ar.exe" --version
+    echo
+    echo "target ranlib:"
+    "$STAGE/bin/x86_64-w64-mingw32-ranlib.exe" --version
+} > "$EVIDENCE/archive-wrapper-preflight.txt" 2>&1
+
+if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     ./build-mingw-w64.sh "$STAGE" \
         --with-default-msvcrt=ucrt \
         --with-default-win32-winnt=0x601 \
-        --enable-cfguard
+        --enable-cfguard; then
+    crt_config="$WORK/llvm-mingw/mingw-w64/mingw-w64-crt/build-x86_64/config.log"
+    if [[ -f "$crt_config" ]]; then
+        cp "$crt_config" "$EVIDENCE/mingw-w64-crt-config.log"
+    fi
+    exit 1
+fi
 
 actual_mingw="$(git -C "$WORK/llvm-mingw/mingw-w64" rev-parse HEAD)"
 if [[ "$actual_mingw" != "$MINGW_W64_COMMIT" ]]; then

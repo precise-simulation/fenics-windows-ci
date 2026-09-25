@@ -2,11 +2,11 @@
 
 ## Status
 
-**Status:** proposed — plan only.
+**Status:** implementation in progress — Phase 0 reference identity is established and Phase 1 source-build qualification is active.
 
 This proposal evaluates a purpose-built minimal Clang/LLD toolchain as a third Windows FFCx/CFFI JIT backend between the qualified TinyCC and LLVM-MinGW options.
 
-No runtime default, package dependency, backend selector, or production behavior changes as part of this proposal. LLVM-MinGW remains the normal/reference backend until a later qualification explicitly decides otherwise.
+No runtime default, package dependency, backend selector, or production behavior changes are made during the private Phase 0-4 implementation. LLVM-MinGW remains the normal/reference backend until a later qualification explicitly decides otherwise.
 
 ## Motivation
 

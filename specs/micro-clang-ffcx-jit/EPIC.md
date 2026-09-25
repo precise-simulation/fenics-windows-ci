@@ -233,7 +233,7 @@ If generated-code performance behaves materially differently despite equivalent 
 
 | Phase | Outcome | Gate |
 | --- | --- | --- |
-| 0. Baseline decomposition | Measure Stage-AW/current LLVM-MinGW payload by host tools, DLL closure, headers, target libs, runtimes, and metadata | Establish where the 216 MiB is actually spent |
+| 0. Reference identity + baseline decomposition | Recover the exact Stage-AW LLVM/mingw-w64/runtime source identities and measure the payload by host tools, DLL closure, headers, target libs, runtimes, and metadata | Establish a same-revision control and where the 216 MiB is actually spent |
 | 1. Source-build feasibility | Reproducibly build X86-only Clang/LLD capable of minimal CFFI and fresh FFCx Poisson JIT | Functional/hermeticity go-no-go |
 | 2. Conservative micro-Clang package | Package the source-built compiler with a conservative x86-64 Windows C sysroot | Reproducibility + complete footprint gate |
 | 3. Private broad qualification | Run supported Python, broad forms, cache, ABI/PE, concurrency, paths-with-spaces, and MPI without selector/default changes | Viability-before-integration gate |
@@ -388,6 +388,8 @@ Compare all three backends on the same supported Python/form corpus:
 | --- | --- | --- | --- |
 | installed backend footprint | measure | measure | fixed reference |
 | compressed package | measure | measure | fixed reference |
+| side-by-side effective install increment | measure | measure | baseline |
+| backend-selected/profile install footprint | measure if supported | measure if supported | reference/default |
 | standalone incremental footprint | measure | measure | measure/reference |
 | cold JIT | measure | measure | 1.0x |
 | warm cache | measure | measure | 1.0x |
@@ -411,7 +413,6 @@ The final candidate must perform fresh JIT from the actual standalone/Nuitka lay
 
 Phase 6 must explicitly select one outcome:
 
-- **A — reject:** size reduction or maintenance cost is not compelling, or qualification fails;
 - **A — reject:** size reduction or maintenance cost is not compelling, or qualification fails;
 - **B — side-by-side optional backend:** micro-Clang qualifies technically as an explicitly selectable backend while LLVM-MinGW remains an unconditional normal-install dependency. This is a functionality/performance option, **not** an installation-footprint reduction, because both compiler payloads are installed;
 - **C — selectable middle-backend profile/variant:** micro-Clang is materially smaller and keeps LLVM-class generated-code performance, and a separately qualified package/profile/variant can install `fenics-jit-runtime + fenics-jit-micro-clang` without `fenics-jit-llvm-mingw`. LLVM-MinGW may remain the default profile;
@@ -448,6 +449,7 @@ The experiment succeeds only if:
 - generated-code performance remains close to LLVM-MinGW rather than TinyCC-like;
 - package ownership/cache identity remain isolated from the other backends;
 - standalone fresh JIT succeeds with only the shared runtime + micro-Clang backend;
-- the final decision records measured size, cold-JIT, generated-code, maintenance, and release tradeoffs.
+- any claimed normal-install footprint reduction is demonstrated with a qualified dependency/profile variant that does not also install LLVM-MinGW;
+- the final decision records measured backend size, effective installation size, cold-JIT, generated-code, maintenance, and release tradeoffs.
 
 Until all of those gates pass, LLVM-MinGW remains the normal/reference backend and TinyCC remains the compact backend.

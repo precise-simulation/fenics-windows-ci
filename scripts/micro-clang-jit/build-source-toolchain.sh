@@ -33,7 +33,7 @@ if [[ "$actual_archive_sha" != "$ARCHIVE_SHA256" ]]; then
     exit 1
 fi
 
-tar -xf "$archive_path" -C "$WORK/bootstrap"
+unzip -q "$archive_path" -d "$WORK/bootstrap"
 BOOTSTRAP="$WORK/bootstrap/llvm-mingw-$LLVM_MINGW_RELEASE-ucrt-x86_64"
 if [[ ! -x "$BOOTSTRAP/bin/clang.exe" ]]; then
     echo "bootstrap clang is missing: $BOOTSTRAP/bin/clang.exe" >&2

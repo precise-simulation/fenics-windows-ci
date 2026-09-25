@@ -32,7 +32,7 @@ $actualCommit = (& git -C $source rev-parse HEAD).Trim()
 if ($actualCommit -ne $llvmCommit) { throw "LLVM source identity mismatch: expected $llvmCommit, got $actualCommit" }
 $sourceTree = (& git -C $source rev-parse "HEAD^{tree}").Trim()
 
-$vswhere = Join-Path \${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
 $vsInstall = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1).Trim()
 if (-not $vsInstall) { throw "Visual Studio C++ build tools not found" }

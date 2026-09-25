@@ -52,11 +52,17 @@ if [[ ! -f "$MINGW_BUILD_PATCH" ]]; then
     echo "required llvm-mingw build patch is missing: $MINGW_BUILD_PATCH" >&2
     exit 1
 fi
-MINGW_BUILD_PATCH_SHA256="$(sha256sum "$MINGW_BUILD_PATCH" | awk '{print $1}')"
-git -C "$WORK/llvm-mingw" apply --check "$MINGW_BUILD_PATCH"
-git -C "$WORK/llvm-mingw" apply "$MINGW_BUILD_PATCH"
+# GitHub's Windows checkout can materialize unconstrained .patch files with
+# CRLF even though the MSYS-cloned upstream shell script is LF. Normalize the
+# exact patch bytes before applying and record the normalized applied identity.
+MINGW_BUILD_PATCH_APPLIED="$WORK/llvm-mingw-materialize-target-include.patch"
+tr -d '\r' < "$MINGW_BUILD_PATCH" > "$MINGW_BUILD_PATCH_APPLIED"
+MINGW_BUILD_PATCH_SHA256="$(sha256sum "$MINGW_BUILD_PATCH_APPLIED" | awk '{print $1}')"
+git -C "$WORK/llvm-mingw" apply --check "$MINGW_BUILD_PATCH_APPLIED"
+git -C "$WORK/llvm-mingw" apply "$MINGW_BUILD_PATCH_APPLIED"
 git -C "$WORK/llvm-mingw" diff --check
-git -C "$WORK/llvm-mingw" diff -- build-mingw-w64.sh > "$EVIDENCE/llvm-mingw-build-script.patch"
+cp "$MINGW_BUILD_PATCH_APPLIED" "$EVIDENCE/llvm-mingw-build-script-applied.patch"
+git -C "$WORK/llvm-mingw" diff -- build-mingw-w64.sh > "$EVIDENCE/llvm-mingw-build-script.diff"
 
 LLVM_SRC="$WORK/llvm-mingw/llvm-project"
 git init "$LLVM_SRC"

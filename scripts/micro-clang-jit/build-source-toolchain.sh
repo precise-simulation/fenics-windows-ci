@@ -158,7 +158,7 @@ rm -f "$WORK/archive-smoke.a"
 # defaults or shipped wrapper configuration.
 if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     AR="$STAGE/bin/llvm-ar.exe" RANLIB="$STAGE/bin/llvm-ranlib.exe" \
-    CPPFLAGS="-isystem $STAGE/include" \
+    CPPFLAGS="-isystem $STAGE/include -I$WORK/llvm-mingw/mingw-w64/mingw-w64-crt/def-include" \
     ./build-mingw-w64.sh "$STAGE" \
         --skip-include-triplet-prefix \
         --with-default-msvcrt=ucrt \
@@ -307,7 +307,7 @@ provenance = {
     "mingw_w64_commit": mingw,
     "local_build_patches": {},
     "mingw_w64_header_layout": "upstream --skip-include-triplet-prefix",
-    "runtime_build_header_flags": "-isystem <stage>/include (bootstrap only)",
+    "runtime_build_header_flags": "-isystem <stage>/include -I<mingw-w64-crt>/def-include (bootstrap only)",
     "bootstrap_archive_sha256": archive_sha,
     "runtime_build_archive_tools": "MSYS2/UCRT GNU binutils ar/ranlib, build-time only",
     "bootstrap_compiler": bootstrap.strip(),

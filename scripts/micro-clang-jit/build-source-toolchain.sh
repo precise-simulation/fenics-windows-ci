@@ -47,6 +47,17 @@ git -C "$WORK/llvm-mingw" checkout --detach FETCH_HEAD
 actual_llvm_mingw="$(git -C "$WORK/llvm-mingw" rev-parse HEAD)"
 [[ "$actual_llvm_mingw" == "$LLVM_MINGW_COMMIT" ]]
 
+MINGW_BUILD_PATCH="$SCRIPT_DIR/patches/llvm-mingw-materialize-target-include.patch"
+if [[ ! -f "$MINGW_BUILD_PATCH" ]]; then
+    echo "required llvm-mingw build patch is missing: $MINGW_BUILD_PATCH" >&2
+    exit 1
+fi
+MINGW_BUILD_PATCH_SHA256="$(sha256sum "$MINGW_BUILD_PATCH" | awk '{print $1}')"
+git -C "$WORK/llvm-mingw" apply --check "$MINGW_BUILD_PATCH"
+git -C "$WORK/llvm-mingw" apply "$MINGW_BUILD_PATCH"
+git -C "$WORK/llvm-mingw" diff --check
+git -C "$WORK/llvm-mingw" diff -- build-mingw-w64.sh > "$EVIDENCE/llvm-mingw-build-script.patch"
+
 LLVM_SRC="$WORK/llvm-mingw/llvm-project"
 git init "$LLVM_SRC"
 git -C "$LLVM_SRC" remote add origin https://github.com/llvm/llvm-project.git
@@ -244,13 +255,13 @@ if [[ -f "$cmake_cache" ]]; then
 fi
 
 python - "$STAGE" "$EVIDENCE" "$actual_archive_sha" "$actual_llvm_mingw" "$actual_llvm" "$actual_mingw" \
-    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" <<'PY'
+    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" "$MINGW_BUILD_PATCH_SHA256" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags) = sys.argv[1:]
+(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags, mingw_build_patch_sha) = sys.argv[1:]
 stage = pathlib.Path(stage_s)
 evidence = pathlib.Path(evidence_s)
 
@@ -276,6 +287,9 @@ provenance = {
     "llvm_commit": llvm,
     "compiler_rt_commit": llvm,
     "mingw_w64_commit": mingw,
+    "local_build_patches": {
+        "llvm-mingw-materialize-target-include.patch": mingw_build_patch_sha,
+    },
     "bootstrap_archive_sha256": archive_sha,
     "bootstrap_compiler": bootstrap.strip(),
     "cmake": cmake.strip(),

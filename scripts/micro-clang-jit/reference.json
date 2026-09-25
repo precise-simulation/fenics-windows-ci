@@ -1,0 +1,72 @@
+{
+  "schema": "fenics-micro-clang-reference-v1",
+  "stage_aw": {
+    "repository_commit": "1d970c7372c673b086ce75210b865768b2b18e42",
+    "workflow": "stack",
+    "workflow_run_number": 231,
+    "workflow_run_id": 34580520920,
+    "artifact_id": 10192571850,
+    "artifact_sha256": "a030db8b3b7dddabff423813e8748112e689dfa25079651b8b7c7bfe7c12d025",
+    "package": "fenics-jit-llvm-mingw-20260826-h9490d1a_49.conda",
+    "package_sha256": "c7be1959bf489cdeaf2e968b2fcbc092db3b65acd9ba242c5fd9cd47489932bc",
+    "package_compressed_bytes": 53830154,
+    "installed_package_mib": 216.43,
+    "retained_payload_bytes": 225940525,
+    "retained_payload_mib": 215.47367572784424
+  },
+  "upstream_archive": {
+    "version": "20260826",
+    "name": "llvm-mingw-20260826-ucrt-x86_64.zip",
+    "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260826/llvm-mingw-20260826-ucrt-x86_64.zip",
+    "sha256": "ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3"
+  },
+  "source_identity": {
+    "llvm_mingw_tag": "20260826",
+    "llvm_mingw_tag_object": "993b5219b769cc59cb9b48be56e5edfd9e5c6226",
+    "llvm_mingw_commit": "14614551fb5fc0f725933e4959c75c06d347acfa",
+    "llvm_project_tag": "llvmorg-23.1.0",
+    "llvm_project_tag_object": "9b0f9b1eb4a233717c6ed014cff6f8a7c65512de",
+    "llvm_project_commit": "ea7d852a70e8bdfaf601d6626a760f9771b2c4b4",
+    "compiler_rt_commit": "ea7d852a70e8bdfaf601d6626a760f9771b2c4b4",
+    "mingw_w64_commit": "a3d708261d5ba659205067cb82cae36e7ae8bbb0"
+  },
+  "target_policy": {
+    "target": "x86_64-w64-mingw32",
+    "crt": "UCRT",
+    "default_win32_winnt": "0x601",
+    "rtlib": "compiler-rt",
+    "unwindlib": "libunwind",
+    "stdlib": "libc++",
+    "linker": "lld",
+    "target_config": "x86_64-w64-windows-gnu.cfg",
+    "common_config": "mingw32-common.cfg"
+  },
+  "stage_aw_retained_categories": {
+    "clang_resource_headers": {"bytes": 15885819, "files": 320},
+    "clang_resource_runtime": {"bytes": 256660},
+    "compiler_bin_other": {"bytes": 74989, "files": 25},
+    "compiler_executables": {"bytes": 7012352, "files": 5},
+    "metadata_scripts": {"bytes": 1008243, "files": 46},
+    "other": {"bytes": 185585, "files": 12},
+    "python_import_libraries": {"bytes": 787301, "files": 5},
+    "root_headers": {"bytes": 37934529, "files": 1581},
+    "shared_compiler_runtime_dlls": {"bytes": 129769984, "files": 6},
+    "target_runtime_files": {"bytes": 1648640, "files": 3},
+    "target_static_import_libraries": {"bytes": 31376423, "files": 861}
+  },
+  "largest_retained_files": {
+    "bin/libLLVM-23.dll": 77647360,
+    "bin/libclang-cpp.dll": 49632768,
+    "bin/ld.lld.exe": 5184512,
+    "bin/llvm-readobj.exe": 1651712,
+    "bin/libc++.dll": 1680384
+  },
+  "size_gates": {
+    "continuation_fraction": 0.5,
+    "strong_fraction": 0.375,
+    "stretch_fraction": 0.25,
+    "continuation_mib": 108.215,
+    "strong_mib": 81.16125,
+    "stretch_mib": 54.1075
+  }
+}

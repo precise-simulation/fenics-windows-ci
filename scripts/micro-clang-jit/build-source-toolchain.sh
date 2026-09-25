@@ -150,8 +150,15 @@ rm -f "$WORK/archive-smoke.a"
     ls -l "$WORK/archive-smoke.a"
 } > "$EVIDENCE/archive-wrapper-preflight.txt" 2>&1
 
+# During the CRT bootstrap, the MinGW sysroot is not complete enough for
+# Clang's automatic sysroot detection (notably libkernel32.a is not installed
+# yet). The headers have already been installed to $STAGE/include by the
+# upstream --skip-include-triplet-prefix mode, so expose that path explicitly
+# to Autoconf/Make for this build only. This does not change final driver
+# defaults or shipped wrapper configuration.
 if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     AR="$STAGE/bin/llvm-ar.exe" RANLIB="$STAGE/bin/llvm-ranlib.exe" \
+    CPPFLAGS="-isystem $STAGE/include" \
     ./build-mingw-w64.sh "$STAGE" \
         --skip-include-triplet-prefix \
         --with-default-msvcrt=ucrt \
@@ -300,6 +307,7 @@ provenance = {
     "mingw_w64_commit": mingw,
     "local_build_patches": {},
     "mingw_w64_header_layout": "upstream --skip-include-triplet-prefix",
+    "runtime_build_header_flags": "-isystem <stage>/include (bootstrap only)",
     "bootstrap_archive_sha256": archive_sha,
     "runtime_build_archive_tools": "MSYS2/UCRT GNU binutils ar/ranlib, build-time only",
     "bootstrap_compiler": bootstrap.strip(),

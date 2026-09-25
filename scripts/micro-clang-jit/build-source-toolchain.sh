@@ -47,36 +47,6 @@ git -C "$WORK/llvm-mingw" checkout --detach FETCH_HEAD
 actual_llvm_mingw="$(git -C "$WORK/llvm-mingw" rev-parse HEAD)"
 [[ "$actual_llvm_mingw" == "$LLVM_MINGW_COMMIT" ]]
 
-# Native Windows Clang cannot reliably consume the MSYS symlink that the
-# pinned llvm-mingw build script creates for <target>/include. The prior
-# failing config.log showed this directly (missing target stdbool.h). Apply a
-# deterministic one-site build-script transformation and preserve its diff.
-MINGW_BUILD_SCRIPT="$WORK/llvm-mingw/build-mingw-w64.sh"
-python - "$MINGW_BUILD_SCRIPT" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-old = """        if [ ! -e "$PREFIX/$arch-w64-mingw32/include" ]; then
-            ln -sfn ../generic-w64-mingw32/include "$PREFIX/$arch-w64-mingw32/include"
-        fi
-"""
-new = """        if [ ! -e "$PREFIX/$arch-w64-mingw32/include" ]; then
-            # Native Windows Clang must see a real target include directory.
-            cp -a "$HEADER_ROOT/include" "$PREFIX/$arch-w64-mingw32/include"
-        fi
-"""
-if text.count(old) != 1:
-    raise SystemExit("expected llvm-mingw target-include block not found exactly once")
-text = text.replace(old, new, 1)
-with path.open("w", encoding="utf-8", newline="\n") as stream:
-    stream.write(text)
-PY
-git -C "$WORK/llvm-mingw" diff --check
-git -C "$WORK/llvm-mingw" diff -- build-mingw-w64.sh > "$EVIDENCE/llvm-mingw-build-script.diff"
-MINGW_BUILD_SCRIPT_PATCH_SHA256="$(sha256sum "$EVIDENCE/llvm-mingw-build-script.diff" | awk '{print $1}')"
-
 LLVM_SRC="$WORK/llvm-mingw/llvm-project"
 git init "$LLVM_SRC"
 git -C "$LLVM_SRC" remote add origin https://github.com/llvm/llvm-project.git
@@ -136,32 +106,14 @@ if ! PATH="$STAGE/bin:$BOOTSTRAP/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 TARGET_OSES=m
     exit 1
 fi
 
-# The source-built llvm-ar/llvm-ranlib are not runtime payload requirements.
-# Use the exact immutable Stage-AW bootstrap copies while building target
-# runtime archives. They are removed with the other non-shipped host tools
-# below; the bootstrap archive identity is already pinned and recorded.
+# Archive creation is the only llvm-wrapper path that failed qualification.
+# Exercise the source-built tools directly and provide them to Autoconf through
+# AR/RANLIB, avoiding the target-prefixed llvm-wrapper dispatch entirely.
 for tool in llvm-ar llvm-ranlib; do
-    bootstrap_tool="$BOOTSTRAP/bin/$tool.exe"
-    stage_tool="$STAGE/bin/$tool.exe"
-    if [[ ! -x "$bootstrap_tool" ]]; then
-        echo "required bootstrap archive tool is missing: $bootstrap_tool" >&2
+    if [[ ! -x "$STAGE/bin/$tool.exe" ]]; then
+        echo "required source-built archive tool is missing: $STAGE/bin/$tool.exe" >&2
         exit 1
     fi
-    cp "$bootstrap_tool" "$stage_tool"
-done
-
-# install-wrappers.sh uses symlinks for target-prefixed llvm-wrapper tools.
-# Materialize ar/ranlib wrappers so native Windows dispatch retains the target
-# tool basename. These wrappers and archive tools are build-time only.
-for tool in ar ranlib; do
-    wrapper="$STAGE/bin/x86_64-w64-mingw32-$tool.exe"
-    if [[ ! -e "$wrapper" ]]; then
-        echo "required target wrapper is missing: $wrapper" >&2
-        exit 1
-    fi
-    cp -L "$wrapper" "$wrapper.materialized"
-    rm -f "$wrapper"
-    mv "$wrapper.materialized" "$wrapper"
 done
 
 cat > "$WORK/archive-smoke.c" <<'EOF'
@@ -169,25 +121,23 @@ int micro_clang_archive_smoke(void) { return 7; }
 EOF
 "$STAGE/bin/x86_64-w64-mingw32-clang.exe" -c "$WORK/archive-smoke.c" -o "$WORK/archive-smoke.o"
 rm -f "$WORK/archive-smoke.a"
-"$STAGE/bin/x86_64-w64-mingw32-ar.exe" cru "$WORK/archive-smoke.a" "$WORK/archive-smoke.o"
-"$STAGE/bin/x86_64-w64-mingw32-ranlib.exe" "$WORK/archive-smoke.a"
+"$STAGE/bin/llvm-ar.exe" cru "$WORK/archive-smoke.a" "$WORK/archive-smoke.o"
+"$STAGE/bin/llvm-ranlib.exe" "$WORK/archive-smoke.a"
 [[ -s "$WORK/archive-smoke.a" ]]
 
 {
-    echo "bootstrap llvm-ar:"
-    "$BOOTSTRAP/bin/llvm-ar.exe" --version
+    echo "source-built llvm-ar:"
+    "$STAGE/bin/llvm-ar.exe" --version
     echo
-    echo "staged target ar:"
-    "$STAGE/bin/x86_64-w64-mingw32-ar.exe" --version
-    echo
-    echo "staged target ranlib:"
-    "$STAGE/bin/x86_64-w64-mingw32-ranlib.exe" --version
+    echo "source-built llvm-ranlib:"
+    "$STAGE/bin/llvm-ranlib.exe" --version
     echo
     echo "archive smoke:"
     ls -l "$WORK/archive-smoke.a"
 } > "$EVIDENCE/archive-wrapper-preflight.txt" 2>&1
 
 if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
+    AR="$STAGE/bin/llvm-ar.exe" RANLIB="$STAGE/bin/llvm-ranlib.exe" \
     ./build-mingw-w64.sh "$STAGE" \
         --with-default-msvcrt=ucrt \
         --with-default-win32-winnt=0x601 \
@@ -304,13 +254,13 @@ if [[ -f "$cmake_cache" ]]; then
 fi
 
 python - "$STAGE" "$EVIDENCE" "$actual_archive_sha" "$actual_llvm_mingw" "$actual_llvm" "$actual_mingw" \
-    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" "$MINGW_BUILD_SCRIPT_PATCH_SHA256" <<'PY'
+    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags, mingw_build_patch_sha) = sys.argv[1:]
+(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags) = sys.argv[1:]
 stage = pathlib.Path(stage_s)
 evidence = pathlib.Path(evidence_s)
 
@@ -336,11 +286,9 @@ provenance = {
     "llvm_commit": llvm,
     "compiler_rt_commit": llvm,
     "mingw_w64_commit": mingw,
-    "local_build_patches": {
-        "llvm-mingw-build-source-toolchain-diff": mingw_build_patch_sha,
-    },
+    "local_build_patches": {},
     "bootstrap_archive_sha256": archive_sha,
-    "runtime_build_archive_tools": "immutable Stage-AW bootstrap llvm-ar/llvm-ranlib",
+    "runtime_build_archive_tools": "source-built llvm-ar/llvm-ranlib invoked directly",
     "bootstrap_compiler": bootstrap.strip(),
     "cmake": cmake.strip(),
     "ninja": ninja.strip(),

@@ -9,7 +9,14 @@
     "qualification_run": 34580520920,
     "staged_payload_mib": 215.19,
     "installed_package_mib": 216.43,
-    "compressed_package_mib": 51.34
+    "compressed_package_mib": 51.34,
+    "repository_reference": {
+      "repository": "precise-simulation/fenics-windows-ci",
+      "pull_request": 9,
+      "qualification_head_commit": "1d970c7372c673b086ce75210b865768b2b18e42",
+      "merge_commit": "e533bf4bfd93567709c8227195b323bfc4eafd1b",
+      "package_build": "fenics-jit-llvm-mingw-20260826-h9490d1a_49"
+    }
   },
   "llvm": {
     "tag": "llvmorg-23.1.0",

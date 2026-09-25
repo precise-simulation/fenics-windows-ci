@@ -43,7 +43,9 @@ The package is not a general-purpose LLVM development environment.
 
 "micro-Clang" means a source-built, feature-minimized Clang/LLD toolchain configured specifically for the FEniCS Windows runtime JIT contract.
 
-The preferred construction is an exact pinned LLVM source revision plus exact pinned mingw-w64/runtime sources, built with a minimal configuration such as:
+The preferred construction is an exact pinned LLVM source revision plus exact pinned mingw-w64/runtime sources. For the initial controlled experiment, these revisions must match the source identities underlying the immutable LLVM-MinGW 20260826 / Stage-AW reference package. Phase 0 must derive and record those exact source revisions before Phase 1 begins. A different LLVM or mingw-w64 revision may only be evaluated later as a separately identified experiment after the same-revision comparison has established the effect of minimization itself.
+
+Build with a minimal configuration such as:
 
 - LLVM target: X86 only;
 - LLVM projects: Clang and LLD only;
@@ -75,9 +77,12 @@ The implementation should test the following in order:
    Build/stage only the mingw-w64/UCRT headers, startup objects, import libraries, and target runtime archives needed for C shared-library output.
 
 4. **Preserve the qualified ABI model.**
-   Generated modules must remain compatible with MSVC-built CPython/DOLFINx and continue to use the established Stable-ABI python3.dll link strategy.
+   Generated modules must remain compatible with MSVC-built CPython/DOLFINx and continue to use the established Stable-ABI python3.dll link strategy. The initial toolchain must preserve the qualified MinGW target model rather than accidentally switching to a native MSVC-target Clang configuration. Explicit sentinels must compare the target triple, MS bitfield layout, `long double` size/alignment/storage model, and relevant default target CPU/features against the Stage-AW reference.
 
-5. **Minimize only from measured evidence.**
+5. **Hold compiler revision constant before comparing minimization.**
+   The first micro-Clang performance/code-generation comparison must use the same LLVM/Clang/LLD and mingw-w64/runtime source identities as Stage AW. This separates the effect of feature/target minimization from compiler-version drift. Any later revision change must receive a distinct backend identity and a fresh comparison baseline.
+
+6. **Minimize only from measured evidence.**
    Any reduction of headers/import libraries must be backed by the existing broad FFCx corpus plus explicit sentinel tests. Do not infer safety solely from the Poisson example.
 
 Using llvm-mingw build machinery as a reproducible source-build bootstrap is acceptable if the resulting package is genuinely purpose-built/minimized rather than merely repackaging the normal upstream binary archive.
@@ -171,7 +176,7 @@ Use Stage AW merged through PR #9:
 - installed package: 216.43 MiB;
 - compressed package: 51.34 MiB.
 
-This remains the generated-code and compatibility reference.
+This remains the generated-code and compatibility reference. Phase 0 must also recover and record the exact LLVM/Clang/LLD and mingw-w64/runtime source identities represented by this package. The first micro-Clang build must use those same source identities so that size/performance differences are attributable to construction and minimization rather than compiler-version drift.
 
 ### TinyCC compact reference
 
@@ -218,7 +223,7 @@ If generated-code performance behaves materially differently despite equivalent 
 3. **Static host linking tradeoff.** A monolithic/self-contained compiler may reduce DLL count but increase executable size, build complexity, and rebuild time.
 4. **Windows target sysroot floor.** mingw-w64/UCRT headers and import libraries may dominate once LLVM host tools are minimized.
 5. **Over-pruning headers/import libraries.** The current broad sysroot intentionally protects future FFCx-generated C. Aggressive corpus-driven pruning can create latent failures.
-6. **Compiler-version drift.** A custom source build must not silently use a different code-generation baseline from the qualified LLVM-MinGW reference.
+6. **Compiler-version drift.** A custom source build must not silently use a different code-generation baseline from the qualified LLVM-MinGW reference. The initial experiment therefore holds the Stage-AW LLVM and mingw-w64/runtime source identities constant; later source upgrades are separate experiments with separate cache/package identities.
 7. **Bootstrap reproducibility.** Building LLVM is substantially more expensive than packaging TinyCC or pruning a release archive; the exact source/toolchain/build flags must be pinned.
 8. **Runtime redistributables.** Host Clang/LLD binaries must not acquire an undeclared Visual C++ runtime or other host dependency that breaks standalone use.
 9. **PE/ABI regressions.** Stable-ABI Python linking, UCRT/MinGW startup, exception/unwind metadata, relocations, and mitigation bits must remain at least as strong as the LLVM-MinGW baseline.
@@ -240,7 +245,19 @@ Phases are ordered. Production selector/dependency changes may not bypass privat
 
 ## Phase 0 requirements
 
-Before building a new toolchain, produce a machine-readable breakdown of the current LLVM-MinGW backend:
+Before building a new toolchain, establish the exact immutable reference identity and produce a machine-readable breakdown of the current LLVM-MinGW backend.
+
+First recover and record the source identities underlying LLVM-MinGW 20260826 / Stage AW:
+
+- exact LLVM/Clang/LLD source revision;
+- exact mingw-w64 source revision;
+- exact compiler-rt/runtime revision(s);
+- any llvm-mingw patches or build-script revision affecting the produced toolchain;
+- the reference target triple, Clang version string, default target CPU/features, CRT model, and ABI-affecting driver defaults.
+
+Phase 1 must use these same source identities unless the plan is explicitly amended to create a separate version-change experiment.
+
+Then decompose the installed reference payload into:
 
 - retained host executables;
 - host DLL dependency closure;
@@ -267,6 +284,9 @@ Phase 1 must prove, on supported CPython versions:
 - no normal LLVM-MinGW backend files are used;
 - generated modules import the intended Stable-ABI python3.dll;
 - UCRT/Windows imports match the approved policy;
+- the compiler reports the intended `x86_64-w64-mingw32`-class MinGW target rather than a native MSVC target;
+- explicit ABI sentinels match the Stage-AW reference for MS bitfield layout and the qualified Windows `long double` size/alignment/storage model;
+- captured compiler invocations/defaults show equivalent target CPU/features and ABI-affecting flags to the Stage-AW reference unless a difference is intentionally declared and separately qualified;
 - DLL characteristics include DYNAMIC_BASE, HIGH_ENTROPY_VA, and NX_COMPAT;
 - relocations and x64 unwind metadata are present;
 - the JIT works with paths containing spaces.
@@ -277,7 +297,7 @@ Failure stops the experiment before production runtime integration.
 
 The package must:
 
-- pin exact LLVM and mingw-w64/runtime revisions;
+- pin the exact Stage-AW-matching LLVM and mingw-w64/runtime revisions for the initial experiment;
 - record exact bootstrap compiler and CMake/Ninja versions;
 - record all source checksums and local patches;
 - capture CMake/cache configuration used to build the compiler;
@@ -346,6 +366,8 @@ If private qualification and the early size gate pass, add micro-Clang as an exp
 Requirements:
 
 - selector accepts micro-clang only when requested;
+- replace the current two-backend dispatch assumption with an explicit three-backend registration/dispatch path for `llvm-mingw`, `tinycc`, and `micro-clang`; simply adding `micro-clang` to the allowed-name tuple is insufficient because the current selector's non-LLVM branch is TinyCC-specific;
+- tests must prove that each of the three selector values loads the intended metadata/runtime module and rejects an unavailable backend without falling through to another backend;
 - default remains llvm-mingw during evaluation;
 - no silent fallback;
 - compiler packages retain non-overlapping ownership;
@@ -355,6 +377,8 @@ Requirements:
 - side-by-side backend switching passes cache-isolation and concurrency tests.
 
 A default switch is not part of the implementation phase and requires the final release decision.
+
+The packaging result must distinguish **backend package size** from **effective installation size**. The current Windows `fenics-dolfinx` runtime dependency installs `fenics-jit-llvm-mingw` unconditionally. Therefore adding micro-Clang side-by-side does not reduce the footprint of a normal DOLFINx installation; it adds the micro-Clang payload on top of LLVM-MinGW. Any release outcome that claims an installation-footprint benefit must define and qualify a package/profile/variant in which the DOLFINx compiler-backend dependency can select micro-Clang instead of LLVM-MinGW.
 
 ## Final comparison
 
@@ -388,11 +412,13 @@ The final candidate must perform fresh JIT from the actual standalone/Nuitka lay
 Phase 6 must explicitly select one outcome:
 
 - **A — reject:** size reduction or maintenance cost is not compelling, or qualification fails;
-- **B — optional middle backend:** micro-Clang is materially smaller and keeps LLVM-class generated-code performance, but LLVM-MinGW remains the normal default;
-- **C — default candidate:** micro-Clang passes all gates, is materially smaller, and is sufficiently equivalent to replace LLVM-MinGW in a separate default-switch change;
-- **D — standalone/profile backend:** useful only for a particular packaged profile, without changing normal installs.
+- **A — reject:** size reduction or maintenance cost is not compelling, or qualification fails;
+- **B — side-by-side optional backend:** micro-Clang qualifies technically as an explicitly selectable backend while LLVM-MinGW remains an unconditional normal-install dependency. This is a functionality/performance option, **not** an installation-footprint reduction, because both compiler payloads are installed;
+- **C — selectable middle-backend profile/variant:** micro-Clang is materially smaller and keeps LLVM-class generated-code performance, and a separately qualified package/profile/variant can install `fenics-jit-runtime + fenics-jit-micro-clang` without `fenics-jit-llvm-mingw`. LLVM-MinGW may remain the default profile;
+- **D — default candidate:** micro-Clang passes all gates, is materially smaller, and is sufficiently equivalent to replace LLVM-MinGW in a separate default-switch change;
+- **E — standalone-only/profile-specific backend:** useful only for a particular bundled/standalone profile, without changing normal conda installs.
 
-No automatic default switch occurs merely because this epic qualifies Option C. A separate change must update fenics-dolfinx dependencies/default selection after reviewing final evidence.
+No automatic dependency/default switch occurs merely because this epic qualifies Option C or D. Any normal-install footprint claim requires a separate packaging change that removes the unconditional `fenics-dolfinx -> fenics-jit-llvm-mingw` dependency for the micro-Clang profile/variant and re-runs the relevant stack/runtime qualification. A default switch under Option D likewise requires a separate reviewed change.
 
 ## CI policy
 
@@ -414,6 +440,7 @@ The normal stack workflow remains the regression authority before any production
 The experiment succeeds only if:
 
 - the full compiler package is materially smaller than Stage-AW LLVM-MinGW;
+- the initial controlled comparison uses the same LLVM/Clang/LLD and mingw-w64/runtime source identities as Stage AW;
 - the source build is reproducible and provenance is complete;
 - fresh CFFI/FFCx JIT is hermetic and independent of Visual Studio/host SDK development inputs;
 - Windows/CPython/UFCx ABI and PE security contracts remain qualified;

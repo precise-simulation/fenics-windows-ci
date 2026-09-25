@@ -67,6 +67,7 @@ jobs:
           update: true
           install: >-
             git
+            unzip
             make
             diffutils
             patch

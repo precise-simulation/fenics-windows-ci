@@ -47,36 +47,6 @@ git -C "$WORK/llvm-mingw" checkout --detach FETCH_HEAD
 actual_llvm_mingw="$(git -C "$WORK/llvm-mingw" rev-parse HEAD)"
 [[ "$actual_llvm_mingw" == "$LLVM_MINGW_COMMIT" ]]
 
-# The pinned llvm-mingw script creates <target>/include as an MSYS symlink.
-# The Phase-1 CRT configure log proves native Windows Clang cannot traverse it:
-# Clang's stdbool.h include_next lookup fails at <target>/include/stdbool.h.
-# Materialize that one header tree while preserving the exact local diff.
-MINGW_BUILD_SCRIPT="$WORK/llvm-mingw/build-mingw-w64.sh"
-python - "$MINGW_BUILD_SCRIPT" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-old = """        if [ ! -e "$PREFIX/$arch-w64-mingw32/include" ]; then
-            ln -sfn ../generic-w64-mingw32/include "$PREFIX/$arch-w64-mingw32/include"
-        fi
-"""
-new = """        if [ ! -e "$PREFIX/$arch-w64-mingw32/include" ]; then
-            # Native Windows Clang must see a real target include directory.
-            cp -a "$HEADER_ROOT/include" "$PREFIX/$arch-w64-mingw32/include"
-        fi
-"""
-if text.count(old) != 1:
-    raise SystemExit("expected llvm-mingw target-include block not found exactly once")
-text = text.replace(old, new, 1)
-with path.open("w", encoding="utf-8", newline="\n") as stream:
-    stream.write(text)
-PY
-git -C "$WORK/llvm-mingw" diff --check
-git -C "$WORK/llvm-mingw" diff -- build-mingw-w64.sh > "$EVIDENCE/llvm-mingw-build-script.diff"
-MINGW_BUILD_SCRIPT_PATCH_SHA256="$(sha256sum "$EVIDENCE/llvm-mingw-build-script.diff" | awk '{print $1}')"
-
 LLVM_SRC="$WORK/llvm-mingw/llvm-project"
 git init "$LLVM_SRC"
 git -C "$LLVM_SRC" remote add origin https://github.com/llvm/llvm-project.git
@@ -183,6 +153,7 @@ rm -f "$WORK/archive-smoke.a"
 if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     AR="$STAGE/bin/llvm-ar.exe" RANLIB="$STAGE/bin/llvm-ranlib.exe" \
     ./build-mingw-w64.sh "$STAGE" \
+        --skip-include-triplet-prefix \
         --with-default-msvcrt=ucrt \
         --with-default-win32-winnt=0x601 \
         --enable-cfguard; then
@@ -209,14 +180,11 @@ PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     ./build-libcxx.sh "$STAGE" --disable-shared --enable-cfguard
 popd >/dev/null
 
-if [[ ! -d "$STAGE/generic-w64-mingw32/include" ]]; then
-    echo "source-built mingw-w64 headers are missing" >&2
+if [[ ! -f "$STAGE/include/crtdefs.h" || ! -f "$STAGE/include/stdio.h" ]]; then
+    echo "source-built mingw-w64 root headers are missing" >&2
     exit 1
 fi
-rm -rf "$STAGE/include"
-cp -a "$STAGE/generic-w64-mingw32/include" "$STAGE/include"
-rm -rf "$STAGE/generic-w64-mingw32"
-rm -rf "$STAGE/x86_64-w64-mingw32/include"
+rm -rf "$STAGE/generic-w64-mingw32" "$STAGE/x86_64-w64-mingw32/include"
 
 rm -rf "$STAGE/include/c++" "$STAGE/share/libc++"
 find "$STAGE/x86_64-w64-mingw32/lib" -maxdepth 1 -type f \
@@ -298,13 +266,13 @@ if [[ -f "$cmake_cache" ]]; then
 fi
 
 python - "$STAGE" "$EVIDENCE" "$actual_archive_sha" "$actual_llvm_mingw" "$actual_llvm" "$actual_mingw" \
-    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" "$MINGW_BUILD_SCRIPT_PATCH_SHA256" <<'PY'
+    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags, mingw_build_patch_sha) = sys.argv[1:]
+(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags) = sys.argv[1:]
 stage = pathlib.Path(stage_s)
 evidence = pathlib.Path(evidence_s)
 
@@ -330,9 +298,8 @@ provenance = {
     "llvm_commit": llvm,
     "compiler_rt_commit": llvm,
     "mingw_w64_commit": mingw,
-    "local_build_patches": {
-        "llvm-mingw-build-source-toolchain-diff": mingw_build_patch_sha,
-    },
+    "local_build_patches": {},
+    "mingw_w64_header_layout": "upstream --skip-include-triplet-prefix",
     "bootstrap_archive_sha256": archive_sha,
     "runtime_build_archive_tools": "MSYS2/UCRT GNU binutils ar/ranlib, build-time only",
     "bootstrap_compiler": bootstrap.strip(),

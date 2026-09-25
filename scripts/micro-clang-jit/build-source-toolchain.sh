@@ -126,8 +126,15 @@ cp -a "$WORK/host-install/." "$STAGE/"
 # build-script revision. The wrapper is a native Windows helper; GCC here is
 # only the build-time bootstrap for that helper and is not shipped.
 pushd "$WORK/llvm-mingw" >/dev/null
-PATH="$STAGE/bin:$BOOTSTRAP/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 TARGET_OSES=mingw32 CC=gcc \
-    ./install-wrappers.sh "$STAGE"
+# Tell the upstream wrapper installer the native Windows host explicitly.
+# Without --host it probes ./clang-$CLANG_MAJOR after the source install; the
+# host install only guarantees clang.exe at this point, which caused exit 127.
+if ! PATH="$STAGE/bin:$BOOTSTRAP/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 TARGET_OSES=mingw32 CC=gcc \
+    bash -x ./install-wrappers.sh --host=x86_64-w64-mingw32 "$STAGE" \
+        > "$EVIDENCE/install-wrappers.log" 2>&1; then
+    cat "$EVIDENCE/install-wrappers.log" >&2
+    exit 1
+fi
 
 # The source-built llvm-ar/llvm-ranlib are not runtime payload requirements.
 # Use the exact immutable Stage-AW bootstrap copies while building target

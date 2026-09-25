@@ -23,9 +23,13 @@ The source identity used by the Stage-AW control is now pinned in
   `llvm-mingw-20260826-ucrt-x86_64.zip`, SHA-256
   `ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3`.
 
-The Phase-0 workflow reconstructs the current Stage-AW staged payload with the
-qualified recipe, captures the target/driver defaults and ABI sentinel, and
-writes a machine-readable installed/compressed category decomposition.
+The Phase-0 workflow reconstructs the **immutable** Stage-AW staged payload
+from the exact qualification head `1d970c7372c673b086ce75210b865768b2b18e42`
+(PR #9, qualification run `34580520920`), not from the moving `main` recipe.
+It replays Stage I through Stage AW after base staging, requires the staged
+payload to remain within 0.25 MiB of the recorded 215.19 MiB control, captures
+the target/driver defaults and ABI sentinel, and writes a machine-readable
+installed/compressed category decomposition.
 
 ## Phase 1: source-build feasibility
 

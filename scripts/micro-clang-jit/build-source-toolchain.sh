@@ -61,6 +61,7 @@ cat > "$LLVM_SRC/.git/info/sparse-checkout" <<'EOF'
 /libunwind/
 /libcxx/
 /libcxxabi/
+/runtimes/
 /libc/
 EOF
 git -C "$LLVM_SRC" fetch --depth 1 origin "$LLVM_COMMIT"

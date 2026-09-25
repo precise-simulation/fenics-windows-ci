@@ -1,7 +1,10 @@
 diff --git a/build-mingw-w64.sh b/build-mingw-w64.sh
 --- a/build-mingw-w64.sh
 +++ b/build-mingw-w64.sh
-@@ -110,7 +110,10 @@ if [ -z "$SKIP_INCLUDE_TRIPLET_PREFIX" ]; then
+@@ -108,10 +108,13 @@ if [ -z "$SKIP_INCLUDE_TRIPLET_PREFIX" ]; then
+         case $arch in
+         arm64ec) continue ;;
+         esac
  
          mkdir -p "$PREFIX/$arch-w64-mingw32"
          if [ ! -e "$PREFIX/$arch-w64-mingw32/include" ]; then

@@ -47,23 +47,6 @@ git -C "$WORK/llvm-mingw" checkout --detach FETCH_HEAD
 actual_llvm_mingw="$(git -C "$WORK/llvm-mingw" rev-parse HEAD)"
 [[ "$actual_llvm_mingw" == "$LLVM_MINGW_COMMIT" ]]
 
-MINGW_BUILD_PATCH="$SCRIPT_DIR/patches/llvm-mingw-materialize-target-include.patch"
-if [[ ! -f "$MINGW_BUILD_PATCH" ]]; then
-    echo "required llvm-mingw build patch is missing: $MINGW_BUILD_PATCH" >&2
-    exit 1
-fi
-# GitHub's Windows checkout can materialize unconstrained .patch files with
-# CRLF even though the MSYS-cloned upstream shell script is LF. Normalize the
-# exact patch bytes before applying and record the normalized applied identity.
-MINGW_BUILD_PATCH_APPLIED="$WORK/llvm-mingw-materialize-target-include.patch"
-tr -d '\r' < "$MINGW_BUILD_PATCH" > "$MINGW_BUILD_PATCH_APPLIED"
-MINGW_BUILD_PATCH_SHA256="$(sha256sum "$MINGW_BUILD_PATCH_APPLIED" | awk '{print $1}')"
-git -C "$WORK/llvm-mingw" apply --check "$MINGW_BUILD_PATCH_APPLIED"
-git -C "$WORK/llvm-mingw" apply "$MINGW_BUILD_PATCH_APPLIED"
-git -C "$WORK/llvm-mingw" diff --check
-cp "$MINGW_BUILD_PATCH_APPLIED" "$EVIDENCE/llvm-mingw-build-script-applied.patch"
-git -C "$WORK/llvm-mingw" diff -- build-mingw-w64.sh > "$EVIDENCE/llvm-mingw-build-script.diff"
-
 LLVM_SRC="$WORK/llvm-mingw/llvm-project"
 git init "$LLVM_SRC"
 git -C "$LLVM_SRC" remote add origin https://github.com/llvm/llvm-project.git
@@ -116,12 +99,23 @@ pushd "$WORK/llvm-mingw" >/dev/null
 PATH="$STAGE/bin:$BOOTSTRAP/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 TARGET_OSES=mingw32 CC=gcc \
     ./install-wrappers.sh "$STAGE"
 
+# The source-built llvm-ar/llvm-ranlib are not runtime payload requirements.
+# Use the exact immutable Stage-AW bootstrap copies while building target
+# runtime archives. They are removed with the other non-shipped host tools
+# below; the bootstrap archive identity is already pinned and recorded.
+for tool in llvm-ar llvm-ranlib; do
+    bootstrap_tool="$BOOTSTRAP/bin/$tool.exe"
+    stage_tool="$STAGE/bin/$tool.exe"
+    if [[ ! -x "$bootstrap_tool" ]]; then
+        echo "required bootstrap archive tool is missing: $bootstrap_tool" >&2
+        exit 1
+    fi
+    cp "$bootstrap_tool" "$stage_tool"
+done
+
 # install-wrappers.sh uses symlinks for target-prefixed llvm-wrapper tools.
-# Native Windows wrapper dispatch derives the real tool name from
-# GetModuleFileName(), so an NTFS/MSYS symlink can resolve back to
-# llvm-wrapper.exe and lose the requested "ar"/"ranlib" basename. Materialize
-# the temporary archive wrappers as real executables before Autoconf probes
-# them. These target-prefixed helpers are removed from the final payload below.
+# Materialize ar/ranlib wrappers so native Windows dispatch retains the target
+# tool basename. These wrappers and archive tools are build-time only.
 for tool in ar ranlib; do
     wrapper="$STAGE/bin/x86_64-w64-mingw32-$tool.exe"
     if [[ ! -e "$wrapper" ]]; then
@@ -133,15 +127,27 @@ for tool in ar ranlib; do
     mv "$wrapper.materialized" "$wrapper"
 done
 
+cat > "$WORK/archive-smoke.c" <<'EOF'
+int micro_clang_archive_smoke(void) { return 7; }
+EOF
+"$STAGE/bin/x86_64-w64-mingw32-clang.exe" -c "$WORK/archive-smoke.c" -o "$WORK/archive-smoke.o"
+rm -f "$WORK/archive-smoke.a"
+"$STAGE/bin/x86_64-w64-mingw32-ar.exe" cru "$WORK/archive-smoke.a" "$WORK/archive-smoke.o"
+"$STAGE/bin/x86_64-w64-mingw32-ranlib.exe" "$WORK/archive-smoke.a"
+[[ -s "$WORK/archive-smoke.a" ]]
+
 {
-    echo "llvm-ar:"
-    "$STAGE/bin/llvm-ar.exe" --version
+    echo "bootstrap llvm-ar:"
+    "$BOOTSTRAP/bin/llvm-ar.exe" --version
     echo
-    echo "target ar:"
+    echo "staged target ar:"
     "$STAGE/bin/x86_64-w64-mingw32-ar.exe" --version
     echo
-    echo "target ranlib:"
+    echo "staged target ranlib:"
     "$STAGE/bin/x86_64-w64-mingw32-ranlib.exe" --version
+    echo
+    echo "archive smoke:"
+    ls -l "$WORK/archive-smoke.a"
 } > "$EVIDENCE/archive-wrapper-preflight.txt" 2>&1
 
 if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
@@ -261,13 +267,13 @@ if [[ -f "$cmake_cache" ]]; then
 fi
 
 python - "$STAGE" "$EVIDENCE" "$actual_archive_sha" "$actual_llvm_mingw" "$actual_llvm" "$actual_mingw" \
-    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" "$MINGW_BUILD_PATCH_SHA256" <<'PY'
+    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags, mingw_build_patch_sha) = sys.argv[1:]
+(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags) = sys.argv[1:]
 stage = pathlib.Path(stage_s)
 evidence = pathlib.Path(evidence_s)
 
@@ -293,10 +299,9 @@ provenance = {
     "llvm_commit": llvm,
     "compiler_rt_commit": llvm,
     "mingw_w64_commit": mingw,
-    "local_build_patches": {
-        "llvm-mingw-materialize-target-include.patch": mingw_build_patch_sha,
-    },
+    "local_build_patches": {},
     "bootstrap_archive_sha256": archive_sha,
+    "runtime_build_archive_tools": "immutable Stage-AW bootstrap llvm-ar/llvm-ranlib",
     "bootstrap_compiler": bootstrap.strip(),
     "cmake": cmake.strip(),
     "ninja": ninja.strip(),

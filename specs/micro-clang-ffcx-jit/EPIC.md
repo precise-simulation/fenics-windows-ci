@@ -57,7 +57,7 @@ Build with a minimal configuration such as:
 - no sanitizers, profilers, fuzzers, ORC JIT, or unsupported target runtimes;
 - tests/examples/benchmarks/docs disabled in the shipped build;
 - static or otherwise self-contained host compiler linkage where practical;
-- only the PE/COFF linker path needed by the Clang driver;
+- LLD's MinGW GNU-style driver plus its COFF backend, exposed through the required `ld.lld.exe` entry point;
 - no C++ target standard library in the runtime payload;
 - only the x86-64 Windows target sysroot.
 
@@ -68,7 +68,7 @@ The exact CMake/build configuration must be captured in package metadata and tre
 The implementation should test the following in order:
 
 1. **Source-built Clang/LLD host tools.**
-   Build only the LLVM components needed to produce the Clang driver/frontend and LLD PE/COFF linker.
+   Build only the LLVM components needed to produce the Clang driver/frontend and LLD's MinGW driver plus COFF backend. Retain the `ld.lld.exe` entry point used by the qualified GNU/MinGW Clang link path; retaining only the MSVC-style `lld-link` driver is insufficient.
 
 2. **Minimize host-tool dependencies at build time.**
    Prefer a compiler configuration that does not require a large set of shared LLVM/Clang DLLs in the runtime package. Static host CRT linkage may be considered if licensing, reproducibility, and Windows compatibility remain acceptable.
@@ -206,7 +206,9 @@ Do not report only clang.exe or only the host-tool directory.
 
 micro-Clang is only valuable as a middle option if it preserves LLVM-class generated code.
 
-Against the immutable LLVM-MinGW reference:
+For every performance qualification, rerun the pinned LLVM-MinGW reference alongside micro-Clang on the same runner instance, with the same Python/dependency environment, form inputs, and benchmark harness. Use repeated samples with alternating backend order to reduce runner drift, and preserve the raw distributions and runner/package identities. The reference package identity remains immutable, but timing denominators must come from this paired run; historical timings from earlier workflow runs must not be used to decide the performance gates.
+
+Against that freshly measured immutable LLVM-MinGW reference:
 
 - numerical results must remain within existing tolerances;
 - representative assembly family aggregate medians should be <= 1.10x LLVM-MinGW;

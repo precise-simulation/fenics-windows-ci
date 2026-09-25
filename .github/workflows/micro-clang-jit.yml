@@ -1,0 +1,144 @@
+name: micro-clang-jit
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/micro-clang-jit.yml"
+      - "scripts/micro-clang-jit/**"
+      - "specs/micro-clang-ffcx-jit/**"
+      - "recipes/fenics-jit-llvm-mingw/fenics_jit_runtime.py"
+      - "scripts/llvm-mingw-jit/run-cffi-proof.ps1"
+      - "scripts/llvm-mingw-jit/minimal-cffi-proof.py"
+      - "scripts/llvm-mingw-jit/ffcx-poisson-proof.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: micro-clang-jit-\${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  phase0:
+    name: Validate immutable Phase 0 reference
+    runs-on: windows-2022
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install reference validation Python
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase0
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Validate Stage-AW source identity and decomposition
+        shell: pwsh
+        run: python ./scripts/micro-clang-jit/verify-phase0.py
+
+  source-build:
+    name: Build X86-only source Clang/LLD
+    needs: phase0
+    runs-on: windows-2022
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install pinned LLVM build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-build
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            cmake=4.1.1
+            ninja=1.13.1
+
+      - name: Build and stage same-revision micro-Clang
+        shell: pwsh
+        run: ./scripts/micro-clang-jit/build-phase1.ps1
+
+      - name: Upload source-built stage
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase1-stage
+          path: micro-clang-stage/
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase1-build-diagnostics
+          path: micro-clang-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
+  phase1-jit:
+    name: Private Phase 1 JIT (Python \${{ matrix.python }})
+    needs: source-build
+    runs-on: windows-2022
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download micro-Clang stage into path with spaces
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase1-stage
+          path: "micro stage with spaces"
+
+      - name: Install isolated FEniCS runtime
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-jit
+          create-args: >-
+            --override-channels --strict-channel-priority
+            -c precise-simulation -c conda-forge
+            python=\${{ matrix.python }}
+            libblas=*=*openblas
+            fenics-dolfinx
+            cffi
+            setuptools
+
+      - name: Prepare immutable LLVM-MinGW driver control
+        shell: pwsh
+        run: |
+          ./scripts/llvm-mingw-jit/prepare-llvm-mingw.ps1 -Destination "reference-control" -DiagnosticsDir "micro-clang-reference-diagnostics"
+
+      - name: Run private micro-Clang functional and hermeticity gate
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/micro-clang-jit"
+          $micro = (Resolve-Path "micro stage with spaces").Path
+          $reference = (Resolve-Path "reference-control/llvm-mingw-20260826-ucrt-x86_64").Path
+          ./scripts/micro-clang-jit/run-phase1.ps1 -PythonPrefix $prefix -MicroClangRoot $micro -ReferenceRoot $reference -WorkDir "micro phase1 work py\${{ matrix.python }}" -DiagnosticsDir "micro-clang-phase1-diagnostics/py\${{ matrix.python }}"
+
+      - name: Upload Phase 1 diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase1-py\${{ matrix.python }}
+          path: |
+            micro-clang-phase1-diagnostics/
+            micro-clang-reference-diagnostics/
+            micro phase1 work py\${{ matrix.python }}/setup.cfg
+            micro phase1 work py\${{ matrix.python }}/*.c
+            micro phase1 work py\${{ matrix.python }}/*.pyd
+          if-no-files-found: warn
+          retention-days: 14

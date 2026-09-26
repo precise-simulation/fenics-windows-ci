@@ -167,12 +167,15 @@ $metadataPath = Join-Path $backend "metadata.json"
     (New-Object Text.UTF8Encoding($false))
 )
 
-$payloadFiles = @(Get-ChildItem -LiteralPath $backend -Recurse -File | Sort-Object FullName)
-$payloadBytes = ($payloadFiles | Measure-Object Length -Sum).Sum
-if ($null -eq $payloadBytes) { $payloadBytes = 0 }
-$payloadBytes = [int64]$payloadBytes
-
-$manifest = foreach ($file in $payloadFiles) {
+# The retained manifest intentionally excludes itself and size.txt so it can
+# carry stable hashes. Both generated files are nevertheless included in the
+# finalized package footprint below.
+$manifestInputs = @(
+    Get-ChildItem -LiteralPath $backend -Recurse -File |
+        Where-Object { $_.Name -notin @("manifest.csv", "size.txt") } |
+        Sort-Object FullName
+)
+$manifest = foreach ($file in $manifestInputs) {
     $relative = $file.FullName.Substring($backend.Length).TrimStart("\")
     [pscustomobject]@{
         path = $relative.Replace("\", "/")
@@ -183,16 +186,39 @@ $manifest = foreach ($file in $payloadFiles) {
 $manifestPath = Join-Path $backend "manifest.csv"
 $manifest | ConvertTo-Csv -NoTypeInformation | Set-Content $manifestPath -Encoding UTF8
 
-$sizeLines = @(
-    "payload_file_count=$($payloadFiles.Count)"
-    "payload_bytes=$payloadBytes"
-    "payload_mib=$([math]::Round($payloadBytes / 1MB, 4))"
-    "stage_aw_reference_mib=215.19"
-    "phase4_early_continuation_gate_mib=108.2"
-    "phase4_size_gate_status=not-evaluated-in-phase2"
-)
 $sizePath = Join-Path $backend "size.txt"
-$sizeLines | Set-Content $sizePath -Encoding Ascii
+$payloadFiles = @()
+$payloadBytes = [int64]0
+for ($iteration = 0; $iteration -lt 5; $iteration++) {
+    $payloadFiles = @(Get-ChildItem -LiteralPath $backend -Recurse -File | Sort-Object FullName)
+    $payloadBytes = ($payloadFiles | Measure-Object Length -Sum).Sum
+    if ($null -eq $payloadBytes) { $payloadBytes = 0 }
+    $payloadBytes = [int64]$payloadBytes
+    $sizeLines = @(
+        "payload_file_count=$($payloadFiles.Count)"
+        "payload_bytes=$payloadBytes"
+        "payload_mib=$([math]::Round($payloadBytes / 1MB, 4))"
+        "manifest_hashed_file_count=$($manifestInputs.Count)"
+        "manifest_excludes=manifest.csv,size.txt"
+        "stage_aw_reference_mib=215.19"
+        "phase4_early_continuation_gate_mib=108.2"
+        "phase4_size_gate_status=not-evaluated-in-phase2"
+    )
+    $previous = if (Test-Path -LiteralPath $sizePath) { Get-Content -LiteralPath $sizePath -Raw } else { "" }
+    $next = ($sizeLines -join [Environment]::NewLine) + [Environment]::NewLine
+    [IO.File]::WriteAllText($sizePath, $next, [Text.Encoding]::ASCII)
+    if ($previous -eq $next) { break }
+}
+$payloadFiles = @(Get-ChildItem -LiteralPath $backend -Recurse -File | Sort-Object FullName)
+$payloadBytes = [int64](($payloadFiles | Measure-Object Length -Sum).Sum)
+$recordedBytes = [int64]((
+    Get-Content -LiteralPath $sizePath |
+        Where-Object { $_ -like "payload_bytes=*" } |
+        Select-Object -First 1
+).Split("=", 2)[1])
+if ($recordedBytes -ne $payloadBytes) {
+    throw "finalized package footprint did not stabilize: recorded=$recordedBytes actual=$payloadBytes"
+}
 
 Copy-Item -LiteralPath $metadataPath, $manifestPath, $sizePath -Destination $evidence -Force
 $summary = [ordered]@{

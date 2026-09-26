@@ -79,7 +79,12 @@ fi
 
 export PATH="$BOOTSTRAP/bin:$PATH"
 export TOOLCHAIN_ARCHS=x86_64
-export LLVM_CMAKEFLAGS="-DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_INCLUDE_TESTS=OFF -DCLANG_INCLUDE_TESTS=OFF -DLLD_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBEDIT=OFF -DCMAKE_EXE_LINKER_FLAGS=-static -DCMAKE_SHARED_LINKER_FLAGS=-static"
+# Keep the host C++ runtime shared, matching the Stage-AW Windows toolchain.
+# The earlier forced-static experiment reproducibly made source-built llvm-ar
+# and Clang treat ordinary ENOENT lookups as fatal across the LLVM/Clang DLL
+# boundary. Stage-AW ships a shared libc++.dll/libunwind.dll closure, so Phase
+# 1 should establish functionality with that model before any later size work.
+export LLVM_CMAKEFLAGS="-DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_INCLUDE_TESTS=OFF -DCLANG_INCLUDE_TESTS=OFF -DLLD_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBEDIT=OFF"
 
 bootstrap_version="$("$BOOTSTRAP/bin/clang.exe" --version | tr '\n' ' ')"
 cmake_version="$(cmake --version | head -n1)"
@@ -106,40 +111,23 @@ if ! PATH="$STAGE/bin:$BOOTSTRAP/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 TARGET_OSES=m
     exit 1
 fi
 
-# Native Windows llvm-ar from this LLVM 23 revision cannot create a new
-# archive on this runner: MemoryBuffer::getFile reports ENOENT through a Windows
-# error category that the tool treats as fatal before honoring the 'c'
-# modifier. Runtime archives are build products, not shipped host tools, so use
-# the already-provisioned MSYS2/UCRT GNU binutils ar/ranlib for runtime builds.
-# They are copied under the names hard-coded by the upstream compiler-rt/libc++
-# build scripts and are pruned from the final micro-Clang payload.
-UCRT_BIN="${MINGW_PREFIX:-/ucrt64}/bin"
-BUILD_AR="$UCRT_BIN/ar.exe"
-BUILD_RANLIB="$UCRT_BIN/ranlib.exe"
-for tool in "$BUILD_AR" "$BUILD_RANLIB"; do
-    if [[ ! -x "$tool" ]]; then
-        echo "required MSYS2/UCRT archive tool is missing: $tool" >&2
-        exit 1
-    fi
-done
-
-SOURCE_LLVM_AR_VERSION="$("$STAGE/bin/llvm-ar.exe" --version | head -n1)"
-cp "$BUILD_AR" "$STAGE/bin/llvm-ar.exe"
-cp "$BUILD_RANLIB" "$STAGE/bin/llvm-ranlib.exe"
-
+# A source-built llvm-ar that can create a previously nonexistent archive is
+# an early sentinel for correct Windows error-category behavior in the host
+# LLVM runtime. Do not mask this with external binutils: the same failure mode
+# also breaks Clang header search when a candidate include path is absent.
 cat > "$WORK/archive-smoke.c" <<'EOF'
 int micro_clang_archive_smoke(void) { return 7; }
 EOF
 "$STAGE/bin/x86_64-w64-mingw32-clang.exe" -c "$WORK/archive-smoke.c" -o "$WORK/archive-smoke.o"
 rm -f "$WORK/archive-smoke.a"
-"$STAGE/bin/llvm-ar.exe" cru "$WORK/archive-smoke.a" "$WORK/archive-smoke.o"
+if ! "$STAGE/bin/llvm-ar.exe" rcs "$WORK/archive-smoke.a" "$WORK/archive-smoke.o"; then
+    echo "source-built llvm-ar cannot create a new archive; host runtime linkage is not usable" >&2
+    exit 1
+fi
 "$STAGE/bin/llvm-ranlib.exe" "$WORK/archive-smoke.a"
 [[ -s "$WORK/archive-smoke.a" ]]
 
 {
-    echo "source-built llvm-ar (not used for runtime archives):"
-    echo "$SOURCE_LLVM_AR_VERSION"
-    echo
     echo "runtime-build ar:"
     "$STAGE/bin/llvm-ar.exe" --version
     echo
@@ -220,7 +208,20 @@ PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
 # runtime set from the same LLVM monorepo revision, static-only, then remove
 # the C++ pieces after installation.
 PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
-    ./build-libcxx.sh "$STAGE" --disable-shared --enable-cfguard
+    ./build-libcxx.sh "$STAGE" --enable-shared --enable-cfguard
+
+# The source-built host Clang/LLVM DLLs use the shared libc++/libunwind model
+# used by Stage-AW. During the runtime build they resolve the immutable
+# bootstrap DLLs from PATH; replace that build-time dependency with the
+# freshly source-built, same-revision runtime DLLs before packaging.
+for host_runtime in libc++.dll libunwind.dll; do
+    runtime_src="$STAGE/x86_64-w64-mingw32/bin/$host_runtime"
+    if [[ ! -f "$runtime_src" ]]; then
+        echo "source-built host runtime DLL is missing: $runtime_src" >&2
+        exit 1
+    fi
+    cp "$runtime_src" "$STAGE/bin/$host_runtime"
+done
 popd >/dev/null
 
 # Convert the successfully built upstream sysroot layout to the native Windows
@@ -256,7 +257,9 @@ for required in "$builtins" "$unwind" \
                 "$STAGE/bin/clang-23.exe" \
                 "$STAGE/bin/ld.lld.exe" \
                 "$STAGE/bin/llvm-readobj.exe" \
-                "$STAGE/bin/llvm-dlltool.exe"; do
+                "$STAGE/bin/llvm-dlltool.exe" \
+                "$STAGE/bin/libc++.dll" \
+                "$STAGE/bin/libunwind.dll"; do
     if [[ ! -f "$required" ]]; then
         echo "required source-built toolchain file missing: $required" >&2
         exit 1
@@ -293,7 +296,9 @@ for required in \
     "$STAGE/bin/x86_64-w64-mingw32-clang.exe" \
     "$STAGE/bin/ld.lld.exe" \
     "$STAGE/bin/llvm-readobj.exe" \
-    "$STAGE/bin/llvm-dlltool.exe"; do
+    "$STAGE/bin/llvm-dlltool.exe" \
+    "$STAGE/bin/libc++.dll" \
+    "$STAGE/bin/libunwind.dll"; do
     [[ -f "$required" ]]
 done
 
@@ -358,7 +363,8 @@ provenance = {
     "runtime_build_header_flags": "none; source-built target wrapper uses triplet sysroot discovery",
     "runtime_build_preprocessor": "source-built target Clang wrapper",
     "bootstrap_archive_sha256": archive_sha,
-    "runtime_build_archive_tools": "MSYS2/UCRT GNU binutils ar/ranlib, build-time only",
+    "runtime_build_archive_tools": "source-built LLVM llvm-ar/llvm-ranlib",
+    "host_cxx_runtime_linkage": "shared source-built libc++/libunwind; Stage-AW-compatible host DLL model",
     "bootstrap_compiler": bootstrap.strip(),
     "cmake": cmake.strip(),
     "ninja": ninja.strip(),

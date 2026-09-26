@@ -206,9 +206,11 @@ def prepare(args: argparse.Namespace) -> None:
         )
 
     # The target wrapper must preserve the qualified compiler-rt/libunwind/LLD
-    # link policy. The -### shared-link probe is authoritative.
+    # link policy. Clang materializes -unwindlib=libunwind in the linker command
+    # as "-lunwind", so validate the emitted link token rather than the driver
+    # option spelling. The -### shared-link probe is authoritative.
     lowered_driver = driver.lower()
-    for required in ("ld.lld", "libclang_rt.builtins", "libunwind"):
+    for required in ("ld.lld", "libclang_rt.builtins", '"-lunwind"'):
         if required not in lowered_driver:
             raise RuntimeError(f"qualified link policy missing {required!r} from micro-Clang -###")
 

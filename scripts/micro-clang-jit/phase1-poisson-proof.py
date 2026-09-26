@@ -98,10 +98,16 @@ def main() -> None:
         if compiler != "mingw32":
             raise RuntimeError(f"private runtime did not select mingw32: {compiler!r}")
 
-        if not hasattr(dolfinx.jit, "_fenics_windows_jit_runtime"):
-            raise RuntimeError("installed DOLFINx does not expose the Windows JIT selector hook")
-        original_dolfinx_context = dolfinx.jit._fenics_windows_jit_runtime
-        dolfinx.jit._fenics_windows_jit_runtime = private_outer_runtime
+        # Newer repository builds wrap each local FFCx JIT operation in the
+        # production Windows selector. Phase 1 must neutralize that wrapper so
+        # it cannot reactivate the installed LLVM-MinGW backend. Older channel
+        # builds predate the selector hook; in that case the already-active
+        # private runtime directly governs FFCx/CFFI and no patch is required.
+        original_dolfinx_context = getattr(
+            dolfinx.jit, "_fenics_windows_jit_runtime", None
+        )
+        if original_dolfinx_context is not None:
+            dolfinx.jit._fenics_windows_jit_runtime = private_outer_runtime
 
         def logged_check_call(cmd, *call_args, **call_kwargs):
             rendered = subprocess.list2cmdline([str(part) for part in cmd])
@@ -114,7 +120,8 @@ def main() -> None:
             runpy.run_path(str(poisson_script), run_name="__main__")
         finally:
             subprocess.check_call = original_check_call
-            dolfinx.jit._fenics_windows_jit_runtime = original_dolfinx_context
+            if original_dolfinx_context is not None:
+                dolfinx.jit._fenics_windows_jit_runtime = original_dolfinx_context
 
     pyds = sorted(cache_dir.glob("*.pyd"))
     if not pyds:

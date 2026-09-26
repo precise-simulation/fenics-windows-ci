@@ -150,12 +150,35 @@ rm -f "$WORK/archive-smoke.a"
     ls -l "$WORK/archive-smoke.a"
 } > "$EVIDENCE/archive-wrapper-preflight.txt" 2>&1
 
-# Build mingw-w64 in the upstream runtime-build layout first. In this layout
-# the target sysroot contains x86_64-w64-mingw32/include -> the generic header
-# tree, so the source-built Clang wrapper can discover both target headers and
-# its own resource headers while the CRT/import libraries are being built.
-# The Windows distribution layout (root include/) is produced only after all
-# runtimes are complete, matching upstream's cross-toolchain packaging model.
+# Build mingw-w64 in the upstream runtime-build layout first. Upstream uses a
+# relative symlink from x86_64-w64-mingw32/include to the generic header tree.
+# On the GitHub Windows/MSYS2 runner that link is visible to MSYS tools but the
+# native source-built Clang cannot reliably traverse it during CRT configure.
+# Keep the same logical sysroot layout, but materialize that one target header
+# tree as a physical copy for the runtime build. The duplicate is removed when
+# the final Windows distribution layout is produced below.
+python - "$WORK/llvm-mingw/build-mingw-w64.sh" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """        if [ ! -e "$PREFIX/$arch-w64-mingw32/include" ]; then
+            ln -sfn ../generic-w64-mingw32/include "$PREFIX/$arch-w64-mingw32/include"
+        fi
+"""
+new = """        if [ ! -e "$PREFIX/$arch-w64-mingw32/include" ]; then
+            mkdir -p "$PREFIX/$arch-w64-mingw32/include"
+            cp -a "$PREFIX/generic-w64-mingw32/include/." "$PREFIX/$arch-w64-mingw32/include/"
+        fi
+"""
+if text.count(old) != 1:
+    raise SystemExit("unexpected build-mingw-w64.sh header-link block")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+git diff -- build-mingw-w64.sh > "$EVIDENCE/llvm-mingw-local-build.patch"
+local_patch_sha="$(sha256sum "$EVIDENCE/llvm-mingw-local-build.patch" | awk '{print $1}')"
+
 if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     AR="$STAGE/bin/llvm-ar.exe" RANLIB="$STAGE/bin/llvm-ranlib.exe" \
     ./build-mingw-w64.sh "$STAGE" \
@@ -295,13 +318,13 @@ if [[ -f "$cmake_cache" ]]; then
 fi
 
 python - "$STAGE" "$EVIDENCE" "$actual_archive_sha" "$actual_llvm_mingw" "$actual_llvm" "$actual_mingw" \
-    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" <<'PY'
+    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" "$local_patch_sha" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags) = sys.argv[1:]
+(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags, local_patch_sha) = sys.argv[1:]
 stage = pathlib.Path(stage_s)
 evidence = pathlib.Path(evidence_s)
 
@@ -327,9 +350,12 @@ provenance = {
     "llvm_commit": llvm,
     "compiler_rt_commit": llvm,
     "mingw_w64_commit": mingw,
-    "local_build_patches": {},
-    "mingw_w64_header_layout": "upstream triplet sysroot during runtime build; converted to root include/ for Windows packaging",
-    "runtime_build_header_flags": "none; source-built target wrapper uses upstream sysroot discovery",
+    "local_build_patches": {
+        "llvm_mingw_build_mingw_w64_sha256": local_patch_sha,
+        "reason": "materialize the x86_64 target include tree because native Windows Clang cannot reliably traverse the MSYS runtime-build symlink",
+    },
+    "mingw_w64_header_layout": "upstream triplet sysroot during runtime build with a physical x86_64 target include copy; converted to root include/ for Windows packaging",
+    "runtime_build_header_flags": "none; source-built target wrapper uses triplet sysroot discovery",
     "runtime_build_preprocessor": "source-built target Clang wrapper",
     "bootstrap_archive_sha256": archive_sha,
     "runtime_build_archive_tools": "MSYS2/UCRT GNU binutils ar/ranlib, build-time only",

@@ -1,0 +1,48 @@
+{
+  "schema": "fenics-jit-micro-clang-reference-v1",
+  "stage_aw": {
+    "llvm_mingw_release": "20260826",
+    "llvm_mingw_tag_object_sha": "993b5219b769cc59cb9b48be56e5edfd9e5c6226",
+    "llvm_mingw_commit": "14614551fb5fc0f725933e4959c75c06d347acfa",
+    "archive": "llvm-mingw-20260826-ucrt-x86_64.zip",
+    "archive_sha256": "ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3",
+    "qualification_run": 34580520920,
+    "staged_payload_mib": 215.19,
+    "installed_package_mib": 216.43,
+    "compressed_package_mib": 51.34,
+    "repository_reference": {
+      "repository": "precise-simulation/fenics-windows-ci",
+      "pull_request": 9,
+      "qualification_head_commit": "1d970c7372c673b086ce75210b865768b2b18e42",
+      "merge_commit": "e533bf4bfd93567709c8227195b323bfc4eafd1b",
+      "package_build": "fenics-jit-llvm-mingw-20260826-h9490d1a_49"
+    }
+  },
+  "llvm": {
+    "tag": "llvmorg-23.1.0",
+    "tag_object_sha": "9b0f9b1eb4a233717c6ed014cff6f8a7c65512de",
+    "commit": "ea7d852a70e8bdfaf601d6626a760f9771b2c4b4"
+  },
+  "compiler_rt": {
+    "repository": "llvm/llvm-project",
+    "commit": "ea7d852a70e8bdfaf601d6626a760f9771b2c4b4"
+  },
+  "mingw_w64": {
+    "commit": "a3d708261d5ba659205067cb82cae36e7ae8bbb0",
+    "default_msvcrt": "ucrt",
+    "default_win32_winnt": "0x601",
+    "cfguard": true
+  },
+  "reference_driver": {
+    "target": "x86_64-w64-mingw32",
+    "rtlib": "compiler-rt",
+    "unwindlib": "libunwind",
+    "linker": "lld",
+    "exception_model": "seh"
+  },
+  "size_gates_mib": {
+    "continuation": 108.2,
+    "strong_middle_backend": 81.2,
+    "stretch": 54.1
+  }
+}

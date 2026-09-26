@@ -150,18 +150,15 @@ rm -f "$WORK/archive-smoke.a"
     ls -l "$WORK/archive-smoke.a"
 } > "$EVIDENCE/archive-wrapper-preflight.txt" 2>&1
 
-# During the CRT bootstrap, the MinGW sysroot is not complete enough for
-# Clang's automatic sysroot detection (notably libkernel32.a is not installed
-# yet). The headers have already been installed to $STAGE/include by the
-# upstream --skip-include-triplet-prefix mode, so expose that path explicitly
-# to Autoconf/Make for this build only. This does not change final driver
-# defaults or shipped wrapper configuration.
+# Build mingw-w64 in the upstream runtime-build layout first. In this layout
+# the target sysroot contains x86_64-w64-mingw32/include -> the generic header
+# tree, so the source-built Clang wrapper can discover both target headers and
+# its own resource headers while the CRT/import libraries are being built.
+# The Windows distribution layout (root include/) is produced only after all
+# runtimes are complete, matching upstream's cross-toolchain packaging model.
 if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     AR="$STAGE/bin/llvm-ar.exe" RANLIB="$STAGE/bin/llvm-ranlib.exe" \
-    CPP="$UCRT_BIN/gcc.exe -E" \
-    CPPFLAGS="-isystem $STAGE/include" \
     ./build-mingw-w64.sh "$STAGE" \
-        --skip-include-triplet-prefix \
         --with-default-msvcrt=ucrt \
         --with-default-win32-winnt=0x601 \
         --enable-cfguard; then
@@ -171,6 +168,21 @@ if ! PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     fi
     exit 1
 fi
+
+# Fail immediately if the completed target sysroot is not usable by the exact
+# source-built wrapper before starting compiler-rt/libc++.
+cat > "$WORK/mingw-header-smoke.c" <<'EOF'
+#include <windows.h>
+#include <stdlib.h>
+#include <xmmintrin.h>
+int micro_clang_mingw_header_smoke(void) { return EXIT_SUCCESS; }
+EOF
+"$STAGE/bin/x86_64-w64-mingw32-clang.exe" -v -std=c17 -c \
+    "$WORK/mingw-header-smoke.c" -o "$WORK/mingw-header-smoke.o" \
+    > "$EVIDENCE/mingw-header-smoke.txt" 2>&1 || {
+        cat "$EVIDENCE/mingw-header-smoke.txt" >&2
+        exit 1
+    }
 
 actual_mingw="$(git -C "$WORK/llvm-mingw/mingw-w64" rev-parse HEAD)"
 if [[ "$actual_mingw" != "$MINGW_W64_COMMIT" ]]; then
@@ -188,11 +200,20 @@ PATH="$STAGE/bin:$PATH" TOOLCHAIN_ARCHS=x86_64 \
     ./build-libcxx.sh "$STAGE" --disable-shared --enable-cfguard
 popd >/dev/null
 
-if [[ ! -f "$STAGE/include/crtdefs.h" || ! -f "$STAGE/include/stdio.h" ]]; then
-    echo "source-built mingw-w64 root headers are missing" >&2
+# Convert the successfully built upstream sysroot layout to the native Windows
+# distribution layout used by Stage-AW: target headers live at root include/.
+generic_include="$STAGE/generic-w64-mingw32/include"
+if [[ ! -f "$generic_include/crtdefs.h" || ! -f "$generic_include/stdio.h" ]]; then
+    echo "source-built mingw-w64 generic headers are missing" >&2
     exit 1
 fi
+mkdir -p "$STAGE/include"
+cp -a "$generic_include/." "$STAGE/include/"
 rm -rf "$STAGE/generic-w64-mingw32" "$STAGE/x86_64-w64-mingw32/include"
+if [[ ! -f "$STAGE/include/crtdefs.h" || ! -f "$STAGE/include/stdio.h" ]]; then
+    echo "packaged mingw-w64 root headers are missing" >&2
+    exit 1
+fi
 
 rm -rf "$STAGE/include/c++" "$STAGE/share/libc++"
 find "$STAGE/x86_64-w64-mingw32/lib" -maxdepth 1 -type f \
@@ -307,9 +328,9 @@ provenance = {
     "compiler_rt_commit": llvm,
     "mingw_w64_commit": mingw,
     "local_build_patches": {},
-    "mingw_w64_header_layout": "upstream --skip-include-triplet-prefix",
-    "runtime_build_header_flags": "-isystem <stage>/include (bootstrap only)",
-    "runtime_build_preprocessor": "MSYS2/UCRT GCC -E, build-time only",
+    "mingw_w64_header_layout": "upstream triplet sysroot during runtime build; converted to root include/ for Windows packaging",
+    "runtime_build_header_flags": "none; source-built target wrapper uses upstream sysroot discovery",
+    "runtime_build_preprocessor": "source-built target Clang wrapper",
     "bootstrap_archive_sha256": archive_sha,
     "runtime_build_archive_tools": "MSYS2/UCRT GNU binutils ar/ranlib, build-time only",
     "bootstrap_compiler": bootstrap.strip(),

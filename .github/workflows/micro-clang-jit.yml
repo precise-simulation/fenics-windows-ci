@@ -173,3 +173,67 @@ jobs:
             micro clang proof py${{ matrix.python }} with spaces/
           if-no-files-found: warn
           retention-days: 14
+
+
+  phase2-package:
+    name: Phase 2 conservative package
+    needs: [phase0-reference, phase1-build, phase1-private-proof]
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download source-built toolchain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase1-toolchain
+          path: micro-clang-artifact
+
+      - name: Download source-build evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase1-build-evidence
+          path: micro-clang-build-evidence
+
+      - name: Install Phase-2 package-test environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase2
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            pefile
+
+      - name: Stage conservative backend package and verify relocation
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/micro-clang-phase2"
+          $compiler = Get-ChildItem "micro-clang-artifact" -Recurse -Filter "x86_64-w64-mingw32-clang.exe" -File | Select-Object -First 1
+          if (-not $compiler) { throw "source-built target clang not found in downloaded artifact" }
+          $sourceRoot = Split-Path -Parent (Split-Path -Parent $compiler.FullName)
+          $packageRoot = Join-Path $PWD "micro clang phase2 package with spaces"
+          $evidence = Join-Path $PWD "micro-clang-phase2-evidence"
+          ./scripts/micro-clang-jit/package-phase2.ps1 -ToolchainRoot $sourceRoot -PythonPrefix $prefix -BuildEvidenceDir (Join-Path $PWD "micro-clang-build-evidence") -OutputRoot $packageRoot -EvidenceDir $evidence
+          $backendRoot = Join-Path $packageRoot "Library/fenics-jit/backends/micro-clang"
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase2-package-smoke.py --backend-root $backendRoot --work-dir (Join-Path $PWD "micro clang phase2 smoke with spaces") --evidence-dir $evidence
+          if ($LASTEXITCODE -ne 0) { throw "Phase-2 conservative package smoke failed" }
+
+      - name: Upload Phase-2 conservative package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase2-package
+          path: micro clang phase2 package with spaces/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
+
+      - name: Upload Phase-2 package evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase2-evidence
+          path: micro-clang-phase2-evidence/
+          if-no-files-found: warn
+          retention-days: 14

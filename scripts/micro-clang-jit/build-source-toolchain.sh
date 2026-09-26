@@ -317,6 +317,14 @@ EOF
     }
 "$STAGE/bin/ld.lld.exe" --version > "$EVIDENCE/lld-version.txt"
 
+# Phase 2 packaging must carry the license notices for every source family
+# represented in the source-built toolchain. Keep them in the Phase-1 stage so
+# the conservative package is a direct relocation of a complete payload.
+mkdir -p "$STAGE/licenses"
+cp "$LLVM_SRC/llvm/LICENSE.TXT" "$STAGE/licenses/LLVM-LICENSE.TXT"
+cp "$WORK/llvm-mingw/LICENSE.txt" "$STAGE/licenses/llvm-mingw-LICENSE.txt"
+cp "$WORK/llvm-mingw/mingw-w64/COPYING" "$STAGE/licenses/mingw-w64-COPYING"
+
 cmake_cache="$WORK/llvm-mingw/llvm-project/llvm/build-withclang/CMakeCache.txt"
 if [[ -f "$cmake_cache" ]]; then
     cp "$cmake_cache" "$EVIDENCE/llvm-cmake-cache.txt"

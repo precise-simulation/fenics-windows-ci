@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 0-1 implementation; production integration remains gated on CI evidence.
+**Status:** Phase 2 conservative packaging; Phases 0-1 qualified in CI, production integration remains gated.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -61,10 +61,51 @@ micro-Clang runtime is in scope. This is deliberate: adding
 `FENICS_JIT_COMPILER=micro-clang` is a Phase-5 action and may occur only after
 the private qualification and size gates pass.
 
+## Phase 0-1 qualification evidence
+
+Workflow run #30 (`36232509736`) at head
+`6c0f3fc562eb9291f9ca58eb6e64cc454b273056` cleared the ordered Phase 0-1
+gate:
+
+- Phase 0 Stage-AW reference: passed;
+- Phase 1 source build: passed;
+- Phase 1 private proof Python 3.12: passed;
+- Phase 1 private proof Python 3.13: passed;
+- Phase 1 private proof Python 3.14: passed;
+- Python 3.15 remains informational and failed during environment installation,
+  before the private proof, so it is not a blocking supported-version result.
+
+The source-built payload reported 3,382 files / 375,006,631 bytes
+(357.6342 MiB). This is a Phase-1 feasibility staging size, not the Phase-4
+continuation measurement and not a claim that the early <=108.2 MiB size gate
+has passed.
+
+The blocking private proofs established fresh minimal CFFI and Poisson JIT,
+Stage-AW ABI and target-default equivalence, Stable-ABI Python linking, PE
+hardening/relocations/x64 unwind metadata, hostile ambient-tool isolation, and
+paths containing spaces.
+
+## Phase 2: conservative package
+
+Phase 2 now relocates the complete source-built payload under
+`Library/fenics-jit/backends/micro-clang`, adds the qualified private runtime
+helper, Stable-ABI import libraries for Python 3.12-3.14, source/build
+provenance, retained-file manifest, complete payload measurement, and LLVM /
+llvm-mingw / mingw-w64 license notices. The package is verified after relocation
+with a fresh DLL compile in a path containing spaces.
+
+This phase deliberately does **not** add `micro-clang` to the production
+shared selector and does not change the LLVM-MinGW default. It also does not
+apply the Phase-4 size gate: the conservative package is the baseline from
+which measured minimization must proceed.
+
 ## Gates before further implementation
 
-Do not start Phase 2 packaging until Phase 0 and Phase 1 pass in
-`.github/workflows/micro-clang-jit.yml`.
+Phase 2 packaging may proceed because Phase 0 and the required Phase 1 matrix
+passed in workflow run #30.
+
+Do not start Phase 3 broad qualification until the conservative Phase-2 package
+passes its package/relocation/provenance gate.
 
 Do not start production shared-runtime integration until the Phase-3 private
 qualification and Phase-4 size/performance gates pass. LLVM-MinGW remains the

@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 2 conservative packaging; Phases 0-1 qualified in CI, production integration remains gated.
+**Status:** Phase 3 private broad qualification in progress; Phases 0-2 qualified in CI, production integration remains gated.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -99,13 +99,73 @@ shared selector and does not change the LLVM-MinGW default. It also does not
 apply the Phase-4 size gate: the conservative package is the baseline from
 which measured minimization must proceed.
 
+
+## Phase 2 qualification evidence
+
+Workflow run #35 (\`36292484662\`) at head
+\`2947adb45176b03d89821a73b63fa2a0a093d0e5\` cleared the conservative
+package/reproducibility gate:
+
+- the finalized backend payload was measured after generated package metadata,
+  manifest and size files were written: 3,404 files / 359.373 MiB;
+- a second package reconstructed from the same immutable Phase-1 inputs under an
+  independent clean work root reported the same finalized file count and size;
+- \`metadata.json\`, \`manifest.csv\`, and \`size.txt\` matched by SHA-256
+  between the two clean package roots;
+- the retained source/build provenance and LLVM / llvm-mingw / mingw-w64
+  license material were present in the installed layout;
+- both the primary package and reconstructed package passed relocation smoke
+  from paths containing spaces;
+- the production selector remained untouched and LLVM-MinGW remained the
+  default/reference backend.
+
+The conservative 359.373 MiB footprint is intentionally not a Phase-4 size
+success. It is the complete pre-minimization baseline from which reversible,
+measured reductions must start.
+
+## Phase 3: private broad qualification
+
+Phase 3 is now implemented as a private Python 3.12-3.14 blocking matrix with
+Python 3.15 informational. It installs the qualified Phase-2 package into an
+isolated prefix containing spaces without registering a production selector
+entry.
+
+Each supported job:
+
+1. re-runs the Phase-1 ABI/driver/PE/hermeticity contract against the installed
+   Phase-2 package and immutable Stage-AW reference;
+2. reuses the established LLVM-MinGW broad FFCx form validator for scalar
+   Poisson, vector elasticity, coefficient/facet forms, nonlinear
+   residual/Jacobian, \`fem.Expression\`, cache reuse, Stable-ABI imports and
+   PE inspection;
+3. hash-checks the generated C for the established eight-module repository
+   corpus contract on Python 3.12-3.14;
+4. adds higher-order P3, explicit interior-facet \`dS\`, exterior-facet \`ds\`
+   and coefficient-heavy P3 coverage;
+5. compares those numerical results directly with the installed LLVM-MinGW
+   reference in the same interpreter/job;
+6. proves a cache reload from a new Python process performs no compiler/linker
+   work;
+7. runs two simultaneous private micro-Clang JIT processes to exercise
+   concurrent compiler/package use while shared-selector thread serialization
+   remains deliberately deferred to Phase 5;
+8. runs the established two-rank MPI JIT/cache proof and requires rank-0 compile
+   ownership with rank 1 loading the shared cache;
+9. keeps hostile Visual Studio/Windows SDK/compiler configuration poisoning and
+   package-root command checks active throughout micro-Clang compilation.
+
+No \`FENICS_JIT_COMPILER=micro-clang\` selector path is added in Phase 3.
+
 ## Gates before further implementation
 
 Phase 2 packaging may proceed because Phase 0 and the required Phase 1 matrix
 passed in workflow run #30.
 
-Do not start Phase 3 broad qualification until the conservative Phase-2 package
-passes its package/relocation/provenance gate.
+Phase 3 broad qualification may proceed because workflow run #35 passed the
+conservative Phase-2 package/relocation/provenance/reproducibility gate.
+
+Do not start Phase 4 minimization until the blocking Python 3.12-3.14 Phase-3
+private qualification matrix passes.
 
 Do not start production shared-runtime integration until the Phase-3 private
 qualification and Phase-4 size/performance gates pass. LLVM-MinGW remains the

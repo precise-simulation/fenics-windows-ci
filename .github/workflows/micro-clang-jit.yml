@@ -220,6 +220,48 @@ jobs:
           & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase2-package-smoke.py --backend-root $backendRoot --work-dir (Join-Path $PWD "micro clang phase2 smoke with spaces") --evidence-dir $evidence
           if ($LASTEXITCODE -ne 0) { throw "Phase-2 conservative package smoke failed" }
 
+          # Reconstruct the same package from the immutable Phase-1 inputs under
+          # an independent clean root. Phase 3 remains gated until this proves
+          # the retained manifest, final size metadata and package metadata are
+          # deterministic and the reconstructed package is relocatable.
+          $reproRoot = Join-Path $PWD "micro clang phase2 reproducibility root with spaces"
+          $reproEvidence = Join-Path $PWD "micro-clang-phase2-repro-evidence"
+          ./scripts/micro-clang-jit/package-phase2.ps1 -ToolchainRoot $sourceRoot -PythonPrefix $prefix -BuildEvidenceDir (Join-Path $PWD "micro-clang-build-evidence") -OutputRoot $reproRoot -EvidenceDir $reproEvidence
+          $reproBackend = Join-Path $reproRoot "Library/fenics-jit/backends/micro-clang"
+
+          $comparisons = [ordered]@{}
+          foreach ($name in @("metadata.json", "manifest.csv", "size.txt")) {
+            $first = (Get-FileHash -LiteralPath (Join-Path $backendRoot $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $second = (Get-FileHash -LiteralPath (Join-Path $reproBackend $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $comparisons[$name] = [ordered]@{
+              first_sha256 = $first
+              second_sha256 = $second
+              match = ($first -eq $second)
+            }
+            if ($first -ne $second) {
+              throw "Phase-2 reproducibility mismatch for $name"
+            }
+          }
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase2-package-smoke.py --backend-root $reproBackend --work-dir (Join-Path $PWD "micro clang phase2 reproducibility smoke with spaces") --evidence-dir $reproEvidence
+          if ($LASTEXITCODE -ne 0) { throw "Phase-2 reconstructed package relocation smoke failed" }
+
+          $repro = [ordered]@{
+            schema = "fenics-jit-micro-clang-phase2-reproducibility-v1"
+            status = "pass"
+            clean_root_rebuild = $true
+            source_inputs_shared = $true
+            comparisons = $comparisons
+            reconstructed_relocation_smoke = "pass"
+            production_selector_integrated = $false
+          }
+          [IO.File]::WriteAllText(
+            (Join-Path $evidence "phase2-reproducibility.json"),
+            ($repro | ConvertTo-Json -Depth 8) + [Environment]::NewLine,
+            (New-Object Text.UTF8Encoding($false))
+          )
+          Copy-Item -LiteralPath (Join-Path $reproEvidence "phase2-smoke.json") -Destination (Join-Path $evidence "phase2-repro-smoke.json") -Force
+
       - name: Upload Phase-2 conservative package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

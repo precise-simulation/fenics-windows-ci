@@ -282,11 +282,11 @@ jobs:
 
 
   phase3-private:
-    name: Phase 3 private broad qualification (Python \${{ matrix.python }})
+    name: Phase 3 private broad qualification (Python ${{ matrix.python }})
     needs: [phase0-reference, phase2-package]
     runs-on: windows-2022
     timeout-minutes: 120
-    continue-on-error: \${{ matrix.experimental }}
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
@@ -327,8 +327,8 @@ jobs:
       - name: Install isolated FEniCS runtime in a spaced prefix
         shell: pwsh
         run: |
-          $prefix = Join-Path $PWD "micro clang phase3 python py\${{ matrix.python }} with spaces"
-          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=\${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
+          $prefix = Join-Path $PWD "micro clang phase3 python py${{ matrix.python }} with spaces"
+          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
           if ($LASTEXITCODE -ne 0) { throw "Phase-3 FEniCS environment installation failed" }
 
           $artifactBackend = Join-Path $PWD "micro clang phase3 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
@@ -344,25 +344,25 @@ jobs:
       - name: Re-run ABI, driver, PE and hermeticity contract against installed package
         shell: pwsh
         run: |
-          $prefix = Join-Path $PWD "micro clang phase3 python py\${{ matrix.python }} with spaces"
+          $prefix = Join-Path $PWD "micro clang phase3 python py${{ matrix.python }} with spaces"
           $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
           $reference = (Resolve-Path "micro-clang-phase0-reference/driver-evidence.json").Path
-          ./scripts/micro-clang-jit/run-phase1.ps1 -PythonPrefix $prefix -ToolchainRoot $backend -ReferenceDriver $reference -WorkDir "micro clang phase3 contract py\${{ matrix.python }} with spaces" -DiagnosticsDir "micro-clang-phase3-py\${{ matrix.python }}/phase1-regression"
+          ./scripts/micro-clang-jit/run-phase1.ps1 -PythonPrefix $prefix -ToolchainRoot $backend -ReferenceDriver $reference -WorkDir "micro clang phase3 contract py${{ matrix.python }} with spaces" -DiagnosticsDir "micro-clang-phase3-py${{ matrix.python }}/phase1-regression"
 
       - name: Run private broad qualification without selector integration
         shell: pwsh
         run: |
-          $prefix = Join-Path $PWD "micro clang phase3 python py\${{ matrix.python }} with spaces"
+          $prefix = Join-Path $PWD "micro clang phase3 python py${{ matrix.python }} with spaces"
           $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
           $env:PYTHONHASHSEED = "0"
-          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase3-private-validation.py --backend-root $backend --work-dir "micro clang phase3 work py\${{ matrix.python }} with spaces" --diagnostics-dir "micro-clang-phase3-py\${{ matrix.python }}"
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase3-private-validation.py --backend-root $backend --work-dir "micro clang phase3 work py${{ matrix.python }} with spaces" --diagnostics-dir "micro-clang-phase3-py${{ matrix.python }}"
           if ($LASTEXITCODE -ne 0) { throw "Phase-3 private broad qualification failed" }
 
       - name: Upload Phase-3 qualification evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: micro-clang-phase3-py\${{ matrix.python }}
-          path: micro-clang-phase3-py\${{ matrix.python }}/
+          name: micro-clang-phase3-py${{ matrix.python }}
+          path: micro-clang-phase3-py${{ matrix.python }}/
           if-no-files-found: warn
           retention-days: 14

@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)][string]$BuildEvidenceDir,
     [Parameter(Mandatory = $true)][string]$OutputRoot,
     [Parameter(Mandatory = $true)][string]$EvidenceDir,
-    [ValidateSet(2, 4)][int]$Phase = 2
+    [ValidateSet(2, 4)][int]$Phase = 2,
+    [string]$PackageRole = ""
 )
 
 Set-StrictMode -Version Latest
@@ -18,7 +19,12 @@ $output = [IO.Path]::GetFullPath($OutputRoot)
 $evidence = [IO.Path]::GetFullPath($EvidenceDir)
 $backend = Join-Path $output "Library\fenics-jit\backends\micro-clang"
 $phaseLabel = "Phase-$Phase"
-$packageRole = if ($Phase -eq 2) { "conservative-private-qualification" } else { "phase4-host-min-private-qualification" }
+$packageRole = if ($PackageRole) { $PackageRole } elseif ($Phase -eq 2) { "conservative-private-qualification" } else { "phase4-host-min-private-qualification" }
+$sourceMetadata = $null
+$sourceMetadataPath = Join-Path $sourceRoot "metadata.json"
+if (Test-Path -LiteralPath $sourceMetadataPath -PathType Leaf) {
+    try { $sourceMetadata = Get-Content -LiteralPath $sourceMetadataPath -Raw | ConvertFrom-Json } catch { $sourceMetadata = $null }
+}
 
 if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) {
     throw "Phase-1 source toolchain root is missing: $sourceRoot"
@@ -162,6 +168,16 @@ $metadata = [ordered]@{
     runtime_helper_policy = "private $phaseLabel proof only; production shared selector unchanged"
     source_build_provenance = "provenance/build-provenance.json"
     source_build_manifest = "provenance/retained-manifest.json"
+}
+if ($null -ne $sourceMetadata) {
+    foreach ($name in @("minimization_stage","minimization_report","library_minimization_stage","library_minimization_report")) {
+        if ($null -ne $sourceMetadata.PSObject.Properties[$name]) {
+            $metadata[$name] = $sourceMetadata.$name
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $sourceRoot "phase4-stage2-pruning.json") -PathType Leaf) {
+        $metadata["phase4_stage2_pruning"] = "phase4-stage2-pruning.json"
+    }
 }
 $metadataPath = Join-Path $backend "metadata.json"
 [IO.File]::WriteAllText(

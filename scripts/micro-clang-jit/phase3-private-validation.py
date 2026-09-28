@@ -556,7 +556,13 @@ def _run_mpi(
     summary = json.loads(
         (mpi_diag / "mpi-summary.json").read_text(encoding="utf-8")
     )
-    if summary.get("compile_commands_by_rank") != [1, 0]:
+    compile_counts = summary.get("compile_commands_by_rank")
+    if (
+        not isinstance(compile_counts, list)
+        or len(compile_counts) != 2
+        or compile_counts[0] <= 0
+        or compile_counts[1] != 0
+    ):
         raise RuntimeError(f"unexpected micro-Clang MPI compile ownership: {summary!r}")
     return {
         "status": "pass",

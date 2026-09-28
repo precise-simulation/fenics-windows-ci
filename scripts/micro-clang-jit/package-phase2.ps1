@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)][string]$PythonPrefix,
     [Parameter(Mandatory = $true)][string]$BuildEvidenceDir,
     [Parameter(Mandatory = $true)][string]$OutputRoot,
-    [Parameter(Mandatory = $true)][string]$EvidenceDir
+    [Parameter(Mandatory = $true)][string]$EvidenceDir,
+    [ValidateSet(2, 4)][int]$Phase = 2
 )
 
 Set-StrictMode -Version Latest
@@ -16,6 +17,8 @@ $buildEvidence = [IO.Path]::GetFullPath($BuildEvidenceDir)
 $output = [IO.Path]::GetFullPath($OutputRoot)
 $evidence = [IO.Path]::GetFullPath($EvidenceDir)
 $backend = Join-Path $output "Library\fenics-jit\backends\micro-clang"
+$phaseLabel = "Phase-$Phase"
+$packageRole = if ($Phase -eq 2) { "conservative-private-qualification" } else { "phase4-host-min-private-qualification" }
 
 if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) {
     throw "Phase-1 source toolchain root is missing: $sourceRoot"
@@ -138,8 +141,8 @@ if ($LASTEXITCODE -ne 0) { throw "packaged ld.lld --version failed" }
 $metadata = [ordered]@{
     schema = "fenics-jit-micro-clang-package-v1"
     package = "fenics-jit-micro-clang"
-    phase = 2
-    package_role = "conservative-private-qualification"
+    phase = $Phase
+    package_role = $packageRole
     production_selector_integrated = $false
     default_backend_changed = $false
     llvm_mingw_release = [string]$provenance.llvm_mingw_release
@@ -156,7 +159,7 @@ $metadata = [ordered]@{
     python_import_library_abi = "python3.dll"
     python_import_library_aliases = @("python3", "python312", "python313", "python314")
     runtime_helper = "fenics_jit_runtime.py"
-    runtime_helper_policy = "private Phase-2 proof only; production shared selector unchanged"
+    runtime_helper_policy = "private $phaseLabel proof only; production shared selector unchanged"
     source_build_provenance = "provenance/build-provenance.json"
     source_build_manifest = "provenance/retained-manifest.json"
 }
@@ -202,7 +205,7 @@ for ($iteration = 0; $iteration -lt 5; $iteration++) {
         "manifest_excludes=manifest.csv,size.txt"
         "stage_aw_reference_mib=215.19"
         "phase4_early_continuation_gate_mib=108.2"
-        "phase4_size_gate_status=not-evaluated-in-phase2"
+        "phase4_size_gate_status=$(if ($Phase -eq 4) { if (($payloadBytes / 1MB) -le 108.2) { 'pass' } else { 'not-yet' } } else { 'not-evaluated-in-phase2' })"
     )
     $previous = if (Test-Path -LiteralPath $sizePath) { Get-Content -LiteralPath $sizePath -Raw } else { "" }
     $next = ($sizeLines -join [Environment]::NewLine) + [Environment]::NewLine
@@ -221,23 +224,33 @@ if ($recordedBytes -ne $payloadBytes) {
 }
 
 Copy-Item -LiteralPath $metadataPath, $manifestPath, $sizePath -Destination $evidence -Force
+$payloadMiB = [math]::Round($payloadBytes / 1MB, 4)
+$phase4GateStatus = if ($Phase -eq 4) {
+    if ($payloadMiB -le 108.2) { "pass" } else { "not-yet" }
+} else {
+    "not-evaluated-in-phase2"
+}
 $summary = [ordered]@{
-    schema = "fenics-jit-micro-clang-phase2-package-summary-v1"
+    schema = "fenics-jit-micro-clang-phase$Phase-package-summary-v1"
     status = "packaged"
+    phase = $Phase
+    package_role = $packageRole
     backend_root = $backend
     payload_file_count = $payloadFiles.Count
     payload_bytes = $payloadBytes
-    payload_mib = [math]::Round($payloadBytes / 1MB, 4)
+    payload_mib = $payloadMiB
     production_selector_integrated = $false
-    phase4_size_gate_evaluated = $false
+    phase4_size_gate_evaluated = ($Phase -eq 4)
+    phase4_size_gate_status = $phase4GateStatus
 }
+$summaryName = if ($Phase -eq 2) { "phase2-package-summary.json" } else { "phase4-package-summary.json" }
 [IO.File]::WriteAllText(
-    (Join-Path $evidence "phase2-package-summary.json"),
+    (Join-Path $evidence $summaryName),
     ($summary | ConvertTo-Json -Depth 5) + [Environment]::NewLine,
     (New-Object Text.UTF8Encoding($false))
 )
 
-Write-Host "Conservative micro-Clang Phase-2 package staged"
+Write-Host "micro-Clang $phaseLabel package staged"
 Write-Host "  backend root: $backend"
 Write-Host "  files: $($payloadFiles.Count)"
 Write-Host "  payload MiB: $([math]::Round($payloadBytes / 1MB, 4))"

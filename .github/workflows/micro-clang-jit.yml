@@ -355,6 +355,7 @@ jobs:
           $prefix = Join-Path $PWD "micro clang phase3 python py${{ matrix.python }} with spaces"
           $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
           $env:PYTHONHASHSEED = "0"
+          $env:FI_PROVIDER = "tcp"
           & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase3-private-validation.py --backend-root $backend --work-dir "micro clang phase3 work py${{ matrix.python }} with spaces" --diagnostics-dir "micro-clang-phase3-py${{ matrix.python }}"
           if ($LASTEXITCODE -ne 0) { throw "Phase-3 private broad qualification failed" }
 

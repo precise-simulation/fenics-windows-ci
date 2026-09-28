@@ -28,6 +28,7 @@ def main() -> None:
     parser.add_argument("--backend-root", required=True)
     parser.add_argument("--work-dir", required=True)
     parser.add_argument("--evidence-dir", required=True)
+    parser.add_argument("--expected-phase", type=int, choices=(2, 4), default=2)
     args = parser.parse_args()
 
     root = Path(args.backend_root).resolve()
@@ -68,7 +69,7 @@ def main() -> None:
     metadata = json.loads((root / "metadata.json").read_text(encoding="utf-8-sig"))
     if metadata.get("package") != "fenics-jit-micro-clang":
         raise RuntimeError(f"unexpected Phase-2 package metadata: {metadata}")
-    if metadata.get("phase") != 2:
+    if metadata.get("phase") != args.expected_phase:
         raise RuntimeError(f"unexpected package phase: {metadata.get('phase')!r}")
     if metadata.get("production_selector_integrated") is not False:
         raise RuntimeError("Phase-2 package must not integrate the production selector")
@@ -120,7 +121,8 @@ def main() -> None:
         raise RuntimeError("packaged smoke DLL has no x64 .pdata unwind metadata")
 
     result = {
-        "schema": "fenics-jit-micro-clang-phase2-smoke-v1",
+        "schema": f"fenics-jit-micro-clang-phase{args.expected_phase}-smoke-v1",
+        "phase": args.expected_phase,
         "status": "pass",
         "backend_root": str(root),
         "target": target,
@@ -129,7 +131,7 @@ def main() -> None:
         "pdata_size": int(pdata.SizeOfRawData),
         "production_selector_integrated": False,
     }
-    (evidence / "phase2-smoke.json").write_text(
+    (evidence / f"phase{args.expected_phase}-smoke.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )

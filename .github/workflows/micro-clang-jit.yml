@@ -611,3 +611,195 @@ jobs:
           path: micro-clang-phase4-stage1-py${{ matrix.python }}/
           if-no-files-found: warn
           retention-days: 14
+
+
+  phase4-stage2-package:
+    name: Phase 4 stage 2 Stage-AW evidence pruning
+    needs: [phase4-package, phase4-private]
+    runs-on: windows-2022
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download qualified Phase-4 stage-1 package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage1-package
+          path: micro clang phase4 stage1 package artifact with spaces
+
+      - name: Download Phase-4 build evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage1-build-evidence
+          path: micro-clang-phase4-build-evidence
+
+      - name: Download conservative Phase-2 evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase2-evidence
+          path: micro-clang-phase2-evidence
+
+      - name: Install Phase-4 stage-2 package-test environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase4-stage2
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            pefile
+
+      - name: Apply qualified Stage-AW families, package, measure and reproduce
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/micro-clang-phase4-stage2"
+          $artifactBackend = Join-Path $PWD "micro clang phase4 stage1 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
+          if (-not (Test-Path -LiteralPath $artifactBackend -PathType Container)) { throw "Phase-4 stage-1 backend artifact missing" }
+
+          function Build-Stage2Candidate([string]$compatParent, [string]$packageRoot, [string]$evidence) {
+            Remove-Item -Recurse -Force $compatParent, $packageRoot, $evidence -ErrorAction SilentlyContinue
+            $compatRoot = Join-Path $compatParent "fenics-jit"
+            New-Item -ItemType Directory -Force $compatParent | Out-Null
+            Copy-Item -LiteralPath $artifactBackend -Destination $compatRoot -Recurse -Force
+            ./scripts/micro-clang-jit/apply-stageaw-pruning.ps1 -ToolchainRoot $compatRoot -EvidenceDir $evidence
+            ./scripts/micro-clang-jit/package-phase2.ps1 -ToolchainRoot $compatRoot -PythonPrefix $prefix -BuildEvidenceDir (Join-Path $PWD "micro-clang-phase4-build-evidence") -OutputRoot $packageRoot -EvidenceDir $evidence -Phase 4 -PackageRole "phase4-stage2-stageaw-evidence-pruned"
+            $backend = Join-Path $packageRoot "Library\fenics-jit\backends\micro-clang"
+            & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase2-package-smoke.py --backend-root $backend --work-dir (Join-Path $compatParent "smoke with spaces") --evidence-dir $evidence --expected-phase 4
+            if ($LASTEXITCODE -ne 0) { throw "Phase-4 stage-2 package smoke failed" }
+            return $backend
+          }
+
+          $evidence = Join-Path $PWD "micro-clang-phase4-stage2-evidence"
+          $packageRoot = Join-Path $PWD "micro clang phase4 stage2 package with spaces"
+          $backend = Build-Stage2Candidate (Join-Path $PWD "micro clang phase4 stage2 compatibility with spaces") $packageRoot $evidence
+
+          $reproEvidence = Join-Path $PWD "micro-clang-phase4-stage2-repro-evidence"
+          $reproRoot = Join-Path $PWD "micro clang phase4 stage2 reproducibility package with spaces"
+          $reproBackend = Build-Stage2Candidate (Join-Path $PWD "micro clang phase4 stage2 reproducibility compatibility with spaces") $reproRoot $reproEvidence
+
+          $comparisons = [ordered]@{}
+          foreach ($name in @("metadata.json", "manifest.csv", "size.txt")) {
+            $first = (Get-FileHash -LiteralPath (Join-Path $backend $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $second = (Get-FileHash -LiteralPath (Join-Path $reproBackend $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $comparisons[$name] = [ordered]@{ first_sha256=$first; second_sha256=$second; match=($first -eq $second) }
+            if ($first -ne $second) { throw "Phase-4 stage-2 reproducibility mismatch for $name" }
+          }
+
+          $baseline = Get-Content "micro-clang-phase2-evidence/phase2-package-summary.json" -Raw | ConvertFrom-Json
+          $candidate = Get-Content (Join-Path $evidence "phase4-package-summary.json") -Raw | ConvertFrom-Json
+          $removed = [int64]$baseline.payload_bytes - [int64]$candidate.payload_bytes
+          $summary = [ordered]@{
+            schema = "fenics-jit-micro-clang-phase4-stage2-reduction-v1"
+            status = "qualified-for-private-matrix"
+            reduction = "reuse same-revision immutable Stage-AW measured-unobserved Windows API/header/import-library families; remove remaining IDL/TLB metadata"
+            baseline_bytes = [int64]$baseline.payload_bytes
+            candidate_bytes = [int64]$candidate.payload_bytes
+            bytes_removed = $removed
+            percent_removed = [math]::Round(100.0 * $removed / [double]$baseline.payload_bytes, 3)
+            candidate_mib = [double]$candidate.payload_mib
+            early_gate_mib = 108.2
+            early_gate_status = [string]$candidate.phase4_size_gate_status
+            reproducibility = $comparisons
+            production_selector_integrated = $false
+          }
+          [IO.File]::WriteAllText(
+            (Join-Path $evidence "phase4-stage2-reduction.json"),
+            ($summary | ConvertTo-Json -Depth 8) + [Environment]::NewLine,
+            (New-Object Text.UTF8Encoding($false))
+          )
+
+      - name: Upload Phase-4 stage-2 package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage2-package
+          path: micro clang phase4 stage2 package with spaces/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
+
+      - name: Upload Phase-4 stage-2 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage2-evidence
+          path: micro-clang-phase4-stage2-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  phase4-stage2-private:
+    name: Phase 4 stage 2 private qualification (Python ${{ matrix.python }})
+    needs: [phase0-reference, phase4-stage2-package]
+    runs-on: windows-2022
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Phase-4 stage-2 package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage2-package
+          path: micro clang phase4 stage2 package artifact with spaces
+
+      - name: Download Phase-0 reference
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase0-reference
+          path: micro-clang-phase0-reference
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase4-stage2-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Install isolated FEniCS runtime in a spaced prefix
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase4 stage2 python py${{ matrix.python }} with spaces"
+          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4 stage-2 FEniCS environment installation failed" }
+          $artifactBackend = Join-Path $PWD "micro clang phase4 stage2 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
+          $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
+          New-Item -ItemType Directory -Force (Split-Path -Parent $backend) | Out-Null
+          Remove-Item -Recurse -Force $backend -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath $artifactBackend -Destination $backend -Recurse -Force
+
+      - name: Re-run ABI, driver, PE and hermeticity contract
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase4 stage2 python py${{ matrix.python }} with spaces"
+          $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
+          $reference = (Resolve-Path "micro-clang-phase0-reference/driver-evidence.json").Path
+          ./scripts/micro-clang-jit/run-phase1.ps1 -PythonPrefix $prefix -ToolchainRoot $backend -ReferenceDriver $reference -WorkDir "micro clang phase4 stage2 contract py${{ matrix.python }} with spaces" -DiagnosticsDir "micro-clang-phase4-stage2-py${{ matrix.python }}/phase1-regression"
+
+      - name: Run complete private broad qualification with closure tracing
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase4 stage2 python py${{ matrix.python }} with spaces"
+          $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
+          $diag = Join-Path $PWD "micro-clang-phase4-stage2-py${{ matrix.python }}"
+          $env:PYTHONHASHSEED = "0"
+          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+          $env:FENICS_JIT_MEASURE_CLOSURE = "1"
+          $env:FENICS_JIT_MEASURE_DIR = Join-Path $diag "closure-traces"
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase3-private-validation.py --backend-root $backend --work-dir "micro clang phase4 stage2 work py${{ matrix.python }} with spaces" --diagnostics-dir $diag
+          if ($LASTEXITCODE -ne 0) { throw "Phase-4 stage-2 private qualification failed" }
+
+      - name: Upload Phase-4 stage-2 qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage2-py${{ matrix.python }}
+          path: micro-clang-phase4-stage2-py${{ matrix.python }}/
+          if-no-files-found: warn
+          retention-days: 14

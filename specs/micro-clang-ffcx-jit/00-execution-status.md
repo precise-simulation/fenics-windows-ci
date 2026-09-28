@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 3 private broad qualification in progress; Phases 0-2 qualified in CI, production integration remains gated.
+**Status:** Phase 3 private broad qualification passed on Python 3.12-3.14; Phase 4 measured minimization may proceed, production integration remains gated.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -156,6 +156,25 @@ Each supported job:
 
 No \`FENICS_JIT_COMPILER=micro-clang\` selector path is added in Phase 3.
 
+## Phase 3 qualification evidence
+
+Workflow run #40 (`36373061120`) at head
+`277e36652301f41c8bbd607bc7c34d7a96f6b0f8` cleared the private broad
+qualification gate:
+
+- Phase 3 Python 3.12: passed;
+- Phase 3 Python 3.13: passed;
+- Phase 3 Python 3.14: passed;
+- Python 3.15 remains informational and failed during environment installation,
+  before private qualification, so it is not a blocking supported-version
+  result.
+
+The blocking jobs re-ran the Phase-1 ABI/driver/PE/hermeticity contract and
+passed the broad generated-C corpus, additional P3/facet/coefficient coverage,
+new-process cache reload, direct LLVM-MinGW numerical comparison, concurrent
+private processes, and two-rank MPI rank-0 compile/rank-1 cache-load proof.
+The installed production selector was not used or modified.
+
 ## Gates before further implementation
 
 Phase 2 packaging may proceed because Phase 0 and the required Phase 1 matrix
@@ -164,8 +183,8 @@ passed in workflow run #30.
 Phase 3 broad qualification may proceed because workflow run #35 passed the
 conservative Phase-2 package/relocation/provenance/reproducibility gate.
 
-Do not start Phase 4 minimization until the blocking Python 3.12-3.14 Phase-3
-private qualification matrix passes.
+Phase 4 minimization may now proceed because the blocking Python 3.12-3.14
+Phase-3 private qualification matrix passed in workflow run #40.
 
 Do not start production shared-runtime integration until the Phase-3 private
 qualification and Phase-4 size/performance gates pass. LLVM-MinGW remains the

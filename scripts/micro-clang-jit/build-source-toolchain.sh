@@ -96,7 +96,8 @@ if [[ "$BUILD_PROFILE" == "phase4-host-min" ]]; then
     # duplicate the LLVM core, but link Clang's required component libraries
     # directly into clang-23.exe instead of shipping the monolithic
     # libclang-cpp DLL. MinSizeRel applies only to the host compiler binaries;
-    # generated FFCx code still uses the same qualified -O2 target policy.\n    # Strip host PE symbol/debug payload at link time; this affects only the\n    # shipped host compiler closure, not target-code generation or the sysroot.\n    LLVM_CMAKEFLAGS="$LLVM_CMAKEFLAGS -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_EXE_LINKER_FLAGS=-s -DCMAKE_SHARED_LINKER_FLAGS=-s -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=ON -DCLANG_LINK_CLANG_DYLIB=OFF"
+    # generated FFCx code still uses the same qualified -O2 target policy.
+    LLVM_CMAKEFLAGS="$LLVM_CMAKEFLAGS -DCMAKE_BUILD_TYPE=MinSizeRel -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=ON -DCLANG_LINK_CLANG_DYLIB=OFF"
 fi
 
 bootstrap_version="$("$BOOTSTRAP/bin/clang.exe" --version | tr '\n' ' ')"

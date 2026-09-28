@@ -225,25 +225,6 @@ explicit C/UCRT/POSIX and startup/runtime/default-Windows safety sets. The
 candidate must again reproduce cleanly and pass the complete Python 3.12-3.14
 private matrix before it can be accepted.
 
-## Phase 4 stage 3 qualification evidence
-
-Workflow run #54 (`36459489476`) at head
-`5c648873ffa8476f92989601a63342b56370627c` qualified Stage 3:
-
-- complete backend: **112.938 MiB**;
-- closure-driven pruning removed **49.8661 MiB**, including 1,283
-  trace-unobserved non-core headers and 802 optional import archives;
-- explicit C/UCRT/POSIX and startup/runtime/default-Windows safety sets remained;
-- independent package reconstruction reproduced metadata, manifest and size;
-- relocation/package smoke passed;
-- complete private qualification passed on Python 3.12, 3.13 and 3.14.
-
-Stage 3 remains **4.738 MiB above** the 108.2 MiB continuation gate, so Phase 5
-remains blocked. The next coherent host-only minimization strips PE
-symbol/debug payload at link time for the already-MinSizeRel host compiler and
-shared libraries. Generated FFCx target code, the target sysroot, selector and
-default remain unchanged; the full Phase-4 matrix must requalify the result.
-
 ## Gates before further implementation
 
 Phase 2 packaging may proceed because Phase 0 and the required Phase 1 matrix

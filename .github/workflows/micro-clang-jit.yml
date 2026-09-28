@@ -665,7 +665,7 @@ jobs:
             ./scripts/micro-clang-jit/apply-stageaw-pruning.ps1 -ToolchainRoot $compatRoot -EvidenceDir $evidence
             ./scripts/micro-clang-jit/package-phase2.ps1 -ToolchainRoot $compatRoot -PythonPrefix $prefix -BuildEvidenceDir (Join-Path $PWD "micro-clang-phase4-build-evidence") -OutputRoot $packageRoot -EvidenceDir $evidence -Phase 4 -PackageRole "phase4-stage2-stageaw-evidence-pruned"
             $backend = Join-Path $packageRoot "Library\fenics-jit\backends\micro-clang"
-            & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase2-package-smoke.py --backend-root $backend --work-dir (Join-Path $compatParent "smoke with spaces") --evidence-dir $evidence --expected-phase 4
+            & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase2-package-smoke.py --backend-root $backend --work-dir (Join-Path $compatParent "smoke with spaces") --evidence-dir $evidence --expected-phase 4 | Out-Host
             if ($LASTEXITCODE -ne 0) { throw "Phase-4 stage-2 package smoke failed" }
             return $backend
           }

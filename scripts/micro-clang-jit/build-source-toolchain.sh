@@ -19,6 +19,11 @@ MINGW_W64_COMMIT=a3d708261d5ba659205067cb82cae36e7ae8bbb0
 ARCHIVE="llvm-mingw-20260826-ucrt-x86_64.zip"
 ARCHIVE_SHA256=ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 ARCHIVE_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_RELEASE/$ARCHIVE"
+BUILD_PROFILE="${MICRO_CLANG_BUILD_PROFILE:-conservative}"
+if [[ "$BUILD_PROFILE" != "conservative" && "$BUILD_PROFILE" != "phase4-host-min" ]]; then
+    echo "unsupported MICRO_CLANG_BUILD_PROFILE: $BUILD_PROFILE" >&2
+    exit 2
+fi
 
 rm -rf "$WORK/bootstrap" "$WORK/llvm-mingw" "$WORK/host-install" "$STAGE"
 mkdir -p "$WORK/bootstrap" "$WORK/host-install" "$STAGE" "$EVIDENCE"
@@ -85,6 +90,15 @@ export TOOLCHAIN_ARCHS=x86_64
 # boundary. Stage-AW ships a shared libc++.dll/libunwind.dll closure, so Phase
 # 1 should establish functionality with that model before any later size work.
 export LLVM_CMAKEFLAGS="-DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_INCLUDE_TESTS=OFF -DCLANG_INCLUDE_TESTS=OFF -DLLD_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBEDIT=OFF"
+if [[ "$BUILD_PROFILE" == "phase4-host-min" ]]; then
+    # Phase 4 stage 1: reduce the host compiler closure without touching the
+    # Windows C/UCRT target sysroot. Keep libLLVM shared so Clang and LLD do not
+    # duplicate the LLVM core, but link Clang's required component libraries
+    # directly into clang-23.exe instead of shipping the monolithic
+    # libclang-cpp DLL. MinSizeRel applies only to the host compiler binaries;
+    # generated FFCx code still uses the same qualified -O2 target policy.
+    LLVM_CMAKEFLAGS="$LLVM_CMAKEFLAGS -DCMAKE_BUILD_TYPE=MinSizeRel -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=ON -DCLANG_LINK_CLANG_DYLIB=OFF"
+fi
 
 bootstrap_version="$("$BOOTSTRAP/bin/clang.exe" --version | tr '\n' ' ')"
 cmake_version="$(cmake --version | head -n1)"
@@ -302,6 +316,45 @@ for required in \
     [[ -f "$required" ]]
 done
 
+if [[ "$BUILD_PROFILE" == "phase4-host-min" ]]; then
+    # The phase-4 Clang executable must no longer require the monolithic Clang
+    # DLL before we discard it. Keep libLLVM/libc++/libunwind because they are
+    # the measured shared dependency closure of the required host tools.
+    "$STAGE/bin/llvm-readobj.exe" --coff-imports "$STAGE/bin/clang-23.exe" \
+        > "$EVIDENCE/phase4-clang-imports.txt"
+    if grep -qi 'libclang-cpp\.dll' "$EVIDENCE/phase4-clang-imports.txt"; then
+        echo "phase4 host-min clang still depends on libclang-cpp.dll" >&2
+        cat "$EVIDENCE/phase4-clang-imports.txt" >&2
+        exit 1
+    fi
+
+    rm -f \
+        "$STAGE/bin/libclang-cpp.dll" \
+        "$STAGE/bin/libclang.dll" \
+        "$STAGE/bin/libLTO.dll" \
+        "$STAGE/bin/libRemarks.dll"
+    find "$STAGE/lib" -maxdepth 1 -type f -name '*.dll.a' -delete
+    rm -rf "$STAGE/lib/libscanbuild" "$STAGE/lib/libear"
+    rm -f \
+        "$STAGE/bin/analyze-build" \
+        "$STAGE/bin/git-clang-format" "$STAGE/bin/git-clang-format.bat" \
+        "$STAGE/bin/hmaptool" \
+        "$STAGE/bin/intercept-build" \
+        "$STAGE/bin/scan-build" "$STAGE/bin/scan-build.bat" \
+        "$STAGE/bin/scan-build-py" "$STAGE/bin/scan-view"
+
+    for removed in \
+        "$STAGE/bin/libclang-cpp.dll" \
+        "$STAGE/bin/libclang.dll" \
+        "$STAGE/lib/libclang-cpp.dll.a" \
+        "$STAGE/lib/libLLVM-23.dll.a"; do
+        if [[ -e "$removed" ]]; then
+            echo "phase4 host development artifact was not removed: $removed" >&2
+            exit 1
+        fi
+    done
+fi
+
 cat > "$WORK/smoke.c" <<'EOF'
 __declspec(dllexport) int micro_clang_smoke(void) { return 42; }
 EOF
@@ -331,13 +384,13 @@ if [[ -f "$cmake_cache" ]]; then
 fi
 
 python - "$STAGE" "$EVIDENCE" "$actual_archive_sha" "$actual_llvm_mingw" "$actual_llvm" "$actual_mingw" \
-    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" "$local_patch_sha" <<'PY'
+    "$bootstrap_version" "$cmake_version" "$ninja_version" "$gcc_version" "$LLVM_CMAKEFLAGS" "$local_patch_sha" "$BUILD_PROFILE" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags, local_patch_sha) = sys.argv[1:]
+(stage_s, evidence_s, archive_sha, llvm_mingw, llvm, mingw, bootstrap, cmake, ninja, gcc, cmake_flags, local_patch_sha, build_profile) = sys.argv[1:]
 stage = pathlib.Path(stage_s)
 evidence = pathlib.Path(evidence_s)
 
@@ -358,6 +411,7 @@ total = sum(item["bytes"] for item in manifest)
 )
 provenance = {
     "schema": "fenics-jit-micro-clang-phase1-build-v1",
+    "build_profile": build_profile,
     "llvm_mingw_release": "20260826",
     "llvm_mingw_commit": llvm_mingw,
     "llvm_commit": llvm,

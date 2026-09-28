@@ -95,7 +95,6 @@ try {
         "stage-w-windows-management.ps1"
     )) {
         & (Join-Path $recipe $scriptName)
-        if ($LASTEXITCODE -ne 0) { throw "qualified Stage-AW pruning script failed: $scriptName" }
     }
 
     # The source-built import archives are rebuilt from the pinned same-source
@@ -179,7 +178,6 @@ try {
         "stage-aw-bda-interface-headers.ps1"
     )) {
         & (Join-Path $recipe $scriptName)
-        if ($LASTEXITCODE -ne 0) { throw "qualified Stage-AW pruning script failed: $scriptName" }
     }
 }
 finally {

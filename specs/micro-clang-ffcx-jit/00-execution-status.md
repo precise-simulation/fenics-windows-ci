@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 3 private broad qualification passed on Python 3.12-3.14; Phase 4 measured minimization may proceed, production integration remains gated.
+**Status:** Phase 4 minimization in progress; Stage 1 passed full Python 3.12-3.14 qualification but remains above the <=108.2 MiB continuation gate, so production integration remains gated.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -174,6 +174,31 @@ passed the broad generated-C corpus, additional P3/facet/coefficient coverage,
 new-process cache reload, direct LLVM-MinGW numerical comparison, concurrent
 private processes, and two-rank MPI rank-0 compile/rank-1 cache-load proof.
 The installed production selector was not used or modified.
+
+## Phase 4 stage 1 qualification evidence
+
+Workflow run #45 (`36384660189`) at head
+`11e00075ef81e13509a2dd0b3a1c887911f23726` qualified the first
+reversible minimization stage:
+
+- the complete Stage-1 backend measured 259,191,062 bytes / 247.1839 MiB;
+- this removed 117,638,845 bytes (31.218%) from the 376,829,907-byte
+  conservative Phase-2 baseline;
+- clean-root package reconstruction reproduced `metadata.json`,
+  `manifest.csv`, and `size.txt` byte-for-byte by SHA-256;
+- package relocation smoke passed;
+- the complete private qualification passed on Python 3.12, 3.13 and 3.14,
+  including ABI/driver/PE/hermeticity, broad generated-C corpus, numerical
+  comparison, cache reload, concurrency and two-rank MPI ownership.
+
+The Stage-1 reduction uses a MinSizeRel host compiler, keeps the shared LLVM
+core, links Clang without the monolithic `libclang-cpp` DLL, and removes
+host development/tooling artifacts. The conservative target sysroot was left
+unchanged.
+
+The early Phase-4 continuation gate is **not** satisfied:
+247.1839 MiB > 108.2 MiB. Phase 5 must therefore remain blocked while further
+measured Phase-4 minimization proceeds.
 
 ## Gates before further implementation
 

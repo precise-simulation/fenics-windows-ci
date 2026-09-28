@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 4 minimization in progress; Stage 1 passed full Python 3.12-3.14 qualification but remains above the <=108.2 MiB continuation gate, so production integration remains gated.
+**Status:** Phase 4 minimization in progress; Stage 2 passed full Python 3.12-3.14 qualification at 163.0088 MiB but remains above the <=108.2 MiB continuation gate. Stage 3 closure-driven sysroot minimization is in progress; production integration remains gated.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -199,6 +199,31 @@ unchanged.
 The early Phase-4 continuation gate is **not** satisfied:
 247.1839 MiB > 108.2 MiB. Phase 5 must therefore remain blocked while further
 measured Phase-4 minimization proceeds.
+
+## Phase 4 stage 2 qualification evidence
+
+Workflow run #51 (`36425414167`) at head
+`62a8ecce67ea38ed0f6c88d59c47b5b3bdffa4d6` qualified the second
+reversible minimization stage:
+
+- the complete Stage-2 backend measured **163.0088 MiB**;
+- Stage 2 reused the same-revision immutable Stage-AW measured-unobserved
+  Windows API header/import-library families and removed remaining IDL/TLB
+  metadata;
+- clean-root reconstruction and relocation/package smoke passed;
+- the complete private qualification passed on Python 3.12, 3.13 and 3.14;
+- closure tracing was enabled across the blocking matrix to provide the input
+  for the next measured sysroot reduction.
+
+Stage 2 is about 54.6% smaller than the 359.373 MiB conservative Phase-2
+baseline, but it remains **54.8088 MiB above** the early continuation gate.
+Phase 5 therefore remains blocked.
+
+Stage 3 uses those qualified Stage-2 dependency/link-map traces to remove only
+unobserved non-core headers and optional target import archives while retaining
+explicit C/UCRT/POSIX and startup/runtime/default-Windows safety sets. The
+candidate must again reproduce cleanly and pass the complete Python 3.12-3.14
+private matrix before it can be accepted.
 
 ## Gates before further implementation
 

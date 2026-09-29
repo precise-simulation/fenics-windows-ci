@@ -20,7 +20,7 @@ ARCHIVE="llvm-mingw-20260826-ucrt-x86_64.zip"
 ARCHIVE_SHA256=ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 ARCHIVE_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_RELEASE/$ARCHIVE"
 BUILD_PROFILE="${MICRO_CLANG_BUILD_PROFILE:-conservative}"
-if [[ "$BUILD_PROFILE" != "conservative" && "$BUILD_PROFILE" != "phase4-host-min" ]]; then
+if [[ "$BUILD_PROFILE" != "conservative" && "$BUILD_PROFILE" != "phase4-host-min" && "$BUILD_PROFILE" != "phase4-host-strip" ]]; then
     echo "unsupported MICRO_CLANG_BUILD_PROFILE: $BUILD_PROFILE" >&2
     exit 2
 fi
@@ -90,8 +90,8 @@ export TOOLCHAIN_ARCHS=x86_64
 # boundary. Stage-AW ships a shared libc++.dll/libunwind.dll closure, so Phase
 # 1 should establish functionality with that model before any later size work.
 export LLVM_CMAKEFLAGS="-DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_INCLUDE_TESTS=OFF -DCLANG_INCLUDE_TESTS=OFF -DLLD_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBEDIT=OFF"
-if [[ "$BUILD_PROFILE" == "phase4-host-min" ]]; then
-    # Phase 4 stage 1: reduce the host compiler closure without touching the
+if [[ "$BUILD_PROFILE" == "phase4-host-min" || "$BUILD_PROFILE" == "phase4-host-strip" ]]; then
+    # Phase 4 stage 1/4: reduce the host compiler closure without touching the
     # Windows C/UCRT target sysroot. Keep libLLVM shared so Clang and LLD do not
     # duplicate the LLVM core, but link Clang's required component libraries
     # directly into clang-23.exe instead of shipping the monolithic
@@ -291,6 +291,71 @@ else
     cp "$STAGE/bin/clang-target-wrapper.exe" "$target_clang"
 fi
 
+# Phase 4 stage 4: strip only symbol/debug payload from the retained host
+# compiler/runtime PE closure using the source-built llvm-strip. This occurs
+# after all target runtimes and the target wrapper are built, and before
+# development-only host tools are discarded. The target sysroot and generated
+# FFCx compilation policy are unchanged.
+if [[ "$BUILD_PROFILE" == "phase4-host-strip" ]]; then
+    strip_tool="$STAGE/bin/llvm-strip.exe"
+    if [[ ! -x "$strip_tool" ]]; then
+        echo "source-built llvm-strip is missing: $strip_tool" >&2
+        exit 1
+    fi
+
+    strip_report="$EVIDENCE/phase4-host-strip.tsv"
+    printf 'path\tbefore_bytes\tafter_bytes\tremoved_bytes\n' > "$strip_report"
+    strip_targets=(
+        "$STAGE/bin/clang-23.exe"
+        "$STAGE/bin/ld.lld.exe"
+        "$STAGE/bin/llvm-readobj.exe"
+        "$STAGE/bin/llvm-dlltool.exe"
+        "$STAGE/bin/libc++.dll"
+        "$STAGE/bin/libunwind.dll"
+        "$STAGE/bin/libLLVM-23.dll"
+    )
+    for pe in "${strip_targets[@]}"; do
+        if [[ ! -f "$pe" ]]; then
+            echo "required Stage-4 host PE missing before strip: $pe" >&2
+            exit 1
+        fi
+        before_bytes="$(stat -c '%s' "$pe")"
+        "$strip_tool" --strip-all "$pe"
+        after_bytes="$(stat -c '%s' "$pe")"
+        if (( after_bytes > before_bytes )); then
+            echo "Stage-4 strip grew host PE: $pe" >&2
+            exit 1
+        fi
+        printf '%s\t%s\t%s\t%s\n'             "${pe#$STAGE/}" "$before_bytes" "$after_bytes" "$((before_bytes - after_bytes))"             >> "$strip_report"
+    done
+
+    python - "$strip_report" "$EVIDENCE/phase4-host-strip.json" <<'PY'
+import csv
+import json
+import pathlib
+import sys
+
+tsv = pathlib.Path(sys.argv[1])
+out = pathlib.Path(sys.argv[2])
+with tsv.open(encoding="utf-8", newline="") as stream:
+    rows = list(csv.DictReader(stream, delimiter="\t"))
+for row in rows:
+    for key in ("before_bytes", "after_bytes", "removed_bytes"):
+        row[key] = int(row[key])
+removed = sum(row["removed_bytes"] for row in rows)
+payload = {
+    "schema": "fenics-jit-micro-clang-phase4-host-strip-v1",
+    "tool": "source-built llvm-strip --strip-all",
+    "scope": "retained host compiler/runtime PE closure only",
+    "files": rows,
+    "removed_bytes": removed,
+    "removed_mib": round(removed / (1024 * 1024), 4),
+}
+out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+print(json.dumps(payload, indent=2, sort_keys=True))
+PY
+fi
+
 # Remove host executables not required by the FFCx JIT contract. Retain all
 # host DLLs for the conservative Phase-1 closure; Phase 4 will minimize them
 # only from measured evidence.
@@ -316,7 +381,7 @@ for required in \
     [[ -f "$required" ]]
 done
 
-if [[ "$BUILD_PROFILE" == "phase4-host-min" ]]; then
+if [[ "$BUILD_PROFILE" == "phase4-host-min" || "$BUILD_PROFILE" == "phase4-host-strip" ]]; then
     # The phase-4 Clang executable must no longer require the monolithic Clang
     # DLL before we discard it. Keep libLLVM/libc++/libunwind because they are
     # the measured shared dependency closure of the required host tools.

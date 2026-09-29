@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 4 minimization in progress; Stage 2 passed full Python 3.12-3.14 qualification at 163.0088 MiB but remains above the <=108.2 MiB continuation gate. Stage 3 closure-driven sysroot minimization is in progress; production integration remains gated.
+**Status:** Phase 4 minimization in progress; Stage 3 passed full Python 3.12-3.14 qualification at 112.938 MiB but remains 4.738 MiB above the <=108.2 MiB continuation gate. Stage 4 host-PE stripping is in progress; production integration remains gated.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -224,6 +224,34 @@ unobserved non-core headers and optional target import archives while retaining
 explicit C/UCRT/POSIX and startup/runtime/default-Windows safety sets. The
 candidate must again reproduce cleanly and pass the complete Python 3.12-3.14
 private matrix before it can be accepted.
+
+## Phase 4 stage 3 qualification evidence
+
+Workflow run #56 (`36488264568`) at head
+`5efa0fad112f06374d0eacef2d332b64d2a6dd3c` revalidated the unchanged
+Stage-3 tree after the failed/reverted host-strip edit and cleared the complete
+Stage-3 gate:
+
+- complete backend: **112.938 MiB**;
+- the closure-driven reduction removed **49.8661 MiB**, comprising 1,283
+  trace-unobserved non-core headers and 802 optional import archives;
+- the candidate was derived from 48 compiler dependency traces and 48 LLD map
+  traces while retaining the explicit C/UCRT/POSIX and
+  startup/runtime/default-Windows safety sets;
+- independent package reconstruction reproduced metadata, manifest and size;
+- relocation/package smoke passed;
+- complete private qualification passed on Python 3.12, 3.13 and 3.14.
+
+Stage 3 remains **4.738 MiB above** the 108.2 MiB continuation gate, so Phase 5
+remains blocked.
+
+Stage 4 is a separate reversible host-only reduction. It uses the source-built
+`llvm-strip --strip-all` on the retained Clang/LLD/LLVM/libc++/libunwind PE
+closure, records per-file bytes removed, then reapplies the already-qualified
+Stage-AW and Stage-3 sysroot reductions. It must reproduce cleanly and pass the
+complete Python 3.12-3.14 private matrix before acceptance. Target-code
+generation policy, target sysroot safety policy, selector and default remain
+unchanged.
 
 ## Gates before further implementation
 

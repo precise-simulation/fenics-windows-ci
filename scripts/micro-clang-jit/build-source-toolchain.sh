@@ -297,9 +297,28 @@ fi
 # development-only host tools are discarded. The target sysroot and generated
 # FFCx compilation policy are unchanged.
 if [[ "$BUILD_PROFILE" == "phase4-host-strip" ]]; then
-    strip_tool="$STAGE/bin/llvm-strip.exe"
-    if [[ ! -x "$strip_tool" ]]; then
-        echo "source-built llvm-strip is missing: $strip_tool" >&2
+    source_strip_tool="$STAGE/bin/llvm-strip.exe"
+    if [[ ! -x "$source_strip_tool" ]]; then
+        echo "source-built llvm-strip is missing: $source_strip_tool" >&2
+        exit 1
+    fi
+
+    # Windows locks DLLs loaded by a running process. llvm-strip itself uses
+    # the source-built host DLL closure that we want to strip, so execute an
+    # isolated copy of llvm-strip with copied DLL dependencies outside STAGE.
+    # That keeps the original STAGE/bin DLLs closed and writable.
+    strip_host="$WORK/phase4-strip-host"
+    rm -rf "$strip_host"
+    mkdir -p "$strip_host"
+    cp "$source_strip_tool" "$strip_host/llvm-strip.exe"
+    for dll in "$STAGE"/bin/*.dll; do
+        [[ -f "$dll" ]] || continue
+        cp "$dll" "$strip_host/"
+    done
+    strip_tool="$strip_host/llvm-strip.exe"
+    if ! "$strip_tool" --version > "$EVIDENCE/phase4-strip-version.txt" 2>&1; then
+        cat "$EVIDENCE/phase4-strip-version.txt" >&2
+        echo "isolated source-built llvm-strip could not start" >&2
         exit 1
     fi
 

@@ -18,13 +18,14 @@ function Invoke-FenicsEnvironmentCreate {
         --override-channels --strict-channel-priority `
         -c precise-simulation -c conda-forge `
         "python=$PythonVersion" "libblas=*=*openblas" `
-        fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
-    return $LASTEXITCODE
+        fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile | Out-Host
+    $code = $LASTEXITCODE
+    return $code
 }
 
 $firstExit = Invoke-FenicsEnvironmentCreate
 if ($firstExit -eq 0) {
-    exit 0
+    return
 }
 
 Write-Warning (
@@ -34,7 +35,7 @@ Write-Warning (
 
 Remove-Item -LiteralPath $Prefix -Recurse -Force -ErrorAction SilentlyContinue
 
-& $env:MAMBA_EXE clean --all --yes
+& $env:MAMBA_EXE clean --all --yes | Out-Host
 if ($LASTEXITCODE -ne 0) {
     throw "micromamba cache cleanup failed after environment-create failure"
 }

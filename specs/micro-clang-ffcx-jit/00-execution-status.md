@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 4 minimization in progress; Stage 3 passed full Python 3.12-3.14 qualification at 112.938 MiB but remains 4.738 MiB above the <=108.2 MiB continuation gate. Stage 4 host-PE stripping is in progress; production integration remains gated.
+**Status:** Phase 4 minimization in progress; Stage 4 passed full Python 3.12-3.14 qualification at 112.1238 MiB but remains 3.9238 MiB above the <=108.2 MiB continuation gate. Stage 5 x86-only Clang resource-header pruning is in progress; production integration remains gated.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -252,6 +252,33 @@ Stage-AW and Stage-3 sysroot reductions. It must reproduce cleanly and pass the
 complete Python 3.12-3.14 private matrix before acceptance. Target-code
 generation policy, target sysroot safety policy, selector and default remain
 unchanged.
+
+## Phase 4 stage 4 qualification evidence
+
+Workflow run #58 (`36535571413`) at head
+`70f9be39ee7729c234a3955f642a2fd4a30a2dd5` qualified Stage 4:
+
+- complete backend: **112.1238 MiB**;
+- source-built `llvm-strip --strip-all` removed **0.8169 MiB** from the
+  retained host PE closure;
+- the qualified Stage-AW and Stage-3 sysroot reductions were reapplied
+  unchanged;
+- independent package reconstruction reproduced metadata, manifest and size;
+- relocation/package smoke passed;
+- complete private qualification passed on Python 3.12, 3.13 and 3.14.
+
+Stage 4 remains **3.9238 MiB above** the 108.2 MiB continuation gate, so Phase
+5 remains blocked.
+
+The remaining package includes about 7.44 MiB of Clang resource headers.
+Pinned LLVM 23.1 `clang/lib/Headers/CMakeLists.txt` explicitly separates
+core, x86, Windows and utility resource headers from ARM/AArch64, CUDA,
+Hexagon, HIP, HLSL, LoongArch, MIPS, OpenCL, PowerPC, RISC-V, SPIR-V,
+SystemZ/zOS, VE, WebAssembly, generic GPU, OpenMP-device, LLVM-offload and
+LLVM-libc-wrapper groups. Stage 5 removes only those non-x86/GPU-offload
+groups (about 4.25 MiB) while retaining the complete core/x86/Windows/utility
+resource sets and the qualified target C/UCRT sysroot. Full private
+qualification remains mandatory.
 
 ## Gates before further implementation
 

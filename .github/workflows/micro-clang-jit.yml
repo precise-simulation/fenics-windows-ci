@@ -328,8 +328,7 @@ jobs:
         shell: pwsh
         run: |
           $prefix = Join-Path $PWD "micro clang phase3 python py${{ matrix.python }} with spaces"
-          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
-          if ($LASTEXITCODE -ne 0) { throw "Phase-3 FEniCS environment installation failed" }
+          ./scripts/micro-clang-jit/install-fenics-runtime.ps1 -Prefix $prefix -PythonVersion "${{ matrix.python }}"
 
           $artifactBackend = Join-Path $PWD "micro clang phase3 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
           if (-not (Test-Path -LiteralPath $artifactBackend -PathType Container)) {
@@ -574,8 +573,7 @@ jobs:
         shell: pwsh
         run: |
           $prefix = Join-Path $PWD "micro clang phase4 python py${{ matrix.python }} with spaces"
-          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
-          if ($LASTEXITCODE -ne 0) { throw "Phase-4 FEniCS environment installation failed" }
+          ./scripts/micro-clang-jit/install-fenics-runtime.ps1 -Prefix $prefix -PythonVersion "${{ matrix.python }}"
 
           $artifactBackend = Join-Path $PWD "micro clang phase4 stage1 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
           if (-not (Test-Path -LiteralPath $artifactBackend -PathType Container)) { throw "Phase-4 backend artifact is missing: $artifactBackend" }
@@ -766,8 +764,7 @@ jobs:
         shell: pwsh
         run: |
           $prefix = Join-Path $PWD "micro clang phase4 stage2 python py${{ matrix.python }} with spaces"
-          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
-          if ($LASTEXITCODE -ne 0) { throw "Phase-4 stage-2 FEniCS environment installation failed" }
+          ./scripts/micro-clang-jit/install-fenics-runtime.ps1 -Prefix $prefix -PythonVersion "${{ matrix.python }}"
           $artifactBackend = Join-Path $PWD "micro clang phase4 stage2 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
           $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
           New-Item -ItemType Directory -Force (Split-Path -Parent $backend) | Out-Null
@@ -985,8 +982,7 @@ jobs:
         shell: pwsh
         run: |
           $prefix = Join-Path $PWD "micro clang phase4 stage3 python py${{ matrix.python }} with spaces"
-          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
-          if ($LASTEXITCODE -ne 0) { throw "Phase-4 stage-3 FEniCS environment installation failed" }
+          ./scripts/micro-clang-jit/install-fenics-runtime.ps1 -Prefix $prefix -PythonVersion "${{ matrix.python }}"
           $artifactBackend = Join-Path $PWD "micro clang phase4 stage3 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
           $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
           New-Item -ItemType Directory -Force (Split-Path -Parent $backend) | Out-Null
@@ -1268,8 +1264,7 @@ jobs:
         shell: pwsh
         run: |
           $prefix = Join-Path $PWD "micro clang phase4 stage4 python py${{ matrix.python }} with spaces"
-          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
-          if ($LASTEXITCODE -ne 0) { throw "Stage-4 FEniCS environment installation failed" }
+          ./scripts/micro-clang-jit/install-fenics-runtime.ps1 -Prefix $prefix -PythonVersion "${{ matrix.python }}"
           $artifactBackend = Join-Path $PWD "micro clang phase4 stage4 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
           $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
           New-Item -ItemType Directory -Force (Split-Path -Parent $backend) | Out-Null
@@ -1463,8 +1458,7 @@ jobs:
         shell: pwsh
         run: |
           $prefix = Join-Path $PWD "micro clang phase4 stage5 python py${{ matrix.python }} with spaces"
-          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-jit-llvm-mingw fenics-dolfinx cffi setuptools pefile
-          if ($LASTEXITCODE -ne 0) { throw "Stage-5 FEniCS environment installation failed" }
+          ./scripts/micro-clang-jit/install-fenics-runtime.ps1 -Prefix $prefix -PythonVersion "${{ matrix.python }}"
           $artifactBackend = Join-Path $PWD "micro clang phase4 stage5 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
           $backend = Join-Path $prefix "Library\fenics-jit\backends\micro-clang"
           New-Item -ItemType Directory -Force (Split-Path -Parent $backend) | Out-Null

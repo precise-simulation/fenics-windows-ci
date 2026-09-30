@@ -1536,6 +1536,8 @@ jobs:
           & $rattler build --recipe recipes/fenics-jit-runtime/recipe.yaml --output-dir phase5-output --channel-priority strict -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "Phase-5 shared runtime package build failed" }
           $channel = "file:///" + ((Resolve-Path phase5-output).Path -replace '\\','/')
+          & $rattler build --recipe recipes/fenics-jit-tinycc/recipe.yaml --output-dir phase5-output --channel-priority strict -c $channel -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "Phase-5 TinyCC backend package build failed" }
           & $rattler build --recipe recipes/fenics-jit-micro-clang/recipe.yaml --output-dir phase5-output --channel-priority strict -c $channel -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "Phase-5 micro-Clang package build failed" }
 

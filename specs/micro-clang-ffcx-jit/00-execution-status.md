@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 4 minimization in progress; Stage 4 passed full Python 3.12-3.14 qualification at 112.1238 MiB but remains 3.9238 MiB above the <=108.2 MiB continuation gate. Stage 5 x86-only Clang resource-header pruning is in progress; production integration remains gated.
+**Status:** Phase 4 qualified. Stage 5 passed the <=108.2 MiB continuation gate at 107.8796 MiB and passed the complete Python 3.12-3.14 private matrix. Phase 5 shared-runtime three-backend integration is in progress; LLVM-MinGW remains the default.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -279,6 +279,39 @@ LLVM-libc-wrapper groups. Stage 5 removes only those non-x86/GPU-offload
 groups (about 4.25 MiB) while retaining the complete core/x86/Windows/utility
 resource sets and the qualified target C/UCRT sysroot. Full private
 qualification remains mandatory.
+
+## Phase 4 stage 5 qualification evidence
+
+Workflow run #61 (`36582260173`) at head
+`7dca0126c3cc55e7a1131a44e3b7607c536c2516` cleared the complete Phase-4
+continuation gate:
+
+- the complete Stage-5 backend measured **107.8796 MiB**;
+- Stage 5 removed **4.2531 MiB / 111 files** from pinned LLVM non-x86 and
+  GPU/offload Clang resource-header groups while retaining core, x86, Windows
+  and utility resource headers;
+- clean reconstruction reproduced package metadata, manifest and size;
+- relocation/package smoke passed;
+- the complete blocking private qualification passed on Python 3.12, 3.13 and
+  3.14;
+- the final backend is below the **108.2 MiB** early continuation gate.
+
+Phase 4 is therefore qualified and Phase 5 shared-runtime integration may
+proceed. LLVM-MinGW remains the default. No normal-install footprint reduction
+is claimed because the current Windows `fenics-dolfinx` package still depends
+on `fenics-jit-llvm-mingw` unconditionally.
+
+## Phase 5 integration work
+
+The first Phase-5 integration slice adds an explicit three-backend selector
+registration for `llvm-mingw`, `tinycc`, and `micro-clang`, a backend-owned
+micro-Clang runtime/cache identity, and a separately owned
+`fenics-jit-micro-clang` package candidate produced from the qualified
+Stage-5 payload. CI must prove on Python 3.12-3.14 that all three selectors load
+the intended backend, unavailable backends fail without fallback, package
+ownership/dependencies do not overlap, backend cache namespaces are distinct,
+sequential switching performs real JIT, and micro-Clang participates safely in
+the shared activation/concurrency contract.
 
 ## Gates before further implementation
 

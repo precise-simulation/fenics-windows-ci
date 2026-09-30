@@ -1492,3 +1492,134 @@ jobs:
           path: micro-clang-phase4-stage5-py${{ matrix.python }}/
           if-no-files-found: warn
           retention-days: 14
+
+
+  phase5-package-integration:
+    name: Phase 5 three-backend package integration
+    needs: [phase4-stage5-package, phase4-stage5-private]
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download qualified Phase-4 stage-5 backend
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage5-package
+          path: micro clang phase4 stage5 package artifact with spaces
+
+      - name: Stage the qualified backend as package source
+        shell: pwsh
+        run: |
+          $backend = Join-Path $PWD "micro clang phase4 stage5 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
+          $staged = Join-Path $PWD "recipes\fenics-jit-micro-clang\staged-backend"
+          if (-not (Test-Path -LiteralPath (Join-Path $backend "micro_clang_runtime.py") -PathType Leaf)) { throw "qualified Stage-5 artifact lacks micro_clang_runtime.py" }
+          Remove-Item -Recurse -Force $staged -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath $backend -Destination $staged -Recurse -Force
+
+      - name: Install package build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase5-package
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            rattler-build=0.74.0
+
+      - name: Build shared runtime and micro-Clang backend packages
+        shell: pwsh
+        run: |
+          $rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs/micro-clang-phase5-package" -Recurse -Filter rattler-build.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $rattler) { throw "rattler-build.exe not found" }
+          & $rattler build --recipe recipes/fenics-jit-runtime/recipe.yaml --output-dir phase5-output --channel-priority strict -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "Phase-5 shared runtime package build failed" }
+          $channel = "file:///" + ((Resolve-Path phase5-output).Path -replace '\\','/')
+          & $rattler build --recipe recipes/fenics-jit-micro-clang/recipe.yaml --output-dir phase5-output --channel-priority strict -c $channel -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "Phase-5 micro-Clang package build failed" }
+
+      - name: Upload Phase-5 package channel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase5-package-channel
+          path: phase5-output/
+          if-no-files-found: error
+          retention-days: 14
+
+
+  phase5-selector-private:
+    name: Phase 5 three-backend integration (Python ${{ matrix.python }})
+    needs: phase5-package-integration
+    runs-on: windows-2022
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Phase-5 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase5-package-channel
+          path: phase5-output
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase5-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Install all three backends with branch shared runtime
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase5 python py${{ matrix.python }} with spaces"
+          $channel = "file:///" + ((Resolve-Path phase5-output).Path -replace '\\','/')
+          function Install-Phase5 {
+            & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c $channel -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-dolfinx fenics-jit-llvm-mingw fenics-jit-tinycc fenics-jit-micro-clang cffi setuptools pefile | Out-Host
+            return $LASTEXITCODE
+          }
+          $code = Install-Phase5
+          if ($code -ne 0) {
+            Remove-Item -Recurse -Force $prefix -ErrorAction SilentlyContinue
+            & $env:MAMBA_EXE clean --all --yes | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Phase-5 micromamba cache cleanup failed" }
+            $code = Install-Phase5
+          }
+          if ($code -ne 0) { throw "Phase-5 three-backend environment installation failed after retry" }
+
+      - name: Validate selector, ownership, cache isolation and switching
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase5 python py${{ matrix.python }} with spaces"
+          $diag = Join-Path $PWD "micro-clang-phase5-py${{ matrix.python }}"
+          New-Item -ItemType Directory -Force $diag | Out-Null
+          $env:PYTHONHASHSEED = "0"
+          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-selector-validation.py --work-dir (Join-Path $diag "selector work with spaces") --output (Join-Path $diag "selector-validation.json")
+          if ($LASTEXITCODE -ne 0) { throw "Phase-5 selector validation failed" }
+
+      - name: Validate micro-Clang shared-runtime concurrency
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase5 python py${{ matrix.python }} with spaces"
+          $diag = Join-Path $PWD "micro-clang-phase5-py${{ matrix.python }}"
+          $env:PYTHONHASHSEED = "0"
+          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-concurrency-proof.py --work-dir (Join-Path $diag "concurrency work with spaces") --output (Join-Path $diag "concurrency-validation.json")
+          if ($LASTEXITCODE -ne 0) { throw "Phase-5 micro-Clang concurrency validation failed" }
+
+      - name: Upload Phase-5 integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase5-py${{ matrix.python }}
+          path: micro-clang-phase5-py${{ matrix.python }}/
+          if-no-files-found: warn
+          retention-days: 14

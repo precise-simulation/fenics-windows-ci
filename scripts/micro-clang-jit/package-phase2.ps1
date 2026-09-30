@@ -60,6 +60,12 @@ if (-not (Test-Path -LiteralPath $runtimeHelper -PathType Leaf)) {
 }
 Copy-Item -LiteralPath $runtimeHelper -Destination (Join-Path $backend "fenics_jit_runtime.py") -Force
 
+$backendRuntime = Join-Path $repoRoot "recipes\fenics-jit-micro-clang\micro_clang_runtime.py"
+if (-not (Test-Path -LiteralPath $backendRuntime -PathType Leaf)) {
+    throw "micro-Clang shared-runtime backend wrapper is missing: $backendRuntime"
+}
+Copy-Item -LiteralPath $backendRuntime -Destination (Join-Path $backend "micro_clang_runtime.py") -Force
+
 $readobj = Join-Path $backend "bin\llvm-readobj.exe"
 $dlltool = Join-Path $backend "bin\llvm-dlltool.exe"
 $clang = Join-Path $backend "bin\x86_64-w64-mingw32-clang.exe"
@@ -165,7 +171,8 @@ $metadata = [ordered]@{
     python_import_library_abi = "python3.dll"
     python_import_library_aliases = @("python3", "python312", "python313", "python314")
     runtime_helper = "fenics_jit_runtime.py"
-    runtime_helper_policy = "private $phaseLabel proof only; production shared selector unchanged"
+    backend_runtime = "micro_clang_runtime.py"
+    runtime_helper_policy = "qualified MinGW-style CFFI runtime; shared selector owned by fenics-jit-runtime"
     source_build_provenance = "provenance/build-provenance.json"
     source_build_manifest = "provenance/retained-manifest.json"
 }

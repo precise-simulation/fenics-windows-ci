@@ -166,7 +166,11 @@ $metadata = [ordered]@{
     llvm_cmake_flags = [string]$provenance.llvm_cmake_flags
     target = $clangTarget
     crt = "UCRT"
-    # Persist only the stable version identity. Full raw compiler diagnostics are\n    # already retained in provenance/clang-version.txt; additional --version\n    # lines may contain the relocated package path (for example InstalledDir or\n    # configuration-file diagnostics), which must not make package metadata vary.\n    clang_version = (($clangVersion -split "\r?\n") | Where-Object { $_.Trim() } | Select-Object -First 1).Trim()
+    # Persist only the stable version identity. Full raw compiler diagnostics are
+    # already retained in provenance/clang-version.txt; additional --version
+    # lines may contain the relocated package path (for example InstalledDir or
+    # configuration-file diagnostics), which must not make package metadata vary.
+    clang_version = (($clangVersion -split "\r?\n") | Where-Object { $_.Trim() } | Select-Object -First 1).Trim()
     lld_version = $lldVersion
     python_import_library_abi = "python3.dll"
     python_import_library_aliases = @("python3", "python312", "python313", "python314")

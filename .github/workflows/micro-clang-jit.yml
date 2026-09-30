@@ -1513,7 +1513,7 @@ jobs:
         shell: pwsh
         run: |
           $backend = Join-Path $PWD "micro clang phase4 stage5 package artifact with spaces\Library\fenics-jit\backends\micro-clang"
-          $staged = Join-Path $PWD "recipes\fenics-jit-micro-clang\staged-backend"
+          $staged = Join-Path $PWD "micro-clang-phase5-source"
           if (-not (Test-Path -LiteralPath (Join-Path $backend "micro_clang_runtime.py") -PathType Leaf)) { throw "qualified Stage-5 artifact lacks micro_clang_runtime.py" }
           Remove-Item -Recurse -Force $staged -ErrorAction SilentlyContinue
           Copy-Item -LiteralPath $backend -Destination $staged -Recurse -Force

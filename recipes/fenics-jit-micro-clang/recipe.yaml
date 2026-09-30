@@ -9,6 +9,9 @@ package:
   name: ${{ name }}
   version: ${{ version }}
 
+source:
+  path: ../../micro-clang-phase5-source
+
 build:
   number: ${{ build }}
   script:

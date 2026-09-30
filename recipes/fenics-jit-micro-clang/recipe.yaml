@@ -24,6 +24,7 @@ tests:
     requirements:
       run:
         - python 3.12.*
+        - fenics-ffcx
 
 about:
   summary: Size-qualified micro-Clang backend for FEniCS FFCx/CFFI JIT on Windows

@@ -115,9 +115,14 @@ def _validate_package_ownership() -> dict[str, object]:
 
     dolfinx = _package_record("fenics-dolfinx")
     dolfinx_deps = _dependency_names(dolfinx)
-    if "fenics-jit-llvm-mingw" not in dolfinx_deps:
+
+    repo_root = Path(__file__).resolve().parents[2]
+    dolfinx_recipe = repo_root / "recipes" / "dolfinx" / "recipe.yaml"
+    recipe_text = dolfinx_recipe.read_text(encoding="utf-8")
+    if "fenics-jit-llvm-mingw ==20260826" not in recipe_text:
         raise RuntimeError(
-            "current Windows fenics-dolfinx no longer records the LLVM-MinGW default dependency"
+            "repository Windows fenics-dolfinx recipe no longer declares the "
+            "LLVM-MinGW default backend dependency"
         )
 
     return {
@@ -125,7 +130,8 @@ def _validate_package_ownership() -> dict[str, object]:
         "file_counts": {name: len(files[name]) for name in PACKAGES},
         "dependencies": {name: sorted(deps[name]) for name in PACKAGES},
         "pairwise_overlap": {},
-        "dolfinx_backend_dependency": "fenics-jit-llvm-mingw",
+        "dolfinx_recipe_backend_dependency": "fenics-jit-llvm-mingw ==20260826",
+        "installed_dolfinx_dependencies": sorted(dolfinx_deps),
         "normal_install_footprint_reduction_claimed": False,
     }
 

@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 4 qualified. Stage 5 passed the <=108.2 MiB continuation gate at 107.8796 MiB and passed the complete Python 3.12-3.14 private matrix. Phase 5 shared-runtime three-backend integration is in progress; LLVM-MinGW remains the default.
+**Status:** Phase 5 shared-runtime integration qualified on Python 3.12-3.14 in workflow run #68. The paired same-run three-backend size/performance comparison is now the active Phase-5 gate; LLVM-MinGW remains the default.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -312,6 +312,36 @@ the intended backend, unavailable backends fail without fallback, package
 ownership/dependencies do not overlap, backend cache namespaces are distinct,
 sequential switching performs real JIT, and micro-Clang participates safely in
 the shared activation/concurrency contract.
+
+## Phase 5 integration qualification evidence
+
+Workflow run #68 (`36825854094`) at head
+`dd4ef37c12f0c626d88701f0ebf3dc08d41b5456` cleared the shared-runtime
+integration/isolation gate:
+
+- Phase-5 package integration job `110295573750`: passed;
+- Python 3.12 integration job `110296365612`: passed;
+- Python 3.13 integration job `110296365454`: passed;
+- Python 3.14 integration job `110296365314`: passed;
+- the selector resolves all three explicit backends, keeps `llvm-mingw` as
+  the default, and rejects unavailable backends without fallback;
+- package ownership is non-overlapping and each backend depends on the shared
+  runtime without depending on another backend;
+- sequential real JIT switching
+  `llvm-mingw -> micro-clang -> tinycc -> micro-clang -> llvm-mingw` passed
+  with distinct physical cache namespaces;
+- shared-runtime concurrency passed, including micro/micro, LLVM/micro and
+  TinyCC/micro contention;
+- the conda micro-Clang package measured **108.02 MiB installed contents** and
+  **30.42 MiB compressed** in the qualified package job;
+- stack run #367, TinyCC JIT run #116 and TinyCC Phase-7 run #35 all passed at
+  the same head.
+
+Phase 5 may therefore proceed to the required paired same-run three-backend
+size/performance comparison. Timing denominators must be freshly measured
+LLVM-MinGW samples from the same runner and repetition. No normal-install
+footprint reduction is claimed: the Windows DOLFINx recipe still declares
+`fenics-jit-llvm-mingw` unconditionally.
 
 ## Gates before further implementation
 

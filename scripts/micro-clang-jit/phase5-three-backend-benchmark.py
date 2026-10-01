@@ -83,6 +83,19 @@ def _identity(record: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _exact_package_record(prefix: Path, name: str) -> dict[str, object]:
+    matches: list[tuple[Path, dict[str, object]]] = []
+    for path in sorted((prefix / "conda-meta").glob(f"{name}-*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and str(data.get("name", "")).lower() == name.lower():
+            matches.append((path, data))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"expected one exact installed {name} record, got {[path for path, _ in matches]}"
+        )
+    return matches[0][1]
+
+
 def _archive_records(package_dir: Path, package: str) -> list[dict[str, object]]:
     return [
         {
@@ -475,7 +488,7 @@ def _environment_identities(base: ModuleType) -> dict[str, object]:
     )
     result = {}
     for name in names:
-        result[name] = _identity(base._package_record(prefix, name))
+        result[name] = _identity(_exact_package_record(prefix, name))
     return result
 
 

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import faulthandler
 import importlib.util
 import json
 import math
 import os
-import subprocess
 import sys
 import tempfile
 import time
@@ -92,124 +90,96 @@ def _load_selector(jit_root: Path):
     return _load_python_module("_micro_clang_phase6_selector", path)
 
 
-def _render_command(cmd: object) -> list[str]:
-    if isinstance(cmd, (list, tuple)):
-        return [str(part) for part in cmd]
-    return [str(cmd)]
-
-
-def _is_micro_clang_build_command(cmd: object) -> bool:
-    parts = _render_command(cmd)
-    if not parts:
-        return False
-    executable = Path(parts[0]).name.lower()
-    if executable != "x86_64-w64-mingw32-clang.exe":
-        return False
-    lowered = {part.lower() for part in parts[1:]}
-    return "--version" not in lowered and "-dumpmachine" not in lowered
-
-
-@contextlib.contextmanager
-def _capture_compiler_commands(records: list[dict[str, object]]):
-    original_run = subprocess.run
-    original_check_call = subprocess.check_call
-    original_spawns: list[tuple[type, object]] = []
-    original_calls: list[tuple[type, object]] = []
-    seen: set[tuple[str, ...]] = {
-        tuple(str(part) for part in record.get("command", []))
-        for record in records
-        if isinstance(record.get("command"), list)
+def _assert_bundle_runtime_config(config, *, bundle: Path, backend_root: Path, original_prefix: Path) -> dict[str, object]:
+    record = config.diagnostic_record()
+    expected = {
+        "toolchain_root": backend_root.resolve(),
+        "clang": (backend_root / "bin" / "x86_64-w64-mingw32-clang.exe").resolve(),
+        "lld": (backend_root / "bin" / "ld.lld.exe").resolve(),
     }
-
-    def remember(cmd: object) -> None:
-        if not _is_micro_clang_build_command(cmd):
-            return
-        parts = _render_command(cmd)
-        key = tuple(parts)
-        if key not in seen:
-            seen.add(key)
-            records.append({"command": parts})
-
-    def capture(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        remember(cmd)
-        return original_run(cmd, *args, **kwargs)
-
-    def capture_check_call(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        remember(cmd)
-        return original_check_call(cmd, *args, **kwargs)
-
-    # In normal conda Python setuptools reaches subprocess.check_call directly,
-    # but Nuitka can freeze/bind that launcher before this proof runs. Patch the
-    # distutils compiler command boundary too; CFFI's MinGW backend must pass
-    # every compile/link invocation through CCompiler.spawn.
-    compiler_classes: list[type] = []
-    try:
-        from setuptools._distutils.ccompiler import CCompiler as SetuptoolsCCompiler
-        compiler_classes.append(SetuptoolsCCompiler)
-    except ImportError:
-        pass
-    try:
-        from distutils.ccompiler import CCompiler as DistutilsCCompiler
-        if DistutilsCCompiler not in compiler_classes:
-            compiler_classes.append(DistutilsCCompiler)
-    except ImportError:
-        pass
-
-    for compiler_class in compiler_classes:
-        original_spawn = compiler_class.spawn
-
-        def capture_spawn(self, cmd, *args, _original=original_spawn, **kwargs):  # noqa: ANN001, ANN002, ANN003
-            remember(cmd)
-            return _original(self, cmd, *args, **kwargs)
-
-        original_spawns.append((compiler_class, original_spawn))
-        compiler_class.spawn = capture_spawn
-
-    # setuptools 84's MinGW implementation invokes Compiler.call() directly
-    # from _compile()/link(); spawn() is only a deprecated compatibility path.
-    try:
-        from setuptools._distutils.compilers.C.base import Compiler as SetuptoolsCompiler
-        original_call = SetuptoolsCompiler.call
-
-        def capture_call(self, cmd, *args, _original=original_call, **kwargs):  # noqa: ANN001, ANN002, ANN003
-            remember(cmd)
-            return _original(self, cmd, *args, **kwargs)
-
-        original_calls.append((SetuptoolsCompiler, original_call))
-        SetuptoolsCompiler.call = capture_call
-    except ImportError:
-        pass
-
-    subprocess.run = capture
-    subprocess.check_call = capture_check_call
-    try:
-        yield
-    finally:
-        subprocess.run = original_run
-        subprocess.check_call = original_check_call
-        for compiler_class, original_spawn in reversed(original_spawns):
-            compiler_class.spawn = original_spawn
-        for compiler_class, original_call in reversed(original_calls):
-            compiler_class.call = original_call
+    for key, path in expected.items():
+        actual = Path(str(record[key])).resolve()
+        if actual != path:
+            raise RuntimeError(f"standalone {key} mismatch: {actual} != {path}")
+    bundle_root = bundle.resolve()
+    keys = (
+        "toolchain_root", "clang", "lld", "toolchain_include", "target_library_dir",
+        "python_prefix", "python_include", "python_dll", "python_import_library_dir",
+        "python_import_library", "python_stable_import_library", "ffcx_include",
+    )
+    resolved = {}
+    for key in keys:
+        path = Path(str(record[key])).resolve()
+        if not path.is_relative_to(bundle_root):
+            raise RuntimeError(f"standalone {key} escaped bundle: {path}")
+        if str(original_prefix).lower() in str(path).lower():
+            raise RuntimeError(f"standalone {key} reached hidden original prefix: {path}")
+        resolved[key] = str(path)
+    if record.get("runtime_dll_dir"):
+        path = Path(str(record["runtime_dll_dir"])).resolve()
+        if not path.is_relative_to(bundle_root):
+            raise RuntimeError(f"standalone runtime DLL directory escaped bundle: {path}")
+        resolved["runtime_dll_dir"] = str(path)
+    for entry in os.environ.get("PATH","").split(os.pathsep):
+        low=entry.lower()
+        if "microsoft visual studio" in low or "windows kits" in low:
+            raise RuntimeError(f"host compiler/SDK path leaked into standalone JIT PATH: {entry}")
+    if Path(os.environ.get("CC","")).resolve()!=expected["clang"]:
+        raise RuntimeError(f"standalone CC is not packaged micro-Clang: {os.environ.get('CC')}")
+    if Path(os.environ.get("CXX","")).resolve()!=expected["clang"]:
+        raise RuntimeError(f"standalone CXX is not packaged micro-Clang: {os.environ.get('CXX')}")
+    return {"diagnostic_record":record,"resolved_bundle_paths":resolved,"cc":os.environ.get("CC"),"cxx":os.environ.get("CXX"),"path":os.environ.get("PATH")}
 
 
-def _minimal_cffi(
-    runtime,
-    work: Path,
-    commands: list[dict[str, object]],
-) -> Path:
+def _assert_ffcx_transcripts(cache: Path, *, bundle: Path, backend_root: Path, original_prefix: Path, config_record: dict[str, object]) -> dict[str, object]:
+    markers=sorted(cache.rglob("*.c.cached"))
+    if not markers:
+        raise RuntimeError("standalone FFCx cache contains no completed compile transcript")
+    texts=[p.read_text(encoding="utf-8",errors="replace") for p in markers]
+    combined="\n".join(texts)
+    lowered=combined.lower()
+    if str(original_prefix).lower() in lowered:
+        raise RuntimeError("FFCx compile transcript references the hidden original prefix")
+    forbidden=("microsoft visual studio","windows kits","\\backends\\llvm-mingw\\","/backends/llvm-mingw/","\\backends\\tinycc\\","/backends/tinycc/","tcc.exe","gcc.exe","g++.exe","cl.exe","link.exe")
+    leaked=[token for token in forbidden if token in lowered]
+    if leaked:
+        raise RuntimeError(f"FFCx compile transcript reached forbidden inputs: {leaked}")
+    required={
+        "clang":Path(str(config_record["clang"])).resolve(),
+        "python_include":Path(str(config_record["python_include"])).resolve(),
+        "ffcx_include":Path(str(config_record["ffcx_include"])).resolve(),
+        "toolchain_include":Path(str(config_record["toolchain_include"])).resolve(),
+        "python_import_library_dir":Path(str(config_record["python_import_library_dir"])).resolve(),
+        "target_library_dir":Path(str(config_record["target_library_dir"])).resolve(),
+    }
+    missing=[]
+    for key,path in required.items():
+        if not path.is_relative_to(bundle.resolve()):
+            raise RuntimeError(f"transcript-required {key} path escaped bundle: {path}")
+        candidates={str(path).lower(),path.as_posix().lower(),str(path).replace("\\","/").lower()}
+        if not any(candidate in lowered for candidate in candidates):
+            missing.append(f"{key}={path}")
+    if missing:
+        raise RuntimeError("FFCx compile transcript does not expose all required bundle-local inputs: "+", ".join(missing))
+    clang_name="x86_64-w64-mingw32-clang.exe"
+    command_lines=[line.strip() for text in texts for line in text.splitlines() if clang_name in line.lower()]
+    if not command_lines:
+        raise RuntimeError("FFCx compile transcript contains no micro-Clang command line")
+    return {"marker_count":len(markers),"markers":[str(p.resolve()) for p in markers],"micro_clang_command_count":len(command_lines),"micro_clang_commands":command_lines,"required_paths":{k:str(v) for k,v in required.items()}}
+
+
+def _minimal_cffi(runtime, work: Path) -> Path:
     ffi = FFI()
     ffi.cdef("int phase6_value(void);")
     ffi.set_source("_phase6_cffi_probe", "int phase6_value(void){return 61;}")
     cache = runtime.cache_root(work / "cffi cache with spaces")
-    with _capture_compiler_commands(commands):
-        with runtime.activate(
-            cache_root=cache,
-            diagnostics_dir=work / "diagnostics" / "cffi",
-        ):
-            output = Path(
-                ffi.compile(tmpdir=str(work / "cffi build with spaces"), verbose=True)
-            ).resolve()
+    with runtime.activate(
+        cache_root=cache,
+        diagnostics_dir=work / "diagnostics" / "cffi",
+    ):
+        output = Path(
+            ffi.compile(tmpdir=str(work / "cffi build with spaces"), verbose=True)
+        ).resolve()
     spec = importlib.util.spec_from_file_location("_phase6_cffi_probe", output)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load standalone CFFI probe: {output}")
@@ -314,96 +284,6 @@ def _run_forms(work: Path, cache: Path) -> dict[str, object]:
     }
 
 
-def _read_commands(diagnostics: Path) -> list[dict[str, object]]:
-    records: list[dict[str, object]] = []
-    for path in sorted(diagnostics.rglob("compiler-commands.jsonl")):
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            if raw.strip():
-                value = json.loads(raw)
-                if isinstance(value, dict):
-                    value["_record_path"] = str(path.resolve())
-                    records.append(value)
-    return records
-
-
-def _assert_hermetic_commands(
-    records: list[dict[str, object]],
-    *,
-    bundle: Path,
-    original_prefix: Path,
-    backend_root: Path,
-) -> dict[str, object]:
-    if not records:
-        raise RuntimeError("standalone qualification captured no micro-Clang compiler commands")
-
-    bundle_text = str(bundle.resolve()).lower()
-    backend_text = str(backend_root.resolve()).lower()
-    original_text = str(original_prefix).lower()
-    rendered: list[str] = []
-    development_paths: list[str] = []
-    compiler_paths: list[str] = []
-
-    for record in records:
-        command = record.get("command")
-        if not isinstance(command, list) or not command:
-            raise RuntimeError(f"invalid compiler command record: {record!r}")
-        text = " ".join(str(part) for part in command)
-        rendered.append(text)
-        lowered = text.lower()
-        if original_text in lowered:
-            raise RuntimeError(f"compiler command reached renamed original prefix: {text}")
-        if any(token in lowered for token in (
-            "microsoft visual studio",
-            "windows kits",
-            "\\backends\\llvm-mingw\\",
-            "/backends/llvm-mingw/",
-            "\\backends\\tinycc\\",
-            "/backends/tinycc/",
-            "tcc.exe",
-            "gcc.exe",
-            "g++.exe",
-            "cl.exe",
-            "link.exe",
-        )):
-            raise RuntimeError(f"compiler command reached forbidden compiler/development input: {text}")
-
-        compiler = Path(str(command[0])).resolve()
-        compiler_paths.append(str(compiler))
-        if not str(compiler).lower().startswith(backend_text + os.sep.lower()):
-            raise RuntimeError(f"compiler executable escaped micro-Clang backend: {compiler}")
-
-        for index, part in enumerate(command):
-            token = str(part)
-            value = None
-            if token in ("-I", "-L", "-B") and index + 1 < len(command):
-                value = str(command[index + 1])
-            elif token.startswith("-I") and len(token) > 2:
-                value = token[2:]
-            elif token.startswith("-L") and len(token) > 2:
-                value = token[2:]
-            elif token.startswith("-B") and len(token) > 2:
-                value = token[2:]
-            if value:
-                try:
-                    candidate = str(Path(value).resolve())
-                except OSError:
-                    candidate = value
-                development_paths.append(candidate)
-                if not candidate.lower().startswith(bundle_text + os.sep.lower()):
-                    raise RuntimeError(
-                        f"compiler development path escaped standalone bundle: {candidate}"
-                    )
-
-    if not development_paths:
-        raise RuntimeError("standalone micro-Clang commands exposed no development include/library paths")
-    return {
-        "command_count": len(records),
-        "compiler_paths": sorted(set(compiler_paths)),
-        "development_paths": sorted(set(development_paths)),
-        "commands": rendered,
-    }
-
-
 def _run_mpi_child(
     runtime,
     work: Path,
@@ -447,34 +327,36 @@ def _run_mpi_child(
             + beta * u * v * ufl.ds
         )
 
-        records: list[dict[str, object]] = []
-        with _capture_compiler_commands(records):
-            with runtime.activate(cache_root=cache, diagnostics_dir=diagnostics):
-                ffcx_jit(
-                    comm,
-                    mpi_form,
-                    jit_options={"cache_dir": cache, "cffi_verbose": True},
+        config_evidence = None
+        transcript_evidence = None
+        nonroot_poison = None
+        with runtime.activate(cache_root=cache, diagnostics_dir=diagnostics) as config:
+            if comm.rank == 0:
+                config_evidence = _assert_bundle_runtime_config(
+                    config, bundle=bundle, backend_root=runtime.backend_root,
+                    original_prefix=original_prefix,
                 )
-
-        compile_counts = comm.allgather(len(records))
-        if compile_counts[0] == 0:
-            raise RuntimeError("standalone MPI rank 0 did not compile the fresh JIT form")
-        if compile_counts[1] != 0:
-            raise RuntimeError(
-                f"standalone MPI non-root rank started an independent compile: {compile_counts}"
-            )
-
-        hermetic = None
-        if comm.rank == 0:
-            hermetic = _assert_hermetic_commands(
-                records,
-                bundle=bundle,
-                original_prefix=original_prefix,
-                backend_root=runtime.backend_root,
-            )
-        elif records:
-            raise RuntimeError(f"standalone MPI rank 1 captured compiler commands: {records!r}")
-
+            else:
+                nonroot_poison = str(work / "nonroot compiler must not run.exe")
+                os.environ["CC"] = nonroot_poison
+                os.environ["CXX"] = nonroot_poison
+            poison_values = comm.allgather(nonroot_poison)
+            if poison_values[0] is not None or not poison_values[1]:
+                raise RuntimeError(f"unexpected MPI compiler-poison state: {poison_values}")
+            ffcx_jit(comm, mpi_form, jit_options={"cache_dir": cache, "cffi_verbose": True})
+            if comm.rank == 0:
+                transcript_evidence = _assert_ffcx_transcripts(
+                    cache, bundle=bundle, backend_root=runtime.backend_root,
+                    original_prefix=original_prefix,
+                    config_record=config_evidence["diagnostic_record"],
+                )
+        compile_ownership = {
+            "fresh_cache": True,
+            "rank0_compiler": str(runtime.backend_root / "bin" / "x86_64-w64-mingw32-clang.exe"),
+            "rank1_compiler_poison": poison_values[1],
+            "rank1_compile_attempt_would_fail": True,
+            "jit_completed": True,
+        }
         comm.Barrier()
         modules = sorted(cache.rglob("*.pyd"))
         visible = comm.allgather([path.name for path in modules])
@@ -495,11 +377,12 @@ def _run_mpi_child(
                 "selected_backend": runtime.selected_backend,
                 "backend_cache_id": runtime.backend_cache_id,
                 "cache_root": str(cache),
-                "compile_commands_by_rank": compile_counts,
+                "compile_ownership": compile_ownership,
                 "cache_modules_by_rank": visible,
                 "generated_pyd_count": len(modules),
                 "generated_pyd": [str(path.resolve()) for path in modules],
-                "compiler_hermeticity": hermetic,
+                "runtime_hermeticity": config_evidence,
+                "ffcx_compile_transcript": transcript_evidence,
                 "pe": [_inspect_pe(path) for path in modules],
             }
             output = output.resolve()
@@ -600,27 +483,26 @@ def main() -> int:
     if args.mpi_child:
         return _run_mpi_child(runtime, work, args.output, bundle, original_prefix)
 
-    records: list[dict[str, object]] = []
-
     _progress(work, "cffi:minimal")
-    cffi_module = _minimal_cffi(runtime, work, records)
+    cffi_module = _minimal_cffi(runtime, work)
     _progress(work, "cffi:minimal:ok")
 
     forms_cache = runtime.cache_root(work / "ffcx cache with spaces")
-    with _capture_compiler_commands(records):
-        with runtime.activate(
-            cache_root=forms_cache,
-            diagnostics_dir=diagnostics / "forms",
-        ):
-            forms = _run_forms(work, forms_cache)
+    with runtime.activate(
+        cache_root=forms_cache,
+        diagnostics_dir=diagnostics / "forms",
+    ) as config:
+        runtime_hermeticity = _assert_bundle_runtime_config(
+            config, bundle=bundle, backend_root=backend_root,
+            original_prefix=original_prefix,
+        )
+        forms = _run_forms(work, forms_cache)
+        transcript_evidence = _assert_ffcx_transcripts(
+            forms_cache, bundle=bundle, backend_root=backend_root,
+            original_prefix=original_prefix,
+            config_record=runtime_hermeticity["diagnostic_record"],
+        )
     _progress(work, "forms:ok")
-
-    hermetic = _assert_hermetic_commands(
-        records,
-        bundle=bundle,
-        original_prefix=original_prefix,
-        backend_root=backend_root,
-    )
 
     pe_records = [_inspect_pe(cffi_module)]
     for item in forms["generated_pyd"]:
@@ -659,7 +541,8 @@ def main() -> int:
         "tinycc_present": (jit_root / "backends" / "tinycc").exists(),
         "cffi": {"module": str(cffi_module)},
         "forms": forms,
-        "compiler_hermeticity": hermetic,
+        "runtime_hermeticity": runtime_hermeticity,
+        "ffcx_compile_transcript": transcript_evidence,
         "pe": pe_records,
         "release_material": release_material,
         "staged_ufcx_headers": [str(path.resolve()) for path in ufcx_headers],

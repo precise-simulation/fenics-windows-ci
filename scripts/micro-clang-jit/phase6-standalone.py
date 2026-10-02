@@ -91,7 +91,9 @@ def _load_selector(jit_root: Path):
 
 
 def _assert_bundle_runtime_config(config, *, bundle: Path, backend_root: Path, original_prefix: Path) -> dict[str, object]:
-    record = config.diagnostic_record()
+    selector_record = config.diagnostic_record()
+    backend_record = selector_record.get("backend")
+    record = backend_record if isinstance(backend_record, dict) else selector_record
     expected = {
         "toolchain_root": backend_root.resolve(),
         "clang": (backend_root / "bin" / "x86_64-w64-mingw32-clang.exe").resolve(),

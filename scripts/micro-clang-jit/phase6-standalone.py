@@ -114,6 +114,7 @@ def _capture_compiler_commands(records: list[dict[str, object]]):
     original_run = subprocess.run
     original_check_call = subprocess.check_call
     original_spawns: list[tuple[type, object]] = []
+    original_calls: list[tuple[type, object]] = []
     seen: set[tuple[str, ...]] = {
         tuple(str(part) for part in record.get("command", []))
         for record in records
@@ -164,6 +165,21 @@ def _capture_compiler_commands(records: list[dict[str, object]]):
         original_spawns.append((compiler_class, original_spawn))
         compiler_class.spawn = capture_spawn
 
+    # setuptools 84's MinGW implementation invokes Compiler.call() directly
+    # from _compile()/link(); spawn() is only a deprecated compatibility path.
+    try:
+        from setuptools._distutils.compilers.C.base import Compiler as SetuptoolsCompiler
+        original_call = SetuptoolsCompiler.call
+
+        def capture_call(self, cmd, *args, _original=original_call, **kwargs):  # noqa: ANN001, ANN002, ANN003
+            remember(cmd)
+            return _original(self, cmd, *args, **kwargs)
+
+        original_calls.append((SetuptoolsCompiler, original_call))
+        SetuptoolsCompiler.call = capture_call
+    except ImportError:
+        pass
+
     subprocess.run = capture
     subprocess.check_call = capture_check_call
     try:
@@ -173,6 +189,8 @@ def _capture_compiler_commands(records: list[dict[str, object]]):
         subprocess.check_call = original_check_call
         for compiler_class, original_spawn in reversed(original_spawns):
             compiler_class.spawn = original_spawn
+        for compiler_class, original_call in reversed(original_calls):
+            compiler_class.call = original_call
 
 
 def _minimal_cffi(

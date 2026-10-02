@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 5 shared-runtime integration and paired three-backend performance comparison are qualified on Python 3.12-3.14. Phase 6 micro-Clang-only standalone/Nuitka qualification is in progress; LLVM-MinGW remains the default.
+**Status:** complete — Phases 0-6 are qualified. Phase 6 selects **Option D: micro-Clang default candidate**; LLVM-MinGW remains the actual default pending a separate dependency/default-switch change.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -410,15 +410,56 @@ avoids an unnecessary LLVM source rebuild while still giving the wrapper change
 a new package/cache identity and complete downstream qualification.
 
 
+
+## Phase 6 final qualification evidence
+
+The qualified implementation head is
+`b632e35d3114c0787393cfdd04c637bde79897a6` (`Fix Phase 6 shared-runtime diagnostics`).
+
+Current-head workflow `micro-clang-phase6` #8 (run `37078092998`)
+cleared the complete release gate:
+
+- corrected micro-Clang package derivation: passed;
+- corrected package integration on Python 3.12, 3.13 and 3.14: passed;
+- paired three-backend comparison on Python 3.12, 3.13 and 3.14: passed;
+- micro-Clang-only Nuitka serial + two-rank MPI standalone qualification: passed.
+
+Focused standalone workflow `micro-clang-phase6-standalone-retry` #3
+(run `37078092955`) independently passed the same standalone execution path.
+Its evidence artifact is `micro-clang-phase6-standalone-retry`, artifact
+`11257857090`, digest
+`sha256:f577c7c15277f4a6cc9e61f6ccd902fbd2c611c47384b846db763d5b56cf64df`.
+
+The standalone proof established:
+
+- the original conda/build prefix was renamed and inaccessible;
+- neither `llvm-mingw` nor `tinycc` was present in the bundle;
+- the serial fresh JIT produced four FFCx cache modules and captured eight
+  micro-Clang compiler/linker commands;
+- the Poisson solution norm was `0.4922541639224417`;
+- all inspected generated modules retained Stable-ABI `python3.dll` imports,
+  required PE mitigation bits (`0x160`), relocations and x64 unwind metadata;
+- the two-rank MPI proof completed with rank 0 owning the fresh compile while
+  rank 1's compiler path was deliberately poisoned, proving rank 1 did not
+  start an independent compiler;
+- the standalone bundle measured 312,159,950 bytes total; common JIT runtime +
+  micro-Clang measured 113,192,164 bytes, of which the micro-Clang incremental
+  payload was 113,143,546 bytes (about 107.90 MiB).
+
+Together with the Phase-5 paired comparison, Phase 6 satisfies the EPIC release
+gate. The release classification is **Option D: default candidate**. This is a
+qualification result only: LLVM-MinGW remains the normal dependency and selector
+default, and no normal-install footprint reduction is claimed until a separate
+package/default-switch change is qualified.
+
+
 ## Gates before further implementation
 
-Phase 2 packaging may proceed because Phase 0 and the required Phase 1 matrix
-passed in workflow run #30.
+All Phase 0-6 gates in this epic are complete. No further implementation is
+required for micro-Clang qualification itself.
 
-Phase 3 broad qualification may proceed because workflow run #35 passed the
-conservative Phase-2 package/relocation/provenance/reproducibility gate.
-
-Phase 4 minimization may now proceed because the blocking Python 3.12-3.14
-Phase-3 private qualification matrix passed in workflow run #40.
-
-Phase 6 standalone qualification may proceed because the shared-runtime integration and paired comparison gates passed. LLVM-MinGW remains the default/reference backend; no dependency/default switch is authorized by these results.
+A normal-install dependency/default switch is intentionally outside this epic.
+Such a change must be proposed separately, must remove or replace the current
+unconditional `fenics-dolfinx -> fenics-jit-llvm-mingw` dependency as intended,
+and must rerun the relevant stack, backend-selection, performance and standalone
+qualification before changing the default.

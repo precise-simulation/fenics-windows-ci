@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import faulthandler
 import importlib.util
 import json
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -90,18 +92,64 @@ def _load_selector(jit_root: Path):
     return _load_python_module("_micro_clang_phase6_selector", path)
 
 
-def _minimal_cffi(runtime, work: Path) -> Path:
+def _render_command(cmd: object) -> list[str]:
+    if isinstance(cmd, (list, tuple)):
+        return [str(part) for part in cmd]
+    return [str(cmd)]
+
+
+def _is_micro_clang_build_command(cmd: object) -> bool:
+    parts = _render_command(cmd)
+    if not parts:
+        return False
+    executable = Path(parts[0]).name.lower()
+    if executable != "x86_64-w64-mingw32-clang.exe":
+        return False
+    lowered = {part.lower() for part in parts[1:]}
+    return "--version" not in lowered and "-dumpmachine" not in lowered
+
+
+@contextlib.contextmanager
+def _capture_compiler_commands(records: list[dict[str, object]]):
+    original_run = subprocess.run
+    original_check_call = subprocess.check_call
+
+    def capture(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        if _is_micro_clang_build_command(cmd):
+            records.append({"command": _render_command(cmd)})
+        return original_run(cmd, *args, **kwargs)
+
+    def capture_check_call(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        if _is_micro_clang_build_command(cmd):
+            records.append({"command": _render_command(cmd)})
+        return original_check_call(cmd, *args, **kwargs)
+
+    subprocess.run = capture
+    subprocess.check_call = capture_check_call
+    try:
+        yield
+    finally:
+        subprocess.run = original_run
+        subprocess.check_call = original_check_call
+
+
+def _minimal_cffi(
+    runtime,
+    work: Path,
+    commands: list[dict[str, object]],
+) -> Path:
     ffi = FFI()
     ffi.cdef("int phase6_value(void);")
     ffi.set_source("_phase6_cffi_probe", "int phase6_value(void){return 61;}")
     cache = runtime.cache_root(work / "cffi cache with spaces")
-    with runtime.activate(
-        cache_root=cache,
-        diagnostics_dir=work / "diagnostics" / "cffi",
-    ):
-        output = Path(
-            ffi.compile(tmpdir=str(work / "cffi build with spaces"), verbose=True)
-        ).resolve()
+    with _capture_compiler_commands(commands):
+        with runtime.activate(
+            cache_root=cache,
+            diagnostics_dir=work / "diagnostics" / "cffi",
+        ):
+            output = Path(
+                ffi.compile(tmpdir=str(work / "cffi build with spaces"), verbose=True)
+            ).resolve()
     spec = importlib.util.spec_from_file_location("_phase6_cffi_probe", output)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load standalone CFFI probe: {output}")
@@ -339,14 +387,15 @@ def _run_mpi_child(
             + beta * u * v * ufl.ds
         )
 
-        with runtime.activate(cache_root=cache, diagnostics_dir=diagnostics):
-            ffcx_jit(
-                comm,
-                mpi_form,
-                jit_options={"cache_dir": cache, "cffi_verbose": True},
-            )
+        records: list[dict[str, object]] = []
+        with _capture_compiler_commands(records):
+            with runtime.activate(cache_root=cache, diagnostics_dir=diagnostics):
+                ffcx_jit(
+                    comm,
+                    mpi_form,
+                    jit_options={"cache_dir": cache, "cffi_verbose": True},
+                )
 
-        records = _read_commands(diagnostics)
         compile_counts = comm.allgather(len(records))
         if compile_counts[0] == 0:
             raise RuntimeError("standalone MPI rank 0 did not compile the fresh JIT form")
@@ -491,19 +540,21 @@ def main() -> int:
     if args.mpi_child:
         return _run_mpi_child(runtime, work, args.output, bundle, original_prefix)
 
+    records: list[dict[str, object]] = []
+
     _progress(work, "cffi:minimal")
-    cffi_module = _minimal_cffi(runtime, work)
+    cffi_module = _minimal_cffi(runtime, work, records)
     _progress(work, "cffi:minimal:ok")
 
     forms_cache = runtime.cache_root(work / "ffcx cache with spaces")
-    with runtime.activate(
-        cache_root=forms_cache,
-        diagnostics_dir=diagnostics / "forms",
-    ):
-        forms = _run_forms(work, forms_cache)
+    with _capture_compiler_commands(records):
+        with runtime.activate(
+            cache_root=forms_cache,
+            diagnostics_dir=diagnostics / "forms",
+        ):
+            forms = _run_forms(work, forms_cache)
     _progress(work, "forms:ok")
 
-    records = _read_commands(diagnostics)
     hermetic = _assert_hermetic_commands(
         records,
         bundle=bundle,

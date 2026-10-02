@@ -6,7 +6,7 @@ param(
     [string]$EntryPoint,
     [string]$OutputDir = "output-nuitka",
     [string]$ExistingPrefix = "",
-    [ValidateSet("", "tinycc", "llvm-mingw")]
+    [ValidateSet("", "tinycc", "llvm-mingw", "micro-clang")]
     [string]$JitBackend = ""
 )
 
@@ -375,6 +375,9 @@ if ($JitBackend) {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $stagedJit "backends\$JitBackend\tcc.exe")) -and $JitBackend -eq "tinycc") {
         throw "staged TinyCC executable missing from standalone distribution"
+    }
+    if ($JitBackend -eq "micro-clang" -and -not (Test-Path -LiteralPath (Join-Path $stagedJit "backends\$JitBackend\bin\x86_64-w64-mingw32-clang.exe") -PathType Leaf)) {
+        throw "staged micro-Clang executable missing from standalone distribution"
     }
     if (-not (Test-Path -LiteralPath (Join-Path $stagedJit "backends\$JitBackend"))) {
         throw "staged JIT backend missing from standalone distribution"

@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phase 5 shared-runtime integration qualified on Python 3.12-3.14 in workflow run #68. The paired same-run three-backend size/performance comparison is now the active Phase-5 gate; LLVM-MinGW remains the default.
+**Status:** Phase 5 shared-runtime integration and paired three-backend performance comparison are qualified on Python 3.12-3.14. Phase 6 micro-Clang-only standalone/Nuitka qualification is in progress; LLVM-MinGW remains the default.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -343,6 +343,41 @@ LLVM-MinGW samples from the same runner and repetition. No normal-install
 footprint reduction is claimed: the Windows DOLFINx recipe still declares
 `fenics-jit-llvm-mingw` unconditionally.
 
+## Phase 5 paired comparison qualification evidence
+
+Dedicated workflow run #2 (`36875583148`) at head
+`10504ac77f15b116d080613e0324e5a0b1b5c658` cleared the required paired
+same-run three-backend performance gate on Python 3.12, 3.13 and 3.14.
+
+The benchmark used LLVM-MinGW, micro-Clang and TinyCC in the same runner,
+Python/dependency environment and form corpus, alternated backend order,
+preserved raw timing distributions, and used the LLVM-MinGW sample from the
+same repetition as each timing denominator.
+
+micro-Clang results versus freshly measured LLVM-MinGW were:
+
+| Python | assembly aggregate median | worst representative form | worst cold JIT | end-to-end Poisson |
+| --- | ---: | ---: | ---: | ---: |
+| 3.12 | 0.9954x | 1.0017x | 1.2037x | 1.0000x |
+| 3.13 | 0.9946x | 1.0036x | 1.1385x | 0.9979x |
+| 3.14 | 1.0075x | 1.0252x | 1.2163x | 0.9804x |
+
+All supported versions therefore satisfy the EPIC limits: aggregate assembly
+median <=1.10x, representative forms <=1.20x, cold JIT <=1.25x, numerical
+equivalence, and no material end-to-end PETSc regression.
+
+The installed package-owned micro-Clang backend measured **107.8947 MiB** in
+the comparison environment. The qualified conda package build remains
+**108.02 MiB total package contents / 30.42 MiB compressed**. The comparison
+also records side-by-side and standalone-increment measurements and explicitly
+records that no backend-selected normal-install profile exists yet, so no
+normal-install footprint reduction is claimed.
+
+Phase 5 is complete. Phase 6 may proceed to the micro-Clang-only standalone
+gate with the original build prefix inaccessible and both LLVM-MinGW and TinyCC
+absent from the bundle.
+
+
 ## Gates before further implementation
 
 Phase 2 packaging may proceed because Phase 0 and the required Phase 1 matrix
@@ -354,6 +389,4 @@ conservative Phase-2 package/relocation/provenance/reproducibility gate.
 Phase 4 minimization may now proceed because the blocking Python 3.12-3.14
 Phase-3 private qualification matrix passed in workflow run #40.
 
-Do not start production shared-runtime integration until the Phase-3 private
-qualification and Phase-4 size/performance gates pass. LLVM-MinGW remains the
-default/reference backend throughout these phases.
+Phase 6 standalone qualification may proceed because the shared-runtime integration and paired comparison gates passed. LLVM-MinGW remains the default/reference backend; no dependency/default switch is authorized by these results.

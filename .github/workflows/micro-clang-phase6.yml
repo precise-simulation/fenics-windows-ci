@@ -1,0 +1,177 @@
+name: micro-clang-phase6
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/micro-clang-phase6.yml"
+      - "scripts/fenicsx-nuitka.ps1"
+      - "scripts/fenicsx-nuitka-runtime.nuitka-package.config.yml"
+      - "scripts/micro-clang-jit/phase6-standalone.py"
+      - "specs/micro-clang-ffcx-jit/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: micro-clang-phase6-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standalone:
+    name: Phase 6 micro-Clang-only Nuitka qualification
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download qualified Phase-5 package channel from run 36825854094
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase5-package-channel
+          path: phase5-output
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 36825854094
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase6-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Create standalone build prefix
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          if (-not $mamba) { $mamba = "micromamba" }
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 build with spaces"
+
+          function Install-BuildPrefix {
+            & $mamba create -y -p $prefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge python=3.12 "libblas=*=*openblas" fenics-dolfinx fenics-jit-llvm-mingw "cffi=2.1.*" "setuptools=84.*" pefile "nuitka=4.1.3" ordered-set zstandard c-compiler | Out-Host
+            return $LASTEXITCODE
+          }
+
+          $code = Install-BuildPrefix
+          if ($code -ne 0) {
+            Remove-Item -Recurse -Force $prefix -ErrorAction SilentlyContinue
+            & $mamba clean --all --yes | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Phase-6 micromamba cache cleanup failed" }
+            $code = Install-BuildPrefix
+          }
+          if ($code -ne 0) { throw "Phase-6 standalone build environment install failed after retry" }
+
+          $runtimePackage = Get-ChildItem phase5-output -Recurse -Filter "fenics-jit-runtime-*.conda" | Select-Object -First 1
+          $microPackage = Get-ChildItem phase5-output -Recurse -Filter "fenics-jit-micro-clang-*.conda" | Select-Object -First 1
+          if (-not $runtimePackage -or -not $microPackage) {
+            throw "Phase-6 qualified runtime/micro-Clang package artifacts are missing"
+          }
+          & $mamba install -y -p $prefix $runtimePackage.FullName $microPackage.FullName | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Phase-6 qualified JIT package install failed" }
+
+          if (Test-Path -LiteralPath (Join-Path $prefix "Library/fenics-jit/backends/tinycc")) {
+            throw "TinyCC unexpectedly installed in Phase-6 build prefix"
+          }
+
+      - name: Build micro-Clang-only standalone bundle
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 build with spaces"
+          ./scripts/fenicsx-nuitka.ps1 -EntryPoint "scripts/micro-clang-jit/phase6-standalone.py" -OutputDir "phase6 output with spaces" -ExistingPrefix $prefix -JitBackend micro-clang
+
+      - name: Run hermetic serial and MPI standalone proof
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 build with spaces"
+          $output = Join-Path $PWD "phase6 output with spaces"
+          $dist = Get-ChildItem -LiteralPath $output -Directory -Filter "*.dist" |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "fenicsx.exe") } |
+            Select-Object -First 1
+          if (-not $dist) { throw "Phase-6 Nuitka distribution not found" }
+
+          $jit = Join-Path $dist.FullName "fenics-jit"
+          $micro = Join-Path $jit "backends/micro-clang"
+          foreach ($forbiddenBackend in @("llvm-mingw", "tinycc")) {
+            if (Test-Path -LiteralPath (Join-Path $jit "backends/$forbiddenBackend")) {
+              throw "$forbiddenBackend was staged into the micro-Clang-only standalone bundle"
+            }
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $micro "bin/x86_64-w64-mingw32-clang.exe") -PathType Leaf)) {
+            throw "micro-Clang compiler missing from standalone bundle"
+          }
+
+          $compilerLike = Get-ChildItem -LiteralPath $dist.FullName -Recurse -File |
+            Where-Object {
+              $_.Name.ToLowerInvariant() -match '^(cl|link|gcc|g\+\+|tcc|clang.*|ld.*)\.exe$' -and
+              -not $_.FullName.StartsWith($micro, [StringComparison]::OrdinalIgnoreCase)
+            }
+          if ($compilerLike) {
+            throw "Standalone bundle contains compiler tools outside micro-Clang ownership: $($compilerLike.FullName -join ', ')"
+          }
+
+          New-Item -ItemType Directory -Force phase6-evidence | Out-Null
+          Get-ChildItem -LiteralPath $dist.FullName -Recurse -File |
+            ForEach-Object {
+              [pscustomobject]@{
+                path = $_.FullName.Substring($dist.FullName.Length + 1).Replace('\','/')
+                bytes = $_.Length
+              }
+            } |
+            Sort-Object path |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -Encoding utf8 phase6-evidence/bundle-files.json
+
+          $hidden = "$prefix-hidden"
+          if (Test-Path -LiteralPath $hidden) { Remove-Item -Recurse -Force $hidden }
+          Move-Item -LiteralPath $prefix -Destination $hidden
+          try {
+            $env:FENICS_PHASE6_BUNDLE_ROOT = $dist.FullName
+            $env:FENICS_PHASE6_ORIGINAL_PREFIX = $prefix
+            $env:FENICS_JIT_ROOT = $jit
+            $env:FENICS_JIT_COMPILER = "micro-clang"
+            $env:FENICS_JIT_VERBOSE = "1"
+
+            foreach ($name in @(
+              "CC","CXX","CPP","LD","LDSHARED","INCLUDE","LIB","LIBPATH","LIBRARY_PATH",
+              "CPATH","C_INCLUDE_PATH","CPLUS_INCLUDE_PATH","COMPILER_PATH","GCC_EXEC_PREFIX",
+              "VSINSTALLDIR","VCINSTALLDIR","VCToolsInstallDir","WindowsSdkDir",
+              "WindowsSDKVersion","UniversalCRTSdkDir","UCRTVersion","DISTUTILS_USE_SDK","MSSdk"
+            )) {
+              Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+            }
+            Get-ChildItem Env: |
+              Where-Object { $_.Name -like "VSCMD_*" } |
+              ForEach-Object { Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue }
+
+            $env:PATH = "$($dist.FullName);$env:SystemRoot\System32;$env:SystemRoot"
+            $exe = Join-Path $dist.FullName "fenicsx.exe"
+            & $exe --work-dir (Join-Path $PWD "phase6 standalone work with spaces") --output (Join-Path $PWD "phase6-evidence/phase6-standalone-summary.json")
+            if ($LASTEXITCODE -ne 0) { throw "Phase-6 standalone executable failed" }
+
+            $mpiexec = Join-Path $dist.FullName "mpiexec.exe"
+            if (-not (Test-Path -LiteralPath $mpiexec -PathType Leaf)) {
+              throw "Phase-6 standalone bundle is missing mpiexec.exe"
+            }
+            & $mpiexec -localonly -n 2 -env PATH $env:PATH -env FENICS_PHASE6_BUNDLE_ROOT $dist.FullName -env FENICS_PHASE6_ORIGINAL_PREFIX $prefix -env FENICS_JIT_ROOT $jit -env FENICS_JIT_COMPILER micro-clang $exe --mpi-child --work-dir (Join-Path $PWD "phase6 standalone mpi work with spaces") --output (Join-Path $PWD "phase6-evidence/phase6-standalone-mpi-summary.json")
+            if ($LASTEXITCODE -ne 0) { throw "Phase-6 standalone MPI proof failed" }
+          } finally {
+            Move-Item -LiteralPath $hidden -Destination $prefix
+          }
+
+      - name: Upload Phase-6 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase6-standalone
+          path: |
+            phase6-evidence/
+            phase6 output with spaces/nuitka-report.xml
+            phase6 standalone work with spaces/diagnostics/
+            phase6 standalone mpi work with spaces/diagnostics/
+          if-no-files-found: warn
+          retention-days: 30

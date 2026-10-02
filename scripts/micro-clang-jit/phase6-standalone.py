@@ -113,16 +113,56 @@ def _is_micro_clang_build_command(cmd: object) -> bool:
 def _capture_compiler_commands(records: list[dict[str, object]]):
     original_run = subprocess.run
     original_check_call = subprocess.check_call
+    original_spawns: list[tuple[type, object]] = []
+    seen: set[tuple[str, ...]] = {
+        tuple(str(part) for part in record.get("command", []))
+        for record in records
+        if isinstance(record.get("command"), list)
+    }
+
+    def remember(cmd: object) -> None:
+        if not _is_micro_clang_build_command(cmd):
+            return
+        parts = _render_command(cmd)
+        key = tuple(parts)
+        if key not in seen:
+            seen.add(key)
+            records.append({"command": parts})
 
     def capture(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        if _is_micro_clang_build_command(cmd):
-            records.append({"command": _render_command(cmd)})
+        remember(cmd)
         return original_run(cmd, *args, **kwargs)
 
     def capture_check_call(cmd, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        if _is_micro_clang_build_command(cmd):
-            records.append({"command": _render_command(cmd)})
+        remember(cmd)
         return original_check_call(cmd, *args, **kwargs)
+
+    # In normal conda Python setuptools reaches subprocess.check_call directly,
+    # but Nuitka can freeze/bind that launcher before this proof runs. Patch the
+    # distutils compiler command boundary too; CFFI's MinGW backend must pass
+    # every compile/link invocation through CCompiler.spawn.
+    compiler_classes: list[type] = []
+    try:
+        from setuptools._distutils.ccompiler import CCompiler as SetuptoolsCCompiler
+        compiler_classes.append(SetuptoolsCCompiler)
+    except ImportError:
+        pass
+    try:
+        from distutils.ccompiler import CCompiler as DistutilsCCompiler
+        if DistutilsCCompiler not in compiler_classes:
+            compiler_classes.append(DistutilsCCompiler)
+    except ImportError:
+        pass
+
+    for compiler_class in compiler_classes:
+        original_spawn = compiler_class.spawn
+
+        def capture_spawn(self, cmd, *args, _original=original_spawn, **kwargs):  # noqa: ANN001, ANN002, ANN003
+            remember(cmd)
+            return _original(self, cmd, *args, **kwargs)
+
+        original_spawns.append((compiler_class, original_spawn))
+        compiler_class.spawn = capture_spawn
 
     subprocess.run = capture
     subprocess.check_call = capture_check_call
@@ -131,6 +171,8 @@ def _capture_compiler_commands(records: list[dict[str, object]]):
     finally:
         subprocess.run = original_run
         subprocess.check_call = original_check_call
+        for compiler_class, original_spawn in reversed(original_spawns):
+            compiler_class.spawn = original_spawn
 
 
 def _minimal_cffi(

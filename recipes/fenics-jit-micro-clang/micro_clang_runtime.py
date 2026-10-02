@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -87,7 +88,11 @@ def _discover_config(*, root: Path, metadata: dict[str, object], expected_cache_
             f"selected={expected_cache_id}, backend={actual_cache_id}"
         )
     runtime = _load_runtime(root)
-    return runtime.RuntimeConfig.discover(toolchain_root=root)
+    ffcx_include = os.environ.get("FENICS_JIT_FFCX_INCLUDE")
+    return runtime.RuntimeConfig.discover(
+        toolchain_root=root,
+        ffcx_include=ffcx_include if ffcx_include else None,
+    )
 
 
 def diagnostic_record(*, root: Path, metadata: dict[str, object]) -> dict[str, object]:

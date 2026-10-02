@@ -378,6 +378,38 @@ gate with the original build prefix inaccessible and both LLVM-MinGW and TinyCC
 absent from the bundle.
 
 
+## Phase 6 standalone qualification work
+
+Initial standalone workflow run #1 (`36948787931`) at head
+`2809d3955e44224941dc4d00bea7d46ce92dbf5d` built the micro-Clang-only
+Nuitka distribution successfully and confirmed that neither LLVM-MinGW nor
+TinyCC was staged into the bundle. The first serial CFFI activation then failed
+before compilation because the MinGW-style runtime helper locates UFCx through
+`importlib.util.find_spec("ffcx").submodule_search_locations`; Nuitka freezes
+the Python package, so that installed-package discovery has no filesystem
+package root even though the explicitly staged
+`ffcx/codegeneration/ufcx.h` is present.
+
+The correction is backend-scoped: `micro_clang_runtime.py` accepts an explicit
+`FENICS_JIT_FFCX_INCLUDE` bundle hint and passes it to the already-qualified
+`RuntimeConfig.discover(..., ffcx_include=...)` path. Normal conda operation
+continues to use installed-package discovery when no hint is set.
+
+Because the wrapper is part of the backend payload and cache identity, the
+standalone workflow must not overwrite the qualified package in place. It
+instead derives a new build-number-1 package from the exact qualified Stage-5
+artifact from run #68, replaces only the wrapper, regenerates the backend
+manifest/size identity, rebuilds the conda package, and re-runs:
+
+- selector/ownership/switching/concurrency qualification on Python 3.12-3.14;
+- the paired three-backend performance comparison on Python 3.12-3.14;
+- the micro-Clang-only serial and two-rank MPI Nuitka standalone proof.
+
+This focused derivation keeps the qualified compiler/sysroot bytes immutable and
+avoids an unnecessary LLVM source rebuild while still giving the wrapper change
+a new package/cache identity and complete downstream qualification.
+
+
 ## Gates before further implementation
 
 Phase 2 packaging may proceed because Phase 0 and the required Phase 1 matrix

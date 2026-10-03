@@ -20,7 +20,7 @@ ARCHIVE="llvm-mingw-20260826-ucrt-x86_64.zip"
 ARCHIVE_SHA256=ae601f4e0f72bbdf441ad2df8bb16f037e2e9251559ea6b37b4057aef39c06c3
 ARCHIVE_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_RELEASE/$ARCHIVE"
 BUILD_PROFILE="${MICRO_CLANG_BUILD_PROFILE:-conservative}"
-if [[ "$BUILD_PROFILE" != "conservative" && "$BUILD_PROFILE" != "phase4-host-min" && "$BUILD_PROFILE" != "phase4-host-strip" ]]; then
+if [[ "$BUILD_PROFILE" != "conservative" && "$BUILD_PROFILE" != "phase4-host-min" && "$BUILD_PROFILE" != "phase4-host-strip" && "$BUILD_PROFILE" != "phase4-host-thinlto-strip" ]]; then
     echo "unsupported MICRO_CLANG_BUILD_PROFILE: $BUILD_PROFILE" >&2
     exit 2
 fi
@@ -90,8 +90,8 @@ export TOOLCHAIN_ARCHS=x86_64
 # boundary. Stage-AW ships a shared libc++.dll/libunwind.dll closure, so Phase
 # 1 should establish functionality with that model before any later size work.
 export LLVM_CMAKEFLAGS="-DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_INCLUDE_TESTS=OFF -DCLANG_INCLUDE_TESTS=OFF -DLLD_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBEDIT=OFF"
-if [[ "$BUILD_PROFILE" == "phase4-host-min" || "$BUILD_PROFILE" == "phase4-host-strip" ]]; then
-    # Phase 4 stage 1/4: reduce the host compiler closure without touching the
+if [[ "$BUILD_PROFILE" == "phase4-host-min" || "$BUILD_PROFILE" == "phase4-host-strip" || "$BUILD_PROFILE" == "phase4-host-thinlto-strip" ]]; then
+    # Phase 4 stage 1/4/6: reduce the host compiler closure without touching the
     # Windows C/UCRT target sysroot. Keep libLLVM shared so Clang and LLD do not
     # duplicate the LLVM core, but link Clang's required component libraries
     # directly into clang-23.exe instead of shipping the monolithic
@@ -106,7 +106,18 @@ ninja_version="$(ninja --version)"
 gcc_version="$(gcc --version | head -n1)"
 
 pushd "$WORK/llvm-mingw" >/dev/null
-./build-llvm.sh "$WORK/host-install" --with-clang --disable-lldb --disable-clang-tools-extra
+llvm_build_args=(
+    "$WORK/host-install"
+    --with-clang
+    --disable-lldb
+    --disable-clang-tools-extra
+)
+if [[ "$BUILD_PROFILE" == "phase4-host-thinlto-strip" ]]; then
+    # Phase 4 stage 6: apply ThinLTO only to the host LLVM/Clang/LLD build.
+    # Generated FFCx target code remains on the already-qualified -O2 policy.
+    llvm_build_args+=(--thinlto)
+fi
+./build-llvm.sh "${llvm_build_args[@]}"
 popd >/dev/null
 
 cp -a "$WORK/host-install/." "$STAGE/"
@@ -296,7 +307,7 @@ fi
 # after all target runtimes and the target wrapper are built, and before
 # development-only host tools are discarded. The target sysroot and generated
 # FFCx compilation policy are unchanged.
-if [[ "$BUILD_PROFILE" == "phase4-host-strip" ]]; then
+if [[ "$BUILD_PROFILE" == "phase4-host-strip" || "$BUILD_PROFILE" == "phase4-host-thinlto-strip" ]]; then
     source_strip_tool="$STAGE/bin/llvm-strip.exe"
     if [[ ! -x "$source_strip_tool" ]]; then
         echo "source-built llvm-strip is missing: $source_strip_tool" >&2
@@ -400,7 +411,7 @@ for required in \
     [[ -f "$required" ]]
 done
 
-if [[ "$BUILD_PROFILE" == "phase4-host-min" || "$BUILD_PROFILE" == "phase4-host-strip" ]]; then
+if [[ "$BUILD_PROFILE" == "phase4-host-min" || "$BUILD_PROFILE" == "phase4-host-strip" || "$BUILD_PROFILE" == "phase4-host-thinlto-strip" ]]; then
     # The phase-4 Clang executable must no longer require the monolithic Clang
     # DLL before we discard it. Keep libLLVM/libc++/libunwind because they are
     # the measured shared dependency closure of the required host tools.

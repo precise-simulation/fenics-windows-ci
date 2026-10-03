@@ -27,7 +27,7 @@ env:
 
 jobs:
   repackage:
-    name: Stage 6 build ThinLTO backend package channel
+    name: Stage 7 build Full-LTO backend package channel
     runs-on: windows-2022
     timeout-minutes: 60
 

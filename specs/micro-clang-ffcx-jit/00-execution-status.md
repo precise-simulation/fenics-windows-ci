@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** Phases 0-6 remain qualified at `b632e35d3114c0787393cfdd04c637bde79897a6`. A post-qualification **Phase 4 Stage 6 ThinLTO minimization experiment is in progress**; LLVM-MinGW remains the actual default pending a separate dependency/default-switch change.
+**Status:** complete — Phases 0-6 and post-qualification **Phase 4 Stage 6 ThinLTO** are qualified. Stage 6 is the preferred micro-Clang payload; LLVM-MinGW remains the actual default pending a separate dependency/default-switch change.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -453,36 +453,58 @@ default, and no normal-install footprint reduction is claimed until a separate
 package/default-switch change is qualified.
 
 
-## Phase 4 stage 6 ThinLTO minimization experiment
+## Phase 4 stage 6 ThinLTO qualification evidence
 
-Stage 6 is a post-qualification minimization experiment and does not invalidate
-the already-qualified Stage-5 / Phase-6 implementation.
+Stage 6 is qualified and supersedes Stage 5 as the preferred micro-Clang
+payload. Stage 5 remains retained as the non-LTO historical control.
 
-The experiment holds the qualified compiler/sysroot policy constant and changes
-only the host compiler build:
+The source/minimization workflow `micro-clang-phase4-stage6-thinlto` #2
+(run `37083171290`) at head
+`cce65aafa0bf8a63bcd717eee25a01af910ea0a4` passed:
 
-- same pinned LLVM 23.1 / llvm-mingw / mingw-w64 source identities;
-- same X86-only target set;
-- same MinSizeRel host profile;
-- same shared `libLLVM` and no `libclang-cpp` policy;
-- add upstream llvm-mingw `--thinlto` / `LLVM_ENABLE_LTO=thin`;
-- retain Stage-4 `llvm-strip --strip-all`;
-- reapply the exact qualified Stage-AW, Stage-3 closure-driven sysroot and
-  Stage-5 resource-header reductions.
+- MinSizeRel + shared `libLLVM` + no `libclang-cpp` + ThinLTO;
+- the existing `llvm-strip --strip-all` host-PE policy;
+- unchanged qualified Stage-AW, Stage-3 sysroot and Stage-5 resource-header
+  reductions;
+- clean independent reconstruction and package smoke;
+- complete private qualification on Python 3.12, 3.13 and 3.14.
 
-Dedicated workflow `micro-clang-phase4-stage6-thinlto` first compares the
-complete package against the qualified **107.8796 MiB** Stage-5 parent. If the
-candidate is not smaller, the expensive Python 3.12-3.14 private matrix is
-skipped and Stage 5 remains authoritative. If it is smaller, the workflow
-requires clean reconstruction, relocation smoke, ABI/driver/PE/hermeticity and
-the complete private broad qualification on Python 3.12-3.14.
+The complete pre-conda backend measured **106.2016 MiB**, compared with the
+qualified Stage-5 parent measurement of 107.8854 MiB in that workflow. ThinLTO
+removed **1,765,586 bytes / 1.5607%**. It therefore provides a real but modest
+reduction and does not reach the aspirational <=81.2 MiB strong target.
 
-A Stage-6 package does not replace the currently qualified backend merely by
-being smaller. Adoption requires the private matrix to pass and, before it can
-replace the released/default-candidate payload, downstream shared-runtime,
-paired-performance and standalone/MPI qualification must be repeated with the
-new package identity.
+Downstream workflow `micro-clang-phase4-stage6-downstream` #1
+(run `37090447506`) at head
+`c4e0e4cb47d2cb983ca3eed313fa2ff8cac54b7b` then cleared every adoption
+gate:
 
+- the conda package measured **106.35 MiB installed / 30.67 MiB compressed**;
+- the installed backend measured **106.2326 MiB** in each paired comparison;
+- selector/ownership/cache-isolation/switching/concurrency passed on Python
+  3.12, 3.13 and 3.14;
+- paired same-run performance against LLVM-MinGW passed on all three supported
+  Python versions;
+- the micro-Clang-only Nuitka serial and two-rank MPI standalone proof passed.
+
+Paired Stage-6 micro-Clang / LLVM-MinGW ratios were:
+
+| Python | assembly aggregate median | worst representative form | worst cold JIT | end-to-end Poisson |
+| --- | ---: | ---: | ---: | ---: |
+| 3.12 | 0.9975x | 1.0074x | 1.1602x | 0.9970x |
+| 3.13 | 0.9942x | 1.0003x | 1.1534x | 1.0150x |
+| 3.14 | 1.0054x | 1.0169x | 1.1096x | 1.0015x |
+
+The Stage-6 standalone distribution measured 310,416,942 bytes total. Common
+runtime + micro-Clang measured 111,449,162 bytes and the micro-Clang incremental
+payload measured **111,400,550 bytes / 106.2398 MiB**. The serial proof retained
+four generated FFCx modules, eight captured micro-Clang compile/link commands
+and solution norm `0.4922541639224417`; the MPI proof again established
+rank-0 compile ownership with the peer loading the shared cache.
+
+ThinLTO changes only how the host compiler is built. Generated FFCx target-code
+flags remain unchanged, and measured generated-code performance remains
+LLVM-class. Stage 6 is therefore the preferred qualified micro-Clang payload.
 
 ## Gates before further implementation
 

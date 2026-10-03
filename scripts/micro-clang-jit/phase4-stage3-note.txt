@@ -1,0 +1,1 @@
+Stage 3 candidate must preserve C/UCRT/POSIX headers, retain startup/runtime/default Windows libraries, and qualify on Python 3.12-3.14 before acceptance.

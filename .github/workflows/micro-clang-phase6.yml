@@ -1,0 +1,436 @@
+name: micro-clang-phase6
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/micro-clang-phase6.yml"
+      - "scripts/fenicsx-nuitka.ps1"
+      - "scripts/fenicsx-nuitka-runtime.nuitka-package.config.yml"
+      - "scripts/micro-clang-jit/phase5-selector-validation.py"
+      - "scripts/micro-clang-jit/phase5-concurrency-proof.py"
+      - "scripts/micro-clang-jit/phase5-three-backend-benchmark.py"
+      - "scripts/micro-clang-jit/phase6-standalone.py"
+      - "recipes/fenics-jit-micro-clang/**"
+      - "specs/micro-clang-ffcx-jit/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: micro-clang-phase6-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repackage:
+    name: Phase 6 derive corrected micro-Clang package
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download qualified Stage-5 backend from run 36825854094
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage5-package
+          path: phase6-stage5
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 36825854094
+
+      - name: Download qualified Phase-5 local channel from run 36825854094
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase5-package-channel
+          path: phase5-qualified-output
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 36825854094
+
+      - name: Stage corrected backend source and refresh manifest identity
+        shell: pwsh
+        run: |
+          $backend = Join-Path $PWD "phase6-stage5\Library\fenics-jit\backends\micro-clang"
+          $staged = Join-Path $PWD "micro-clang-phase5-source"
+          if (-not (Test-Path -LiteralPath (Join-Path $backend "metadata.json") -PathType Leaf)) {
+            throw "qualified Stage-5 backend artifact is missing"
+          }
+
+          Remove-Item -Recurse -Force $staged -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath $backend -Destination $staged -Recurse -Force
+          Copy-Item -LiteralPath "recipes/fenics-jit-micro-clang/micro_clang_runtime.py" -Destination (Join-Path $staged "micro_clang_runtime.py") -Force
+
+          $manifestInputs = @(
+            Get-ChildItem -LiteralPath $staged -Recurse -File |
+              Where-Object { $_.Name -notin @("manifest.csv", "size.txt") } |
+              Sort-Object FullName
+          )
+          $manifest = foreach ($file in $manifestInputs) {
+            $relative = $file.FullName.Substring($staged.Length).TrimStart("\")
+            [pscustomobject]@{
+              path = $relative.Replace("\", "/")
+              bytes = $file.Length
+              sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+          $manifest | ConvertTo-Csv -NoTypeInformation | Set-Content -LiteralPath (Join-Path $staged "manifest.csv") -Encoding utf8
+
+          $sizePath = Join-Path $staged "size.txt"
+          for ($iteration = 0; $iteration -lt 5; $iteration++) {
+            $files = @(Get-ChildItem -LiteralPath $staged -Recurse -File | Sort-Object FullName)
+            $bytes = [int64](($files | Measure-Object Length -Sum).Sum)
+            $next = @(
+              "payload_file_count=$($files.Count)"
+              "payload_bytes=$bytes"
+              "payload_mib=$([math]::Round($bytes / 1MB, 4))"
+              "manifest_hashed_file_count=$($manifestInputs.Count)"
+              "manifest_excludes=manifest.csv,size.txt"
+              "stage_aw_reference_mib=215.19"
+              "phase4_early_continuation_gate_mib=108.2"
+              "phase4_size_gate_status=$(if (($bytes / 1MB) -le 108.2) { 'pass' } else { 'fail' })"
+            ) -join [Environment]::NewLine
+            $next += [Environment]::NewLine
+            $previous = if (Test-Path -LiteralPath $sizePath) { Get-Content -LiteralPath $sizePath -Raw } else { "" }
+            [IO.File]::WriteAllText($sizePath, $next, [Text.Encoding]::ASCII)
+            if ($previous -eq $next) { break }
+          }
+
+          $files = @(Get-ChildItem -LiteralPath $staged -Recurse -File)
+          $bytes = [int64](($files | Measure-Object Length -Sum).Sum)
+          [pscustomobject]@{
+            source_run = 36825854094
+            source_head = "dd4ef37c12f0c626d88701f0ebf3dc08d41b5456"
+            wrapper_sha256 = (Get-FileHash -LiteralPath (Join-Path $staged "micro_clang_runtime.py") -Algorithm SHA256).Hash.ToLowerInvariant()
+            manifest_sha256 = (Get-FileHash -LiteralPath (Join-Path $staged "manifest.csv") -Algorithm SHA256).Hash.ToLowerInvariant()
+            payload_bytes = $bytes
+            payload_mib = $bytes / 1MB
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 phase6-derived-source.json
+
+      - name: Install package build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase6-package-tools
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            rattler-build=0.74.0
+
+      - name: Build corrected micro-Clang package
+        shell: pwsh
+        run: |
+          $rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs/micro-clang-phase6-package-tools" -Recurse -Filter rattler-build.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $rattler) { throw "rattler-build.exe not found" }
+
+          Remove-Item -Recurse -Force phase6-output -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath phase5-qualified-output -Destination phase6-output -Recurse -Force
+          $channel = "file:///" + ((Resolve-Path phase6-output).Path -replace '\\','/')
+
+          & $rattler build --recipe recipes/fenics-jit-micro-clang/recipe.yaml --output-dir phase6-output --channel-priority strict -c $channel -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "Phase-6 corrected micro-Clang package build failed" }
+
+          $package = Get-ChildItem phase6-output -Recurse -Filter "fenics-jit-micro-clang-*.conda" |
+            Where-Object { $_.Name -match "_1\.conda$" } |
+            Select-Object -First 1
+          if (-not $package) { throw "corrected build-number-1 micro-Clang package missing" }
+          [pscustomobject]@{
+            package = $package.Name
+            bytes = $package.Length
+            mib = $package.Length / 1MB
+            sha256 = (Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 phase6-package.json
+
+      - name: Upload corrected Phase-6 package channel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase6-package-channel
+          path: |
+            phase6-output/
+            phase6-derived-source.json
+            phase6-package.json
+          if-no-files-found: error
+          retention-days: 30
+
+  integration:
+    name: Phase 6 corrected package integration (Python ${{ matrix.python }})
+    needs: repackage
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download corrected Phase-6 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase6-package-channel
+          path: phase6-channel
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase6-integration-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Install all three backends with corrected micro-Clang package
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 i py${{ matrix.python }}"
+          $channelRoot = Resolve-Path "phase6-channel/phase6-output"
+          $channel = "file:///" + ($channelRoot.Path -replace '\\','/')
+          function Install-Integration {
+            & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c $channel -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-dolfinx fenics-jit-llvm-mingw fenics-jit-tinycc "fenics-jit-micro-clang=20260826=*_1" cffi setuptools pefile | Out-Host
+            return $LASTEXITCODE
+          }
+          $code = Install-Integration
+          if ($code -ne 0) {
+            Remove-Item -Recurse -Force $prefix -ErrorAction SilentlyContinue
+            & $env:MAMBA_EXE clean --all --yes | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Phase-6 integration cache cleanup failed" }
+            $code = Install-Integration
+          }
+          if ($code -ne 0) { throw "Phase-6 corrected integration environment installation failed" }
+
+      - name: Requalify selector, ownership, switching and concurrency
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 i py${{ matrix.python }}"
+          $diag = Join-Path $PWD "phase6-integration-py${{ matrix.python }}"
+          $selectorWork = Join-Path $env:RUNNER_TEMP "p6 s py${{ matrix.python }}"
+          $concurrencyWork = Join-Path $env:RUNNER_TEMP "p6 c py${{ matrix.python }}"
+          Remove-Item -Recurse -Force $selectorWork, $concurrencyWork, $diag -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $selectorWork, $concurrencyWork, $diag | Out-Null
+          $env:PYTHONHASHSEED = "0"
+          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-selector-validation.py --work-dir $selectorWork --output (Join-Path $diag "selector-validation.json")
+          if ($LASTEXITCODE -ne 0) { throw "Phase-6 corrected selector validation failed" }
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-concurrency-proof.py --work-dir $concurrencyWork --output (Join-Path $diag "concurrency-validation.json")
+          if ($LASTEXITCODE -ne 0) { throw "Phase-6 corrected concurrency validation failed" }
+
+      - name: Upload corrected integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase6-integration-py${{ matrix.python }}
+          path: phase6-integration-py${{ matrix.python }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+  comparison:
+    name: Phase 6 corrected package paired comparison (Python ${{ matrix.python }})
+    needs: integration
+    runs-on: windows-2022
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download corrected Phase-6 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase6-package-channel
+          path: phase6-channel
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase6-comparison-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Install corrected paired-comparison environment
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 b py${{ matrix.python }}"
+          $channelRoot = Resolve-Path "phase6-channel/phase6-output"
+          $channel = "file:///" + ($channelRoot.Path -replace '\\','/')
+          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c $channel -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-dolfinx fenics-jit-llvm-mingw fenics-jit-tinycc "fenics-jit-micro-clang=20260826=*_1" cffi setuptools | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Phase-6 corrected comparison environment installation failed" }
+
+      - name: Run corrected paired three-backend comparison
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 b py${{ matrix.python }}"
+          $cache = Join-Path $env:RUNNER_TEMP "p6 cache py${{ matrix.python }}"
+          $diag = Join-Path $PWD "phase6-comparison-py${{ matrix.python }}"
+          Remove-Item -Recurse -Force $cache, $diag -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $cache, $diag | Out-Null
+          $env:PYTHONHASHSEED = "0"
+          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-three-backend-benchmark.py --cache-dir $cache --diagnostics-dir $diag --package-dir (Resolve-Path "phase6-channel/phase6-output").Path --jit-repeats 5 --runtime-repeats 11
+          if ($LASTEXITCODE -ne 0) { throw "Phase-6 corrected paired comparison failed" }
+
+      - name: Upload corrected comparison evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase6-comparison-py${{ matrix.python }}
+          path: phase6-comparison-py${{ matrix.python }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+  standalone:
+    name: Phase 6 micro-Clang-only Nuitka qualification
+    needs: comparison
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download corrected Phase-6 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase6-package-channel
+          path: phase6-channel
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase6-standalone-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Create standalone build prefix
+        shell: pwsh
+        run: |
+          $mamba = $env:MAMBA_EXE
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 build with spaces"
+          $channelRoot = Resolve-Path "phase6-channel/phase6-output"
+          $channel = "file:///" + ($channelRoot.Path -replace '\\','/')
+
+          function Install-BuildPrefix {
+            & $mamba create -y -p $prefix --override-channels --strict-channel-priority -c $channel -c precise-simulation -c conda-forge python=3.12 "libblas=*=*openblas" fenics-dolfinx fenics-jit-llvm-mingw "fenics-jit-runtime=0.1.0" "fenics-jit-micro-clang=20260826=*_1" "cffi=2.1.*" "setuptools=84.*" pefile "nuitka=4.1.3" ordered-set zstandard c-compiler | Out-Host
+            return $LASTEXITCODE
+          }
+
+          $code = Install-BuildPrefix
+          if ($code -ne 0) {
+            Remove-Item -Recurse -Force $prefix -ErrorAction SilentlyContinue
+            & $mamba clean --all --yes | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Phase-6 standalone cache cleanup failed" }
+            $code = Install-BuildPrefix
+          }
+          if ($code -ne 0) { throw "Phase-6 standalone build environment install failed after retry" }
+          if (Test-Path -LiteralPath (Join-Path $prefix "Library/fenics-jit/backends/tinycc")) {
+            throw "TinyCC unexpectedly installed in Phase-6 build prefix"
+          }
+
+      - name: Build micro-Clang-only standalone bundle
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 build with spaces"
+          ./scripts/fenicsx-nuitka.ps1 -EntryPoint "scripts/micro-clang-jit/phase6-standalone.py" -OutputDir "phase6 output with spaces" -ExistingPrefix $prefix -JitBackend micro-clang
+
+      - name: Run hermetic serial and MPI standalone proof
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "p6 build with spaces"
+          $output = Join-Path $PWD "phase6 output with spaces"
+          $dist = Get-ChildItem -LiteralPath $output -Directory -Filter "*.dist" |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "fenicsx.exe") } |
+            Select-Object -First 1
+          if (-not $dist) { throw "Phase-6 Nuitka distribution not found" }
+
+          $jit = Join-Path $dist.FullName "fenics-jit"
+          $micro = Join-Path $jit "backends/micro-clang"
+          foreach ($forbiddenBackend in @("llvm-mingw", "tinycc")) {
+            if (Test-Path -LiteralPath (Join-Path $jit "backends/$forbiddenBackend")) {
+              throw "$forbiddenBackend was staged into the micro-Clang-only standalone bundle"
+            }
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $micro "bin/x86_64-w64-mingw32-clang.exe") -PathType Leaf)) {
+            throw "micro-Clang compiler missing from standalone bundle"
+          }
+
+          $compilerLike = Get-ChildItem -LiteralPath $dist.FullName -Recurse -File |
+            Where-Object {
+              $_.Name.ToLowerInvariant() -match '^(cl|link|gcc|g\+\+|tcc|clang.*|ld.*)\.exe$' -and
+              -not $_.FullName.StartsWith($micro, [StringComparison]::OrdinalIgnoreCase)
+            }
+          if ($compilerLike) {
+            throw "Standalone bundle contains compiler tools outside micro-Clang ownership: $($compilerLike.FullName -join ', ')"
+          }
+
+          New-Item -ItemType Directory -Force phase6-evidence | Out-Null
+          Get-ChildItem -LiteralPath $dist.FullName -Recurse -File |
+            ForEach-Object {
+              [pscustomobject]@{
+                path = $_.FullName.Substring($dist.FullName.Length + 1).Replace('\','/')
+                bytes = $_.Length
+              }
+            } |
+            Sort-Object path |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -Encoding utf8 phase6-evidence/bundle-files.json
+
+          $hidden = "$prefix-hidden"
+          if (Test-Path -LiteralPath $hidden) { Remove-Item -Recurse -Force $hidden }
+          Move-Item -LiteralPath $prefix -Destination $hidden
+          try {
+            $env:FENICS_PHASE6_BUNDLE_ROOT = $dist.FullName
+            $env:FENICS_PHASE6_ORIGINAL_PREFIX = $prefix
+            $env:FENICS_JIT_ROOT = $jit
+            $env:FENICS_JIT_COMPILER = "micro-clang"
+            $env:FENICS_JIT_FFCX_INCLUDE = Join-Path $dist.FullName "ffcx/codegeneration"
+            $env:FENICS_JIT_VERBOSE = "1"
+
+            foreach ($name in @(
+              "CC","CXX","CPP","LD","LDSHARED","INCLUDE","LIB","LIBPATH","LIBRARY_PATH",
+              "CPATH","C_INCLUDE_PATH","CPLUS_INCLUDE_PATH","COMPILER_PATH","GCC_EXEC_PREFIX",
+              "VSINSTALLDIR","VCINSTALLDIR","VCToolsInstallDir","WindowsSdkDir",
+              "WindowsSDKVersion","UniversalCRTSdkDir","UCRTVersion","DISTUTILS_USE_SDK","MSSdk"
+            )) {
+              Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+            }
+            Get-ChildItem Env: |
+              Where-Object { $_.Name -like "VSCMD_*" } |
+              ForEach-Object { Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue }
+
+            $env:PATH = "$($dist.FullName);$env:SystemRoot\System32;$env:SystemRoot"
+            $exe = Join-Path $dist.FullName "fenicsx.exe"
+            & $exe --work-dir (Join-Path $PWD "phase6 standalone work with spaces") --output (Join-Path $PWD "phase6-evidence/phase6-standalone-summary.json")
+            if ($LASTEXITCODE -ne 0) { throw "Phase-6 standalone executable failed" }
+
+            $mpiexec = Join-Path $dist.FullName "mpiexec.exe"
+            if (-not (Test-Path -LiteralPath $mpiexec -PathType Leaf)) {
+              throw "Phase-6 standalone bundle is missing mpiexec.exe"
+            }
+            & $mpiexec -localonly -n 2 -env PATH $env:PATH -env FENICS_PHASE6_BUNDLE_ROOT $dist.FullName -env FENICS_PHASE6_ORIGINAL_PREFIX $prefix -env FENICS_JIT_ROOT $jit -env FENICS_JIT_COMPILER micro-clang -env FENICS_JIT_FFCX_INCLUDE $env:FENICS_JIT_FFCX_INCLUDE $exe --mpi-child --work-dir (Join-Path $PWD "phase6 standalone mpi work with spaces") --output (Join-Path $PWD "phase6-evidence/phase6-standalone-mpi-summary.json")
+            if ($LASTEXITCODE -ne 0) { throw "Phase-6 standalone MPI proof failed" }
+          } finally {
+            Move-Item -LiteralPath $hidden -Destination $prefix
+          }
+
+      - name: Upload Phase-6 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase6-standalone
+          path: |
+            phase6-evidence/
+            phase6 output with spaces/nuitka-report.xml
+            phase6 standalone work with spaces/diagnostics/
+            phase6 standalone mpi work with spaces/diagnostics/
+          if-no-files-found: warn
+          retention-days: 30

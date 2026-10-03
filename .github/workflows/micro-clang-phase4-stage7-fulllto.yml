@@ -1,0 +1,227 @@
+name: micro-clang-phase4-stage7-fulllto
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: micro-clang-phase4-stage7-fulllto-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QUALIFIED_STAGE6_RUN_ID: "37083171290"
+  QUALIFIED_TRACE_RUN_ID: "36825854094"
+
+jobs:
+  build:
+    name: Stage 7 Full LTO host build
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install UCRT source-build environment
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            unzip
+            make
+            diffutils
+            patch
+            autoconf
+            automake
+            libtool
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+
+      - name: Build MinSizeRel Full-LTO host and strip retained PE closure
+        shell: msys2 {0}
+        run: |
+          export MICRO_CLANG_BUILD_PROFILE=phase4-host-fulllto-strip
+          ./scripts/micro-clang-jit/build-source-toolchain.sh \
+            "$PWD/micro-clang-phase4-stage7-build" \
+            "$PWD/micro-clang-phase4-stage7-raw" \
+            "$PWD/micro-clang-phase4-stage7-build-evidence"
+
+      - name: Upload Stage-7 raw toolchain
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage7-fulllto-raw
+          path: micro-clang-phase4-stage7-raw/
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 9
+
+      - name: Upload Stage-7 build evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage7-build-evidence
+          path: micro-clang-phase4-stage7-build-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  measure:
+    name: Stage 7 reapply qualified pruning and measure
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Stage-7 raw toolchain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage7-fulllto-raw
+          path: stage7-raw
+
+      - name: Download Stage-7 build evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage7-build-evidence
+          path: micro-clang-phase4-stage7-build-evidence
+
+      - name: Download qualified ThinLTO Stage-6 parent
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage6-thinlto-package
+          path: stage6-parent
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.QUALIFIED_STAGE6_RUN_ID }}
+
+      - name: Download qualified Stage-2 closure traces
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: micro-clang-phase4-stage2-py*
+          path: qualified-stage2-traces
+          merge-multiple: false
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.QUALIFIED_TRACE_RUN_ID }}
+
+      - name: Install package-test environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase4-stage7
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            pefile
+
+      - name: Reapply qualified reductions and compare with ThinLTO
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/micro-clang-phase4-stage7"
+          $compiler = Get-ChildItem "stage7-raw" -Recurse -Filter "x86_64-w64-mingw32-clang.exe" -File | Select-Object -First 1
+          if (-not $compiler) { throw "Stage-7 target clang not found" }
+          $rawRoot = Split-Path -Parent (Split-Path -Parent $compiler.FullName)
+
+          $traceRoot = Join-Path $PWD "stage7-traces"
+          New-Item -ItemType Directory -Force $traceRoot | Out-Null
+          foreach ($py in @("3.12", "3.13", "3.14")) {
+            $artifact = Join-Path $PWD ("qualified-stage2-traces/micro-clang-phase4-stage2-py" + $py)
+            if (-not (Test-Path -LiteralPath $artifact -PathType Container)) { throw "missing Stage-2 trace artifact for Python $py" }
+            Copy-Item -LiteralPath $artifact -Destination (Join-Path $traceRoot ("py" + $py)) -Recurse -Force
+          }
+
+          $evidence = Join-Path $PWD "micro-clang-phase4-stage7-evidence"
+          $intermediate = Join-Path $PWD "stage7 intermediate with spaces"
+          $compatParent = Join-Path $PWD "stage7 compatibility with spaces"
+          $packageRoot = Join-Path $PWD "stage7 package with spaces"
+          Remove-Item -Recurse -Force $evidence, $intermediate, $compatParent, $packageRoot -ErrorAction SilentlyContinue
+
+          ./scripts/micro-clang-jit/package-phase2.ps1 -ToolchainRoot $rawRoot -PythonPrefix $prefix -BuildEvidenceDir (Join-Path $PWD "micro-clang-phase4-stage7-build-evidence") -OutputRoot $intermediate -EvidenceDir (Join-Path $evidence "intermediate") -Phase 4 -PackageRole "phase4-stage7-fulllto-intermediate"
+          $intermediateBackend = Join-Path $intermediate "Library/fenics-jit/backends/micro-clang"
+
+          $compatRoot = Join-Path $compatParent "fenics-jit"
+          New-Item -ItemType Directory -Force $compatParent | Out-Null
+          Copy-Item -LiteralPath $intermediateBackend -Destination $compatRoot -Recurse -Force
+
+          ./scripts/micro-clang-jit/apply-stageaw-pruning.ps1 -ToolchainRoot $compatRoot -EvidenceDir (Join-Path $evidence "stageaw")
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase4-stage3-prune.py --backend-root $compatRoot --trace-root $traceRoot --evidence-dir (Join-Path $evidence "closure") | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Stage-7 closure pruning failed" }
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase4-stage5-prune-resource-headers.py --backend-root $compatRoot --evidence-dir (Join-Path $evidence "resources") | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Stage-7 resource pruning failed" }
+
+          ./scripts/micro-clang-jit/package-phase2.ps1 -ToolchainRoot $compatRoot -PythonPrefix $prefix -BuildEvidenceDir (Join-Path $PWD "micro-clang-phase4-stage7-build-evidence") -OutputRoot $packageRoot -EvidenceDir $evidence -Phase 4 -PackageRole "phase4-stage7-fulllto-plus-qualified-pruning"
+          $backend = Join-Path $packageRoot "Library/fenics-jit/backends/micro-clang"
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase2-package-smoke.py --backend-root $backend --work-dir (Join-Path $PWD "stage7 smoke with spaces") --evidence-dir $evidence --expected-phase 4 | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Stage-7 package smoke failed" }
+
+          $parentBackend = Join-Path $PWD "stage6-parent/Library/fenics-jit/backends/micro-clang"
+          $parentLine = Get-Content (Join-Path $parentBackend "size.txt") | Where-Object { $_ -like "payload_bytes=*" } | Select-Object -First 1
+          if (-not $parentLine) { throw "Stage-6 parent size.txt is missing payload_bytes" }
+          $parentBytes = [int64]($parentLine.Split("=", 2)[1])
+
+          $candidate = Get-Content (Join-Path $evidence "phase4-package-summary.json") -Raw | ConvertFrom-Json
+          $candidateBytes = [int64]$candidate.payload_bytes
+          $removed = $parentBytes - $candidateBytes
+          $removedPct = if ($parentBytes -gt 0) { 100.0 * $removed / $parentBytes } else { 0.0 }
+
+          $largest = Get-ChildItem -LiteralPath $backend -Recurse -File |
+            Sort-Object Length -Descending |
+            Select-Object -First 12 |
+            ForEach-Object {
+              [ordered]@{
+                path = $_.FullName.Substring($backend.Length + 1).Replace("\", "/")
+                bytes = $_.Length
+                mib = [math]::Round($_.Length / 1MB, 4)
+              }
+            }
+
+          $summary = [ordered]@{
+            schema = "fenics-jit-micro-clang-phase4-stage7-fulllto-v1"
+            status = if ($candidateBytes -lt $parentBytes) { "smaller-than-thinlto" } elseif ($candidateBytes -eq $parentBytes) { "same-as-thinlto" } else { "larger-than-thinlto" }
+            reduction = "replace host ThinLTO with full LTO while holding all qualified pruning and target-code policy constant"
+            qualified_stage6_parent_bytes = $parentBytes
+            qualified_stage6_parent_mib = [math]::Round($parentBytes / 1MB, 4)
+            candidate_bytes = $candidateBytes
+            candidate_mib = [double]$candidate.payload_mib
+            bytes_removed_vs_thinlto = $removed
+            mib_removed_vs_thinlto = [math]::Round($removed / 1MB, 4)
+            percent_removed_vs_thinlto = [math]::Round($removedPct, 4)
+            stage5_reference_mib = 107.8854
+            strong_target_mib = 81.2
+            stretch_target_mib = 54.1
+            strong_target_status = if ([double]$candidate.payload_mib -le 81.2) { "pass" } else { "not-yet" }
+            stretch_target_status = if ([double]$candidate.payload_mib -le 54.1) { "pass" } else { "not-yet" }
+            largest_retained_files = $largest
+          }
+          [IO.File]::WriteAllText(
+            (Join-Path $evidence "phase4-stage7-fulllto.json"),
+            ($summary | ConvertTo-Json -Depth 8) + [Environment]::NewLine,
+            (New-Object Text.UTF8Encoding($false))
+          )
+          $summary | ConvertTo-Json -Depth 8 | Out-Host
+
+      - name: Upload Stage-7 candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage7-fulllto-package
+          path: stage7 package with spaces/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
+
+      - name: Upload Stage-7 measurement evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage7-fulllto-evidence
+          path: micro-clang-phase4-stage7-evidence/
+          if-no-files-found: warn
+          retention-days: 14

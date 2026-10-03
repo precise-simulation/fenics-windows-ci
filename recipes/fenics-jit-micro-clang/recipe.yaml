@@ -1,0 +1,39 @@
+schema_version: 1
+
+context:
+  name: fenics-jit-micro-clang
+  version: "20260826"
+  build: 1
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  path: ../../micro-clang-phase5-source
+
+build:
+  number: ${{ build }}
+  script:
+    file: build.bat
+
+requirements:
+  run:
+    - fenics-jit-runtime ==0.1.0
+
+tests:
+  - script:
+      file: test-package.bat
+    requirements:
+      run:
+        - python 3.12.*
+        - fenics-ffcx
+
+about:
+  summary: Size-qualified micro-Clang backend for FEniCS FFCx/CFFI JIT on Windows
+  description: |
+    Experimental x86-64 UCRT Clang/LLD backend reconstructed and qualified by
+    the micro-clang EPIC. The package owns only
+    Library/fenics-jit/backends/micro-clang and depends on the separately owned
+    shared selector/lifecycle package. LLVM-MinGW and TinyCC remain separate
+    backend packages.

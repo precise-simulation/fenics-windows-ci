@@ -14,5 +14,6 @@ rem The shared runtime package must not pull either compiler backend into its
 rem own payload/dependency test environment.
 if exist "%LIBRARY_PREFIX%\fenics-jit\bin\x86_64-w64-mingw32-clang.exe" exit /b 1
 if exist "%LIBRARY_PREFIX%\fenics-jit\backends\tinycc\tcc.exe" exit /b 1
+if exist "%LIBRARY_PREFIX%\fenics-jit\backends\micro-clang" exit /b 1
 
 exit /b 0

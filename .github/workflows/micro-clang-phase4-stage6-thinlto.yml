@@ -1,0 +1,329 @@
+name: micro-clang-phase4-stage6-thinlto
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/micro-clang-phase4-stage6-thinlto.yml"
+      - "scripts/micro-clang-jit/build-source-toolchain.sh"
+      - "scripts/micro-clang-jit/apply-stageaw-pruning.ps1"
+      - "scripts/micro-clang-jit/phase4-stage3-prune.py"
+      - "scripts/micro-clang-jit/phase4-stage5-prune-resource-headers.py"
+      - "scripts/micro-clang-jit/package-phase2.ps1"
+      - "scripts/micro-clang-jit/phase2-package-smoke.py"
+      - "scripts/micro-clang-jit/phase3-private-validation.py"
+      - "specs/micro-clang-ffcx-jit/phase4-stage6-plan.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: micro-clang-phase4-stage6-thinlto-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QUALIFIED_RUN_ID: "36825854094"
+
+jobs:
+  build:
+    name: Stage 6 ThinLTO host build
+    runs-on: windows-2022
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install UCRT source-build environment
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            unzip
+            make
+            diffutils
+            patch
+            autoconf
+            automake
+            libtool
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+
+      - name: Build MinSizeRel ThinLTO host and strip retained PE closure
+        shell: msys2 {0}
+        run: |
+          export MICRO_CLANG_BUILD_PROFILE=phase4-host-thinlto-strip
+          ./scripts/micro-clang-jit/build-source-toolchain.sh \
+            "$PWD/micro-clang-phase4-stage6-build" \
+            "$PWD/micro-clang-phase4-stage6-raw" \
+            "$PWD/micro-clang-phase4-stage6-build-evidence"
+
+      - name: Upload Stage-6 raw toolchain
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-thinlto-raw
+          path: micro-clang-phase4-stage6-raw/
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 9
+
+      - name: Upload Stage-6 build evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-build-evidence
+          path: micro-clang-phase4-stage6-build-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  package:
+    name: Stage 6 reapply qualified pruning and measure
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 120
+    outputs:
+      size_improved: ${{ steps.measure.outputs.size_improved }}
+      candidate_mib: ${{ steps.measure.outputs.candidate_mib }}
+      parent_mib: ${{ steps.measure.outputs.parent_mib }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Stage-6 raw toolchain
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage6-thinlto-raw
+          path: micro-clang-phase4-stage6-raw-artifact
+
+      - name: Download Stage-6 build evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage6-build-evidence
+          path: micro-clang-phase4-stage6-build-evidence
+
+      - name: Download qualified Stage-5 parent
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage5-package
+          path: qualified-stage5-parent
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.QUALIFIED_RUN_ID }}
+
+      - name: Download qualified Stage-2 closure traces
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: micro-clang-phase4-stage2-py*
+          path: qualified-stage2-traces
+          merge-multiple: false
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.QUALIFIED_RUN_ID }}
+
+      - name: Install package-test environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase4-stage6
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            pefile
+
+      - name: Reapply Stage-AW, Stage-3 and Stage-5 reductions reproducibly
+        id: measure
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/micro-clang-phase4-stage6"
+          $compiler = Get-ChildItem "micro-clang-phase4-stage6-raw-artifact" -Recurse -Filter "x86_64-w64-mingw32-clang.exe" -File | Select-Object -First 1
+          if (-not $compiler) { throw "Stage-6 target clang not found in raw artifact" }
+          $rawRoot = Split-Path -Parent (Split-Path -Parent $compiler.FullName)
+
+          $traceRoot = Join-Path $PWD "stage6-traces"
+          Remove-Item -Recurse -Force $traceRoot -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $traceRoot | Out-Null
+          foreach ($py in @("3.12", "3.13", "3.14")) {
+            $artifact = Join-Path $PWD ("qualified-stage2-traces/micro-clang-phase4-stage2-py" + $py)
+            if (-not (Test-Path -LiteralPath $artifact -PathType Container)) { throw "missing Stage-2 trace artifact for Python $py" }
+            Copy-Item -LiteralPath $artifact -Destination (Join-Path $traceRoot ("py" + $py)) -Recurse -Force
+          }
+
+          function Build-Stage6Candidate([string]$tag, [string]$packageRoot, [string]$evidence) {
+            $intermediate = Join-Path $PWD ("micro clang phase4 stage6 " + $tag + " intermediate with spaces")
+            $compatParent = Join-Path $PWD ("micro clang phase4 stage6 " + $tag + " compatibility with spaces")
+            Remove-Item -Recurse -Force $intermediate, $compatParent, $packageRoot, $evidence -ErrorAction SilentlyContinue
+
+            ./scripts/micro-clang-jit/package-phase2.ps1 -ToolchainRoot $rawRoot -PythonPrefix $prefix -BuildEvidenceDir (Join-Path $PWD "micro-clang-phase4-stage6-build-evidence") -OutputRoot $intermediate -EvidenceDir (Join-Path $evidence "intermediate") -Phase 4 -PackageRole "phase4-stage6-thinlto-intermediate"
+            $intermediateBackend = Join-Path $intermediate "Library/fenics-jit/backends/micro-clang"
+
+            $compatRoot = Join-Path $compatParent "fenics-jit"
+            New-Item -ItemType Directory -Force $compatParent | Out-Null
+            Copy-Item -LiteralPath $intermediateBackend -Destination $compatRoot -Recurse -Force
+
+            ./scripts/micro-clang-jit/apply-stageaw-pruning.ps1 -ToolchainRoot $compatRoot -EvidenceDir (Join-Path $evidence "stageaw")
+            & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase4-stage3-prune.py --backend-root $compatRoot --trace-root $traceRoot --evidence-dir (Join-Path $evidence "closure") | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Stage-6 closure-driven sysroot pruning failed" }
+
+            & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase4-stage5-prune-resource-headers.py --backend-root $compatRoot --evidence-dir (Join-Path $evidence "resources") | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Stage-6 resource-header pruning failed" }
+
+            ./scripts/micro-clang-jit/package-phase2.ps1 -ToolchainRoot $compatRoot -PythonPrefix $prefix -BuildEvidenceDir (Join-Path $PWD "micro-clang-phase4-stage6-build-evidence") -OutputRoot $packageRoot -EvidenceDir $evidence -Phase 4 -PackageRole "phase4-stage6-thinlto-plus-qualified-pruning"
+            $backend = Join-Path $packageRoot "Library/fenics-jit/backends/micro-clang"
+
+            & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase2-package-smoke.py --backend-root $backend --work-dir (Join-Path $compatParent "smoke with spaces") --evidence-dir $evidence --expected-phase 4 | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Stage-6 package smoke failed" }
+            return $backend
+          }
+
+          $evidence = Join-Path $PWD "micro-clang-phase4-stage6-evidence"
+          $packageRoot = Join-Path $PWD "micro clang phase4 stage6 package with spaces"
+          $backend = Build-Stage6Candidate "primary" $packageRoot $evidence
+
+          $reproEvidence = Join-Path $PWD "micro-clang-phase4-stage6-repro-evidence"
+          $reproRoot = Join-Path $PWD "micro clang phase4 stage6 reproducibility package with spaces"
+          $reproBackend = Build-Stage6Candidate "repro" $reproRoot $reproEvidence
+
+          $comparisons = [ordered]@{}
+          foreach ($name in @("metadata.json", "manifest.csv", "size.txt")) {
+            $first = (Get-FileHash -LiteralPath (Join-Path $backend $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $second = (Get-FileHash -LiteralPath (Join-Path $reproBackend $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $comparisons[$name] = [ordered]@{ first_sha256=$first; second_sha256=$second; match=($first -eq $second) }
+            if ($first -ne $second) { throw "Stage-6 reproducibility mismatch for $name" }
+          }
+
+          $parentBackend = Join-Path $PWD "qualified-stage5-parent/Library/fenics-jit/backends/micro-clang"
+          $parentLine = Get-Content (Join-Path $parentBackend "size.txt") | Where-Object { $_ -like "payload_bytes=*" } | Select-Object -First 1
+          if (-not $parentLine) { throw "qualified Stage-5 size.txt is missing payload_bytes" }
+          $parentBytes = [int64]($parentLine.Split("=", 2)[1])
+
+          $candidate = Get-Content (Join-Path $evidence "phase4-package-summary.json") -Raw | ConvertFrom-Json
+          $candidateBytes = [int64]$candidate.payload_bytes
+          $improved = $candidateBytes -lt $parentBytes
+          $removed = $parentBytes - $candidateBytes
+          $removedPct = if ($parentBytes -gt 0) { 100.0 * $removed / $parentBytes } else { 0.0 }
+
+          $summary = [ordered]@{
+            schema = "fenics-jit-micro-clang-phase4-stage6-thinlto-v1"
+            status = if ($improved) { "size-improved" } else { "no-size-improvement" }
+            reduction = "same Stage-5 toolchain policy rebuilt with LLVM ThinLTO, then stripped and re-pruned with the qualified Stage-AW/Stage-3/Stage-5 policies"
+            qualified_stage5_parent_bytes = $parentBytes
+            qualified_stage5_parent_mib = [math]::Round($parentBytes / 1MB, 4)
+            candidate_bytes = $candidateBytes
+            candidate_mib = [double]$candidate.payload_mib
+            bytes_removed = $removed
+            percent_removed = [math]::Round($removedPct, 4)
+            strong_target_mib = 81.2
+            stretch_target_mib = 54.1
+            strong_target_status = if ([double]$candidate.payload_mib -le 81.2) { "pass" } else { "not-yet" }
+            stretch_target_status = if ([double]$candidate.payload_mib -le 54.1) { "pass" } else { "not-yet" }
+            reproducibility = $comparisons
+          }
+          [IO.File]::WriteAllText(
+            (Join-Path $evidence "phase4-stage6-thinlto.json"),
+            ($summary | ConvertTo-Json -Depth 8) + [Environment]::NewLine,
+            (New-Object Text.UTF8Encoding($false))
+          )
+
+          "size_improved=$($improved.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "candidate_mib=$([double]$candidate.payload_mib)" >> $env:GITHUB_OUTPUT
+          "parent_mib=$([math]::Round($parentBytes / 1MB, 4))" >> $env:GITHUB_OUTPUT
+          $summary | ConvertTo-Json -Depth 8 | Out-Host
+
+      - name: Upload Stage-6 candidate package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-thinlto-package
+          path: micro clang phase4 stage6 package with spaces/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
+
+      - name: Upload Stage-6 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-thinlto-evidence
+          path: micro-clang-phase4-stage6-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  private:
+    name: Stage 6 private qualification (Python ${{ matrix.python }})
+    needs: package
+    if: needs.package.outputs.size_improved == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Stage-6 candidate package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage6-thinlto-package
+          path: micro clang phase4 stage6 package artifact with spaces
+
+      - name: Download qualified Phase-0 reference
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase0-reference
+          path: micro-clang-phase0-reference
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.QUALIFIED_RUN_ID }}
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-phase4-stage6-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Install isolated FEniCS runtime in a spaced prefix
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase4 stage6 python py${{ matrix.python }} with spaces"
+          ./scripts/micro-clang-jit/install-fenics-runtime.ps1 -Prefix $prefix -PythonVersion "${{ matrix.python }}"
+          $artifactBackend = Join-Path $PWD "micro clang phase4 stage6 package artifact with spaces/Library/fenics-jit/backends/micro-clang"
+          $backend = Join-Path $prefix "Library/fenics-jit/backends/micro-clang"
+          New-Item -ItemType Directory -Force (Split-Path -Parent $backend) | Out-Null
+          Remove-Item -Recurse -Force $backend -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath $artifactBackend -Destination $backend -Recurse -Force
+
+      - name: Re-run ABI, driver, PE and hermeticity contract
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase4 stage6 python py${{ matrix.python }} with spaces"
+          $backend = Join-Path $prefix "Library/fenics-jit/backends/micro-clang"
+          $reference = (Resolve-Path "micro-clang-phase0-reference/driver-evidence.json").Path
+          ./scripts/micro-clang-jit/run-phase1.ps1 -PythonPrefix $prefix -ToolchainRoot $backend -ReferenceDriver $reference -WorkDir "micro clang phase4 stage6 contract py${{ matrix.python }} with spaces" -DiagnosticsDir "micro-clang-phase4-stage6-py${{ matrix.python }}/phase1-regression"
+
+      - name: Run complete private broad qualification
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $PWD "micro clang phase4 stage6 python py${{ matrix.python }} with spaces"
+          $backend = Join-Path $prefix "Library/fenics-jit/backends/micro-clang"
+          $diag = Join-Path $PWD "micro-clang-phase4-stage6-py${{ matrix.python }}"
+          $env:PYTHONHASHSEED = "0"
+          $env:PATH = "$prefix;$prefix/Scripts;$prefix/Library/bin;$env:PATH"
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase3-private-validation.py --backend-root $backend --work-dir "micro clang phase4 stage6 work py${{ matrix.python }} with spaces" --diagnostics-dir $diag
+          if ($LASTEXITCODE -ne 0) { throw "Stage-6 private qualification failed" }
+
+      - name: Upload Stage-6 qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-thinlto-py${{ matrix.python }}
+          path: micro-clang-phase4-stage6-py${{ matrix.python }}/
+          if-no-files-found: warn
+          retention-days: 14

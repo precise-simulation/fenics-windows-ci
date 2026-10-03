@@ -15,7 +15,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Iterator
 
-_ALLOWED_BACKENDS = ("llvm-mingw", "tinycc")
+_BACKEND_REGISTRY = {
+    "llvm-mingw": ("metadata.json", "LLVM-MinGW", "llvm_mingw_runtime.py", "_fenics_jit_llvm_mingw_runtime"),
+    "tinycc": ("backend-metadata.json", "TinyCC", "tinycc_runtime.py", "_fenics_jit_tinycc_runtime"),
+    "micro-clang": ("metadata.json", "micro-Clang", "micro_clang_runtime.py", "_fenics_jit_micro_clang_runtime"),
+}
+_ALLOWED_BACKENDS = tuple(_BACKEND_REGISTRY)
 _DEFAULT_BACKEND = "llvm-mingw"
 _CACHE_SCHEMA = "fenics-jit-cache-v1"
 _REMOVED_ENV = {
@@ -244,18 +249,9 @@ def discover_runtime() -> SelectedRuntime:
     if not backend_root.is_dir():
         raise _backend_unavailable(selected, backend_root)
 
-    if selected == "llvm-mingw":
-        metadata = _read_metadata(backend_root / "metadata.json", "LLVM-MinGW")
-        module = _load_module(
-            backend_root / "llvm_mingw_runtime.py",
-            "_fenics_jit_llvm_mingw_runtime",
-        )
-    else:
-        metadata = _read_metadata(backend_root / "backend-metadata.json", "TinyCC")
-        module = _load_module(
-            backend_root / "tinycc_runtime.py",
-            "_fenics_jit_tinycc_runtime",
-        )
+    metadata_name, metadata_label, runtime_name, module_name = _BACKEND_REGISTRY[selected]
+    metadata = _read_metadata(backend_root / metadata_name, metadata_label)
+    module = _load_module(backend_root / runtime_name, module_name)
 
     cache_id = module.backend_cache_id(root=backend_root, metadata=metadata)
     return SelectedRuntime(selected, backend_root, cache_id, metadata, module)
@@ -307,6 +303,7 @@ def _self_test() -> None:
     assert normalize_backend("") == "llvm-mingw"
     assert normalize_backend(" LLVM-MinGW ") == "llvm-mingw"
     assert normalize_backend("tinycc") == "tinycc"
+    assert normalize_backend("micro-clang") == "micro-clang"
     try:
         normalize_backend("msvc")
     except RuntimeError as exc:
@@ -316,6 +313,8 @@ def _self_test() -> None:
 
     root = backend_cache_root(Path("cache"), "tinycc", "tinycc-test-id")
     assert root.parts[-3:] == ("ffcx", "tinycc", "tinycc-test-id")
+    micro_root = backend_cache_root(Path("cache"), "micro-clang", "micro-clang-test-id")
+    assert micro_root.parts[-3:] == ("ffcx", "micro-clang", "micro-clang-test-id")
 
     with tempfile.TemporaryDirectory(prefix="fenics-jit-selector-selftest-") as temp_name:
         temp_root = Path(temp_name).resolve()

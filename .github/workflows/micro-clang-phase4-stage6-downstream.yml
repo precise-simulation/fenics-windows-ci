@@ -1,0 +1,399 @@
+name: micro-clang-phase4-stage6-downstream
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/micro-clang-phase4-stage6-downstream.yml"
+      - "scripts/micro-clang-jit/phase5-selector-validation.py"
+      - "scripts/micro-clang-jit/phase5-concurrency-proof.py"
+      - "scripts/micro-clang-jit/phase5-three-backend-benchmark.py"
+      - "scripts/micro-clang-jit/phase6-standalone.py"
+      - "scripts/fenicsx-nuitka.ps1"
+      - "scripts/fenicsx-nuitka-runtime.nuitka-package.config.yml"
+      - "recipes/fenics-jit-micro-clang/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: micro-clang-phase4-stage6-downstream-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  STAGE6_RUN_ID: "37083171290"
+  QUALIFIED_PHASE5_RUN_ID: "36825854094"
+
+jobs:
+  repackage:
+    name: Stage 6 build ThinLTO backend package channel
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download privately qualified Stage-6 backend
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage6-thinlto-package
+          path: stage6-backend
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.STAGE6_RUN_ID }}
+
+      - name: Download qualified Phase-5 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase5-package-channel
+          path: phase5-qualified-output
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.QUALIFIED_PHASE5_RUN_ID }}
+
+      - name: Stage Stage-6 backend source and refresh package identity
+        shell: pwsh
+        run: |
+          $backend = Join-Path $PWD "stage6-backend/Library/fenics-jit/backends/micro-clang"
+          if (-not (Test-Path -LiteralPath (Join-Path $backend "metadata.json") -PathType Leaf)) {
+            throw "Stage-6 backend artifact is missing"
+          }
+
+          $staged = Join-Path $PWD "micro-clang-phase5-source"
+          Remove-Item -Recurse -Force $staged -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath $backend -Destination $staged -Recurse -Force
+
+          # Keep the currently qualified backend wrapper while preserving the
+          # Stage-6 compiler/sysroot bytes.
+          Copy-Item -LiteralPath "recipes/fenics-jit-micro-clang/micro_clang_runtime.py" -Destination (Join-Path $staged "micro_clang_runtime.py") -Force
+
+          $manifestInputs = @(
+            Get-ChildItem -LiteralPath $staged -Recurse -File |
+              Where-Object { $_.Name -notin @("manifest.csv", "size.txt") } |
+              Sort-Object FullName
+          )
+          $manifest = foreach ($file in $manifestInputs) {
+            $relative = $file.FullName.Substring($staged.Length).TrimStart("\")
+            [pscustomobject]@{
+              path = $relative.Replace("\", "/")
+              bytes = $file.Length
+              sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+          $manifest | ConvertTo-Csv -NoTypeInformation | Set-Content -LiteralPath (Join-Path $staged "manifest.csv") -Encoding utf8
+
+          $sizePath = Join-Path $staged "size.txt"
+          for ($iteration = 0; $iteration -lt 5; $iteration++) {
+            $files = @(Get-ChildItem -LiteralPath $staged -Recurse -File | Sort-Object FullName)
+            $bytes = [int64](($files | Measure-Object Length -Sum).Sum)
+            $next = @(
+              "payload_file_count=$($files.Count)"
+              "payload_bytes=$bytes"
+              "payload_mib=$([math]::Round($bytes / 1MB, 4))"
+              "manifest_hashed_file_count=$($manifestInputs.Count)"
+              "manifest_excludes=manifest.csv,size.txt"
+              "stage_aw_reference_mib=215.19"
+              "phase4_early_continuation_gate_mib=108.2"
+              "phase4_size_gate_status=$(if (($bytes / 1MB) -le 108.2) { 'pass' } else { 'fail' })"
+            ) -join [Environment]::NewLine
+            $next += [Environment]::NewLine
+            $previous = if (Test-Path -LiteralPath $sizePath) { Get-Content -LiteralPath $sizePath -Raw } else { "" }
+            [IO.File]::WriteAllText($sizePath, $next, [Text.Encoding]::ASCII)
+            if ($previous -eq $next) { break }
+          }
+
+          $files = @(Get-ChildItem -LiteralPath $staged -Recurse -File)
+          $bytes = [int64](($files | Measure-Object Length -Sum).Sum)
+          if (($bytes / 1MB) -ge 107.8854) {
+            throw "Stage-6 staged payload no longer improves on the qualified Stage-5 parent: $($bytes / 1MB) MiB"
+          }
+
+          [pscustomobject]@{
+            source_run = [int64]$env:STAGE6_RUN_ID
+            source_head = "cce65aafa0bf8a63bcd717eee25a01af910ea0a4"
+            payload_bytes = $bytes
+            payload_mib = $bytes / 1MB
+            wrapper_sha256 = (Get-FileHash -LiteralPath (Join-Path $staged "micro_clang_runtime.py") -Algorithm SHA256).Hash.ToLowerInvariant()
+            manifest_sha256 = (Get-FileHash -LiteralPath (Join-Path $staged "manifest.csv") -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 stage6-derived-source.json
+
+      - name: Install package build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-stage6-package-tools
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            rattler-build=0.74.0
+
+      - name: Build Stage-6 micro-Clang package
+        shell: pwsh
+        run: |
+          $rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs/micro-clang-stage6-package-tools" -Recurse -Filter rattler-build.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $rattler) { throw "rattler-build.exe not found" }
+
+          Remove-Item -Recurse -Force stage6-output -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath phase5-qualified-output -Destination stage6-output -Recurse -Force
+          $channel = "file:///" + ((Resolve-Path stage6-output).Path -replace '\\','/')
+
+          & $rattler build --recipe recipes/fenics-jit-micro-clang/recipe.yaml --output-dir stage6-output --channel-priority strict -c $channel -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "Stage-6 micro-Clang package build failed" }
+
+          $package = Get-ChildItem stage6-output -Recurse -Filter "fenics-jit-micro-clang-*.conda" |
+            Where-Object { $_.Name -match "_1\.conda$" } |
+            Select-Object -First 1
+          if (-not $package) { throw "Stage-6 build-number-1 package missing" }
+
+          [pscustomobject]@{
+            package = $package.Name
+            bytes = $package.Length
+            mib = $package.Length / 1MB
+            sha256 = (Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 stage6-package.json
+
+      - name: Upload Stage-6 package channel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-package-channel
+          path: |
+            stage6-output/
+            stage6-derived-source.json
+            stage6-package.json
+          if-no-files-found: error
+          retention-days: 30
+
+  integration:
+    name: Stage 6 shared-runtime integration (Python ${{ matrix.python }})
+    needs: repackage
+    runs-on: windows-2022
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Stage-6 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage6-package-channel
+          path: stage6-channel
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-stage6-integration-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Install all three backends with Stage-6 micro-Clang
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "s6 i py${{ matrix.python }}"
+          $channelRoot = Resolve-Path "stage6-channel/stage6-output"
+          $channel = "file:///" + ($channelRoot.Path -replace '\\','/')
+          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c $channel -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-dolfinx fenics-jit-llvm-mingw fenics-jit-tinycc "fenics-jit-micro-clang=20260826=*_1" cffi setuptools pefile | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Stage-6 integration environment installation failed" }
+
+      - name: Requalify selector, ownership, switching and concurrency
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "s6 i py${{ matrix.python }}"
+          $diag = Join-Path $PWD "stage6-integration-py${{ matrix.python }}"
+          $selectorWork = Join-Path $env:RUNNER_TEMP "s6 s py${{ matrix.python }}"
+          $concurrencyWork = Join-Path $env:RUNNER_TEMP "s6 c py${{ matrix.python }}"
+          Remove-Item -Recurse -Force $selectorWork, $concurrencyWork, $diag -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $selectorWork, $concurrencyWork, $diag | Out-Null
+          $env:PYTHONHASHSEED = "0"
+          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-selector-validation.py --work-dir $selectorWork --output (Join-Path $diag "selector-validation.json")
+          if ($LASTEXITCODE -ne 0) { throw "Stage-6 selector validation failed" }
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-concurrency-proof.py --work-dir $concurrencyWork --output (Join-Path $diag "concurrency-validation.json")
+          if ($LASTEXITCODE -ne 0) { throw "Stage-6 concurrency validation failed" }
+
+      - name: Upload Stage-6 integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-integration-py${{ matrix.python }}
+          path: stage6-integration-py${{ matrix.python }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+  comparison:
+    name: Stage 6 paired comparison (Python ${{ matrix.python }})
+    needs: integration
+    runs-on: windows-2022
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Stage-6 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage6-package-channel
+          path: stage6-channel
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-stage6-comparison-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Install Stage-6 paired-comparison environment
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "s6 b py${{ matrix.python }}"
+          $channelRoot = Resolve-Path "stage6-channel/stage6-output"
+          $channel = "file:///" + ($channelRoot.Path -replace '\\','/')
+          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c $channel -c precise-simulation -c conda-forge "python=${{ matrix.python }}" "libblas=*=*openblas" fenics-dolfinx fenics-jit-llvm-mingw fenics-jit-tinycc "fenics-jit-micro-clang=20260826=*_1" cffi setuptools | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Stage-6 comparison environment installation failed" }
+
+      - name: Run paired three-backend comparison
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "s6 b py${{ matrix.python }}"
+          $cache = Join-Path $env:RUNNER_TEMP "s6 cache py${{ matrix.python }}"
+          $diag = Join-Path $PWD "stage6-comparison-py${{ matrix.python }}"
+          Remove-Item -Recurse -Force $cache, $diag -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $cache, $diag | Out-Null
+          $env:PYTHONHASHSEED = "0"
+          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-three-backend-benchmark.py --cache-dir $cache --diagnostics-dir $diag --package-dir (Resolve-Path "stage6-channel/stage6-output").Path --jit-repeats 5 --runtime-repeats 11
+          if ($LASTEXITCODE -ne 0) { throw "Stage-6 paired comparison failed" }
+
+      - name: Upload Stage-6 comparison evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-comparison-py${{ matrix.python }}
+          path: stage6-comparison-py${{ matrix.python }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+  standalone:
+    name: Stage 6 micro-Clang-only Nuitka qualification
+    needs: comparison
+    runs-on: windows-2022
+    timeout-minutes: 150
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download Stage-6 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage6-package-channel
+          path: stage6-channel
+
+      - name: Install micromamba bootstrap
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-stage6-standalone-bootstrap
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Create standalone build prefix
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "s6 build with spaces"
+          $channelRoot = Resolve-Path "stage6-channel/stage6-output"
+          $channel = "file:///" + ($channelRoot.Path -replace '\\','/')
+
+          & $env:MAMBA_EXE create -y -p $prefix --override-channels --strict-channel-priority -c $channel -c precise-simulation -c conda-forge python=3.12 "libblas=*=*openblas" fenics-dolfinx fenics-jit-llvm-mingw "fenics-jit-runtime=0.1.0" "fenics-jit-micro-clang=20260826=*_1" "cffi=2.1.*" "setuptools=84.*" pefile "nuitka=4.1.3" ordered-set zstandard c-compiler | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "Stage-6 standalone build environment install failed" }
+          if (Test-Path -LiteralPath (Join-Path $prefix "Library/fenics-jit/backends/tinycc")) {
+            throw "TinyCC unexpectedly installed in Stage-6 build prefix"
+          }
+
+      - name: Build micro-Clang-only standalone bundle
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "s6 build with spaces"
+          ./scripts/fenicsx-nuitka.ps1 -EntryPoint "scripts/micro-clang-jit/phase6-standalone.py" -OutputDir "stage6 output with spaces" -ExistingPrefix $prefix -JitBackend micro-clang
+
+      - name: Run hermetic serial and MPI standalone proof
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "s6 build with spaces"
+          $output = Join-Path $PWD "stage6 output with spaces"
+          $dist = Get-ChildItem -LiteralPath $output -Directory -Filter "*.dist" |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "fenicsx.exe") } |
+            Select-Object -First 1
+          if (-not $dist) { throw "Stage-6 Nuitka distribution not found" }
+
+          $jit = Join-Path $dist.FullName "fenics-jit"
+          $micro = Join-Path $jit "backends/micro-clang"
+          foreach ($forbiddenBackend in @("llvm-mingw", "tinycc")) {
+            if (Test-Path -LiteralPath (Join-Path $jit "backends/$forbiddenBackend")) {
+              throw "$forbiddenBackend was staged into the Stage-6 micro-Clang-only bundle"
+            }
+          }
+
+          New-Item -ItemType Directory -Force stage6-downstream-evidence | Out-Null
+          $hidden = "$prefix-hidden"
+          if (Test-Path -LiteralPath $hidden) { Remove-Item -Recurse -Force $hidden }
+          Move-Item -LiteralPath $prefix -Destination $hidden
+          try {
+            $env:FENICS_PHASE6_BUNDLE_ROOT = $dist.FullName
+            $env:FENICS_PHASE6_ORIGINAL_PREFIX = $prefix
+            $env:FENICS_JIT_ROOT = $jit
+            $env:FENICS_JIT_COMPILER = "micro-clang"
+            $env:FENICS_JIT_FFCX_INCLUDE = Join-Path $dist.FullName "ffcx/codegeneration"
+            $env:FENICS_JIT_VERBOSE = "1"
+
+            foreach ($name in @(
+              "CC","CXX","CPP","LD","LDSHARED","INCLUDE","LIB","LIBPATH","LIBRARY_PATH",
+              "CPATH","C_INCLUDE_PATH","CPLUS_INCLUDE_PATH","COMPILER_PATH","GCC_EXEC_PREFIX",
+              "VSINSTALLDIR","VCINSTALLDIR","VCToolsInstallDir","WindowsSdkDir",
+              "WindowsSDKVersion","UniversalCRTSdkDir","UCRTVersion","DISTUTILS_USE_SDK","MSSdk"
+            )) {
+              Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+            }
+            Get-ChildItem Env: |
+              Where-Object { $_.Name -like "VSCMD_*" } |
+              ForEach-Object { Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue }
+
+            $env:PATH = "$($dist.FullName);$env:SystemRoot\System32;$env:SystemRoot"
+            $exe = Join-Path $dist.FullName "fenicsx.exe"
+            & $exe --work-dir (Join-Path $PWD "stage6 standalone work with spaces") --output (Join-Path $PWD "stage6-downstream-evidence/stage6-standalone-summary.json")
+            if ($LASTEXITCODE -ne 0) { throw "Stage-6 standalone executable failed" }
+
+            $mpiexec = Join-Path $dist.FullName "mpiexec.exe"
+            & $mpiexec -localonly -n 2 -env PATH $env:PATH -env FENICS_PHASE6_BUNDLE_ROOT $dist.FullName -env FENICS_PHASE6_ORIGINAL_PREFIX $prefix -env FENICS_JIT_ROOT $jit -env FENICS_JIT_COMPILER micro-clang -env FENICS_JIT_FFCX_INCLUDE $env:FENICS_JIT_FFCX_INCLUDE $exe --mpi-child --work-dir (Join-Path $PWD "stage6 standalone mpi work with spaces") --output (Join-Path $PWD "stage6-downstream-evidence/stage6-standalone-mpi-summary.json")
+            if ($LASTEXITCODE -ne 0) { throw "Stage-6 standalone MPI proof failed" }
+          } finally {
+            Move-Item -LiteralPath $hidden -Destination $prefix
+          }
+
+      - name: Upload Stage-6 downstream evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-phase4-stage6-downstream
+          path: |
+            stage6-downstream-evidence/
+            stage6 output with spaces/nuitka-report.xml
+            stage6 standalone work with spaces/diagnostics/
+            stage6 standalone mpi work with spaces/diagnostics/
+          if-no-files-found: warn
+          retention-days: 30

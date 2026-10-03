@@ -17,7 +17,7 @@ from types import ModuleType
 
 
 def _default_backend_root() -> Path:
-    return (Path(__file__).resolve().parent.parent / "backends" / "llvm-mingw").resolve()
+    return (Path(__file__).resolve().parent.parent / "backends" / "micro-clang").resolve()
 
 
 def _load_backend_runtime(toolchain_root: str | os.PathLike[str] | None = None) -> tuple[Path, ModuleType]:

@@ -53,7 +53,7 @@ def main() -> int:
     if comm.size != 2:
         raise RuntimeError(f"default MPI proof requires two ranks, got {comm.size}")
     if os.environ.get("FENICS_JIT_COMPILER"):
-        raise RuntimeError,"default MPI proof requires FENICS_JIT_COMPILER unset")
+        raise RuntimeError("default MPI proof requires FENICS_JIT_COMPILER unset")
 
     selector = load_selector()
     runtime = selector.discover_runtime()

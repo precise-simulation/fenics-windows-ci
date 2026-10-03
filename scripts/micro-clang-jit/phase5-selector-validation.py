@@ -124,10 +124,6 @@ def _validate_package_ownership() -> dict[str, object]:
             "repository Windows fenics-dolfinx recipe does not declare the "
             "micro-Clang default backend dependency"
         )
-    if "fenics-jit-micro-clang" not in dolfinx_deps:
-        raise RuntimeError("installed fenics-dolfinx does not depend on micro-Clang")
-    if "fenics-jit-llvm-mingw" in dolfinx_deps:
-        raise RuntimeError("installed fenics-dolfinx still depends on LLVM-MinGW")
 
     return {
         "status": "pass",

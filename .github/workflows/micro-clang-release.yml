@@ -101,6 +101,13 @@ jobs:
             python=3.12
             anaconda-client=1.14.1
 
+      - name: Put release environment on PATH
+        shell: pwsh
+        run: |
+          "$env:MAMBA_ROOT_PREFIX/envs/micro-clang-release" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/micro-clang-release/Library/bin" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/micro-clang-release/Scripts" >> $env:GITHUB_PATH
+
       - name: Clean-install exact package and verify backend ownership
         shell: pwsh
         run: |

@@ -81,7 +81,11 @@ def _owned_files(record: dict) -> set[str]:
     return {str(item).replace("\\", "/").lower() for item in record.get("files", [])}
 
 
-def _validate_package_ownership() -> dict[str, object]:
+def _validate_package_ownership(
+    *,
+    expected_installed_dolfinx_backend: str,
+    expected_repo_dolfinx_backend: str,
+) -> dict[str, object]:
     records = {name: _package_record(name) for name in PACKAGES}
     files = {name: _owned_files(record) for name, record in records.items()}
     for name, root in PACKAGES.items():
@@ -116,13 +120,31 @@ def _validate_package_ownership() -> dict[str, object]:
     dolfinx = _package_record("fenics-dolfinx")
     dolfinx_deps = _dependency_names(dolfinx)
 
+    installed_package = f"fenics-jit-{expected_installed_dolfinx_backend}"
+    if installed_package not in dolfinx_deps:
+        raise RuntimeError(
+            "installed fenics-dolfinx does not depend on expected backend "
+            f"{installed_package}: {sorted(dolfinx_deps)}"
+        )
+    alternate_packages = {
+        "fenics-jit-llvm-mingw",
+        "fenics-jit-micro-clang",
+    } - {installed_package}
+    unexpected = sorted(dolfinx_deps & alternate_packages)
+    if unexpected:
+        raise RuntimeError(
+            "installed fenics-dolfinx unexpectedly depends on alternate backend(s): "
+            f"{unexpected}"
+        )
+
     repo_root = Path(__file__).resolve().parents[2]
     dolfinx_recipe = repo_root / "recipes" / "dolfinx" / "recipe.yaml"
     recipe_text = dolfinx_recipe.read_text(encoding="utf-8")
-    if "fenics-jit-micro-clang ==20260826" not in recipe_text:
+    repo_dependency = f"fenics-jit-{expected_repo_dolfinx_backend} ==20260826"
+    if repo_dependency not in recipe_text:
         raise RuntimeError(
-            "repository Windows fenics-dolfinx recipe does not declare the "
-            "micro-Clang default backend dependency"
+            "repository Windows fenics-dolfinx recipe does not declare expected "
+            f"backend dependency {repo_dependency!r}"
         )
 
     return {
@@ -130,9 +152,12 @@ def _validate_package_ownership() -> dict[str, object]:
         "file_counts": {name: len(files[name]) for name in PACKAGES},
         "dependencies": {name: sorted(deps[name]) for name in PACKAGES},
         "pairwise_overlap": {},
-        "dolfinx_recipe_backend_dependency": "fenics-jit-micro-clang ==20260826",
+        "dolfinx_recipe_backend_dependency": repo_dependency,
+        "installed_dolfinx_backend_dependency": installed_package,
         "installed_dolfinx_dependencies": sorted(dolfinx_deps),
-        "normal_install_footprint_reduction_claimed": True,
+        "normal_install_footprint_reduction_claimed": (
+            expected_installed_dolfinx_backend == "micro-clang"
+        ),
     }
 
 
@@ -198,6 +223,21 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--expected-default-backend",
+        choices=tuple(BACKENDS),
+        default="micro-clang",
+    )
+    parser.add_argument(
+        "--expected-installed-dolfinx-backend",
+        choices=("llvm-mingw", "micro-clang"),
+        default="micro-clang",
+    )
+    parser.add_argument(
+        "--expected-repo-dolfinx-backend",
+        choices=("llvm-mingw", "micro-clang"),
+        default="micro-clang",
+    )
     args = parser.parse_args()
     work = args.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=True)
@@ -207,8 +247,11 @@ def main() -> int:
 
     with _selector_value(None):
         default = selector.discover_runtime()
-    if default.selected_backend != "micro-clang":
-        raise RuntimeError(f"default backend is not micro-clang: {default.selected_backend}")
+    if default.selected_backend != args.expected_default_backend:
+        raise RuntimeError(
+            "default backend mismatch: "
+            f"{default.selected_backend} != {args.expected_default_backend}"
+        )
 
     unavailable = {
         name: _validate_unavailable_no_fallback(selector, name)
@@ -264,7 +307,10 @@ def main() -> int:
         "unavailable_backend_behavior": unavailable,
         "cache_ids": cache_ids,
         "cache_namespaces": {name: str(path) for name, path in physical.items()},
-        "package_ownership": _validate_package_ownership(),
+        "package_ownership": _validate_package_ownership(
+            expected_installed_dolfinx_backend=args.expected_installed_dolfinx_backend,
+            expected_repo_dolfinx_backend=args.expected_repo_dolfinx_backend,
+        ),
         "switching": switching,
         "environment_restored": dict(os.environ) == baseline,
     }

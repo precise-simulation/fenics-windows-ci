@@ -92,12 +92,12 @@ foreach ($pythonVersion in $pythonVersions) {
             if ($LASTEXITCODE -ne 0) {
                 throw "Could not inspect Phase 4 consumer environment"
             }
-            foreach ($required in @("fenics-jit-llvm-mingw", "cffi", "setuptools")) {
+            foreach ($required in @("fenics-jit-runtime", "fenics-jit-micro-clang", "cffi", "setuptools")) {
                 if ($packageList -notmatch "(?m)^\s*$([regex]::Escape($required))\s") {
                     throw "Phase 4 runtime environment is missing required package: $required"
                 }
             }
-            foreach ($forbidden in @("vs2022_win-64", "vswhere")) {
+            foreach ($forbidden in @("fenics-jit-llvm-mingw", "fenics-jit-tinycc", "vs2022_win-64", "vswhere")) {
                 if ($packageList -match "(?m)^\s*$([regex]::Escape($forbidden))\s") {
                     throw "Phase 4 runtime environment still contains compiler activation package: $forbidden"
                 }
@@ -127,7 +127,10 @@ foreach ($pythonVersion in $pythonVersions) {
 
             $savedXdgCache = $env:XDG_CACHE_HOME
             $savedJitVerbose = $env:FENICS_JIT_VERBOSE
+            $hadCompiler = Test-Path Env:FENICS_JIT_COMPILER
+            $savedCompiler = $env:FENICS_JIT_COMPILER
             try {
+                Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
                 $env:XDG_CACHE_HOME = $jitCache
                 $env:FENICS_JIT_VERBOSE = "1"
                 & micromamba run -n $envName python (Join-Path $root "scripts/test-poisson.py") 2>&1 |
@@ -139,11 +142,16 @@ foreach ($pythonVersion in $pythonVersions) {
             finally {
                 $env:XDG_CACHE_HOME = $savedXdgCache
                 $env:FENICS_JIT_VERBOSE = $savedJitVerbose
+                if ($hadCompiler) {
+                    $env:FENICS_JIT_COMPILER = $savedCompiler
+                } else {
+                    Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
+                }
             }
 
             $jitText = Get-Content $jitLog -Raw
-            if ($jitText -notmatch "FFCx JIT compiler:\s+LLVM-MinGW") {
-                throw "Direct DOLFINx JIT did not report automatic LLVM-MinGW helper activation"
+            if ($jitText -notmatch "FEniCS JIT backend:\s+micro-clang") {
+                throw "Direct DOLFINx JIT did not report automatic micro-Clang default activation"
             }
             $jitModules = @(Get-ChildItem (Join-Path $jitCache "fenics") -Filter "*.pyd" -File -Recurse -ErrorAction SilentlyContinue)
             if ($jitModules.Count -eq 0) {

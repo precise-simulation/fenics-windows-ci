@@ -120,22 +120,34 @@ def _validate_package_ownership(
     dolfinx = _package_record("fenics-dolfinx")
     dolfinx_deps = _dependency_names(dolfinx)
 
-    installed_package = f"fenics-jit-{expected_installed_dolfinx_backend}"
-    if installed_package not in dolfinx_deps:
-        raise RuntimeError(
-            "installed fenics-dolfinx does not depend on expected backend "
-            f"{installed_package}: {sorted(dolfinx_deps)}"
-        )
-    alternate_packages = {
+    jit_backend_packages = {
         "fenics-jit-llvm-mingw",
         "fenics-jit-micro-clang",
-    } - {installed_package}
-    unexpected = sorted(dolfinx_deps & alternate_packages)
-    if unexpected:
-        raise RuntimeError(
-            "installed fenics-dolfinx unexpectedly depends on alternate backend(s): "
-            f"{unexpected}"
+        "fenics-jit-tinycc",
+    }
+    if expected_installed_dolfinx_backend == "none":
+        unexpected = sorted(dolfinx_deps & jit_backend_packages)
+        if unexpected:
+            raise RuntimeError(
+                "installed historical fenics-dolfinx unexpectedly depends on "
+                f"JIT backend package(s): {unexpected}"
+            )
+        installed_package = None
+    else:
+        installed_package = f"fenics-jit-{expected_installed_dolfinx_backend}"
+        if installed_package not in dolfinx_deps:
+            raise RuntimeError(
+                "installed fenics-dolfinx does not depend on expected backend "
+                f"{installed_package}: {sorted(dolfinx_deps)}"
+            )
+        unexpected = sorted(
+            (dolfinx_deps & jit_backend_packages) - {installed_package}
         )
+        if unexpected:
+            raise RuntimeError(
+                "installed fenics-dolfinx unexpectedly depends on alternate backend(s): "
+                f"{unexpected}"
+            )
 
     repo_root = Path(__file__).resolve().parents[2]
     dolfinx_recipe = repo_root / "recipes" / "dolfinx" / "recipe.yaml"
@@ -230,7 +242,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--expected-installed-dolfinx-backend",
-        choices=("llvm-mingw", "micro-clang"),
+        choices=("none", "llvm-mingw", "micro-clang"),
         default="micro-clang",
     )
     parser.add_argument(

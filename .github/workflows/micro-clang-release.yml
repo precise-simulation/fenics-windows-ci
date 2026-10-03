@@ -1,0 +1,154 @@
+name: micro-clang-release
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/micro-clang-release.yml"
+      - "specs/micro-clang-ffcx-jit/07-package-promotion.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/micro-clang-release.yml"
+      - "specs/micro-clang-ffcx-jit/07-package-promotion.md"
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Publish the verified package to anaconda.org"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: micro-clang-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  QUALIFIED_RUN_ID: "37100978194"
+  QUALIFIED_HEAD: "dbcc097f2a1084d89b92b280c96d98dc5a7f8a9d"
+  QUALIFIED_ARTIFACT: "micro-clang-phase4-stage7-package-channel"
+  PACKAGE_FILE: "fenics-jit-micro-clang-20260826-h9490d1a_1.conda"
+  PACKAGE_SHA256: "d8a3510eb08615cb890dbf8f6da8b0d26f573e16a7b0bbee657edf563d40ad01"
+  PACKAGE_BYTES: "31890069"
+
+jobs:
+  promote:
+    name: Verify and promote qualified Full-LTO package
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download exact qualified Stage-7 package channel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.QUALIFIED_ARTIFACT }}
+          path: qualified-stage7
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.QUALIFIED_RUN_ID }}
+
+      - name: Verify qualification provenance and exact package bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = Join-Path $PWD "qualified-stage7/stage7-output/win-64/$env:PACKAGE_FILE"
+          $packageJsonPath = Join-Path $PWD "qualified-stage7/stage7-package.json"
+          $sourceJsonPath = Join-Path $PWD "qualified-stage7/stage7-derived-source.json"
+          if (-not (Test-Path -LiteralPath $package)) { throw "qualified package is missing" }
+          if (-not (Test-Path -LiteralPath $packageJsonPath)) { throw "stage7-package.json is missing" }
+          if (-not (Test-Path -LiteralPath $sourceJsonPath)) { throw "stage7-derived-source.json is missing" }
+
+          $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant()
+          $bytes = (Get-Item -LiteralPath $package).Length
+          if ($hash -ne $env:PACKAGE_SHA256) { throw "qualified package SHA-256 mismatch: $hash" }
+          if ($bytes -ne [int64]$env:PACKAGE_BYTES) { throw "qualified package size mismatch: $bytes" }
+
+          $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json
+          if ([string]$packageJson.package -ne $env:PACKAGE_FILE) { throw "qualified package filename mismatch" }
+          if ([string]$packageJson.sha256 -ne $env:PACKAGE_SHA256) { throw "qualified package record hash mismatch" }
+          if ([int64]$packageJson.bytes -ne [int64]$env:PACKAGE_BYTES) { throw "qualified package record size mismatch" }
+
+          $sourceJson = Get-Content -LiteralPath $sourceJsonPath -Raw | ConvertFrom-Json
+          if ([int64]$sourceJson.source_run -ne 37100266040) { throw "unexpected Stage-7 source run" }
+          if ([string]$sourceJson.source_head -ne "52a3da9bfc999492d2cfb3fac6aaece446cbe638") { throw "unexpected Stage-7 source head" }
+          if ([int64]$sourceJson.payload_bytes -ne 108891293) { throw "Stage-7 source payload mismatch" }
+          if ([string]$sourceJson.manifest_sha256 -ne "408b5bffdb62da06230165b3b51335ed6b088710f50624ddcfcea6acbad0fcc9") { throw "Stage-7 source manifest mismatch" }
+          if ([string]$sourceJson.wrapper_sha256 -ne "7f5c6a59a8e4b4e286f105bd94b27308fa162debf0814cecc9534a7ebb2c6d66") { throw "Stage-7 source wrapper mismatch" }
+
+          [ordered]@{
+            qualification_run = [int64]$env:QUALIFIED_RUN_ID
+            qualification_head = $env:QUALIFIED_HEAD
+            artifact = $env:QUALIFIED_ARTIFACT
+            package = $env:PACKAGE_FILE
+            package_bytes = $bytes
+            package_sha256 = $hash
+            source_payload_bytes = [int64]$sourceJson.payload_bytes
+            source_manifest_sha256 = [string]$sourceJson.manifest_sha256
+            source_wrapper_sha256 = [string]$sourceJson.wrapper_sha256
+            verified = $true
+          } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 promotion-record.json
+
+      - name: Install release verification tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-release
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            anaconda-client=1.14.1
+
+      - name: Clean-install exact package and verify backend ownership
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $prefix = Join-Path $env:RUNNER_TEMP "micro clang release verification"
+          $channelPath = (Resolve-Path "qualified-stage7/stage7-output").Path -replace "\\", "/"
+          $localChannel = "file:///$channelPath"
+          $args = @("create", "-y", "-p", $prefix, "--override-channels", "--strict-channel-priority", "-c", $localChannel, "-c", "conda-forge", "python=3.12", "fenics-ffcx", "fenics-jit-micro-clang=20260826=h9490d1a_1")
+          & $env:MAMBA_EXE @args | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "qualified package clean install failed" }
+
+          $jit = Join-Path $prefix "Library/fenics-jit"
+          $backend = Join-Path $jit "backends/micro-clang"
+          $selector = Join-Path $jit "runtime/fenics_jit_selector.py"
+          foreach ($forbidden in @("llvm-mingw", "tinycc")) {
+            if (Test-Path -LiteralPath (Join-Path $jit "backends/$forbidden")) { throw "unexpected backend installed: $forbidden" }
+          }
+          $env:FENICS_JIT_COMPILER = "micro-clang"
+          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+          & (Join-Path $prefix "python.exe") $selector | Tee-Object -FilePath selector-diagnostic.json
+          if ($LASTEXITCODE -ne 0) { throw "shared selector could not activate promoted micro-Clang package" }
+
+          $clang = Join-Path $backend "bin/x86_64-w64-mingw32-clang.exe"
+          $smokeC = Join-Path $env:RUNNER_TEMP "micro-clang-release-smoke.c"
+          $smokeDll = Join-Path $env:RUNNER_TEMP "micro-clang-release-smoke.dll"
+          "__declspec(dllexport) int micro_clang_release_smoke(void) { return 42; }" | Set-Content -LiteralPath $smokeC -Encoding ascii
+          & $clang -shared $smokeC -o $smokeDll
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $smokeDll)) { throw "promoted compiler smoke failed" }
+
+      - name: Upload promotion evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: micro-clang-release-promotion-evidence
+          path: |
+            promotion-record.json
+            selector-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish exact qualified package to precise-simulation
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload) }}
+        shell: pwsh
+        env:
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
+        run: |
+          $package = Join-Path $PWD "qualified-stage7/stage7-output/win-64/$env:PACKAGE_FILE"
+          $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:PACKAGE_SHA256) { throw "refusing publication because package hash changed" }
+          anaconda upload --force --user precise-simulation $package
+          if ($LASTEXITCODE -ne 0) { throw "micro-Clang package publication failed" }

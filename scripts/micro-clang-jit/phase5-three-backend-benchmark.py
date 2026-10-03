@@ -166,18 +166,21 @@ def _footprint(base: ModuleType, package_dir: Path) -> dict[str, object]:
         },
         "backends": backend_records,
         "normal_install": {
-            "llvm_mingw_remains_unconditional": True,
-            "normal_install_footprint_reduction_claimed": False,
+            "llvm_mingw_remains_unconditional": False,
+            "micro_clang_is_unconditional": True,
+            "normal_install_footprint_reduction_claimed": True,
+            "normal_install_default_backend": "micro-clang",
+            "normal_install_compiler_payload_bytes": micro_bytes,
+            "normal_install_compiler_payload_mib": micro_bytes / (1024 * 1024),
             "micro_clang_side_by_side_compiler_payload_bytes": llvm_bytes + micro_bytes,
             "micro_clang_side_by_side_compiler_payload_mib": (
                 llvm_bytes + micro_bytes
             ) / (1024 * 1024),
-            "backend_selected_profile_footprint": None,
-            "backend_selected_profile_supported": False,
+            "backend_selected_profile_footprint": micro_bytes,
+            "backend_selected_profile_supported": True,
             "reason": (
-                "recipes/dolfinx still declares fenics-jit-llvm-mingw unconditionally; "
-                "a separately qualified profile/variant is required before a normal-install "
-                "footprint reduction can be claimed"
+                "recipes/dolfinx declares fenics-jit-micro-clang as the normal "
+                "Windows runtime backend; LLVM-MinGW and TinyCC are explicit alternatives"
             ),
         },
         "micro_clang_size_gates": {

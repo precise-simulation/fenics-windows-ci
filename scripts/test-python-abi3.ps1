@@ -141,7 +141,7 @@ foreach ($pythonVersion in $pythonVersions) {
                 }
                 $jitStopwatch.Stop()
                 if ($jitStopwatch.Elapsed.TotalSeconds -gt 20.0) {
-                    throw "Default micro-Clang Poisson JIT sanity bound exceeded on Python $pythonVersion: $($jitStopwatch.Elapsed.TotalSeconds)s"
+                    throw "Default micro-Clang Poisson JIT sanity bound exceeded on Python ${pythonVersion}: $($jitStopwatch.Elapsed.TotalSeconds)s"
                 }
             }
             finally {

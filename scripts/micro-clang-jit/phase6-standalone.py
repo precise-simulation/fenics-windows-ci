@@ -430,6 +430,11 @@ def main() -> int:
     parser.add_argument("--work-dir", type=Path, default=Path("phase6 standalone work"))
     parser.add_argument("--output", type=Path, default=Path("phase6-standalone-summary.json"))
     parser.add_argument("--mpi-child", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--expect-default",
+        action="store_true",
+        help="require micro-Clang selection with FENICS_JIT_COMPILER unset",
+    )
     args = parser.parse_args()
 
     bundle = _bundle_root()
@@ -455,7 +460,13 @@ def main() -> int:
     configured_root = Path(os.environ.get("FENICS_JIT_ROOT", "")).resolve()
     if configured_root != jit_root.resolve():
         raise RuntimeError(f"FENICS_JIT_ROOT mismatch: {configured_root} != {jit_root}")
-    if os.environ.get("FENICS_JIT_COMPILER") != "micro-clang":
+    configured_backend = os.environ.get("FENICS_JIT_COMPILER")
+    if args.expect_default:
+        if configured_backend not in (None, ""):
+            raise RuntimeError(
+                "default standalone proof requires FENICS_JIT_COMPILER to be unset"
+            )
+    elif configured_backend != "micro-clang":
         raise RuntimeError("standalone proof requires FENICS_JIT_COMPILER=micro-clang")
 
     python_headers = bundle / "include"

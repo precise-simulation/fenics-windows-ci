@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** complete — Phases 0-6 are qualified. Phase 6 selects **Option D: micro-Clang default candidate**; LLVM-MinGW remains the actual default pending a separate dependency/default-switch change.
+**Status:** Phases 0-6 remain qualified at `b632e35d3114c0787393cfdd04c637bde79897a6`. A post-qualification **Phase 4 Stage 6 ThinLTO minimization experiment is in progress**; LLVM-MinGW remains the actual default pending a separate dependency/default-switch change.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -451,6 +451,37 @@ gate. The release classification is **Option D: default candidate**. This is a
 qualification result only: LLVM-MinGW remains the normal dependency and selector
 default, and no normal-install footprint reduction is claimed until a separate
 package/default-switch change is qualified.
+
+
+## Phase 4 stage 6 ThinLTO minimization experiment
+
+Stage 6 is a post-qualification minimization experiment and does not invalidate
+the already-qualified Stage-5 / Phase-6 implementation.
+
+The experiment holds the qualified compiler/sysroot policy constant and changes
+only the host compiler build:
+
+- same pinned LLVM 23.1 / llvm-mingw / mingw-w64 source identities;
+- same X86-only target set;
+- same MinSizeRel host profile;
+- same shared `libLLVM` and no `libclang-cpp` policy;
+- add upstream llvm-mingw `--thinlto` / `LLVM_ENABLE_LTO=thin`;
+- retain Stage-4 `llvm-strip --strip-all`;
+- reapply the exact qualified Stage-AW, Stage-3 closure-driven sysroot and
+  Stage-5 resource-header reductions.
+
+Dedicated workflow `micro-clang-phase4-stage6-thinlto` first compares the
+complete package against the qualified **107.8796 MiB** Stage-5 parent. If the
+candidate is not smaller, the expensive Python 3.12-3.14 private matrix is
+skipped and Stage 5 remains authoritative. If it is smaller, the workflow
+requires clean reconstruction, relocation smoke, ABI/driver/PE/hermeticity and
+the complete private broad qualification on Python 3.12-3.14.
+
+A Stage-6 package does not replace the currently qualified backend merely by
+being smaller. Adoption requires the private matrix to pass and, before it can
+replace the released/default-candidate payload, downstream shared-runtime,
+paired-performance and standalone/MPI qualification must be repeated with the
+new package identity.
 
 
 ## Gates before further implementation

@@ -234,7 +234,7 @@ outputs:
         - if: win
           then:
             - fenics-jit-runtime ==0.1.0
-            - fenics-jit-llvm-mingw ==20260826
+            - fenics-jit-micro-clang ==20260826
             # CFFI on Python 3.12+ uses setuptools' vendored distutils backend.
             - setuptools
           else:

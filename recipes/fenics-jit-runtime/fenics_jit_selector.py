@@ -21,7 +21,7 @@ _BACKEND_REGISTRY = {
     "micro-clang": ("metadata.json", "micro-Clang", "micro_clang_runtime.py", "_fenics_jit_micro_clang_runtime"),
 }
 _ALLOWED_BACKENDS = tuple(_BACKEND_REGISTRY)
-_DEFAULT_BACKEND = "llvm-mingw"
+_DEFAULT_BACKEND = "micro-clang"
 _CACHE_SCHEMA = "fenics-jit-cache-v1"
 _REMOVED_ENV = {
     "CC", "CXX", "CPP", "LD", "LDSHARED",
@@ -299,8 +299,8 @@ class _SelfTestLock:
 def _self_test() -> None:
     global _ACTIVATION_LOCK
 
-    assert normalize_backend(None) == "llvm-mingw"
-    assert normalize_backend("") == "llvm-mingw"
+    assert normalize_backend(None) == "micro-clang"
+    assert normalize_backend("") == "micro-clang"
     assert normalize_backend(" LLVM-MinGW ") == "llvm-mingw"
     assert normalize_backend("tinycc") == "tinycc"
     assert normalize_backend("micro-clang") == "micro-clang"

@@ -119,20 +119,24 @@ def _validate_package_ownership() -> dict[str, object]:
     repo_root = Path(__file__).resolve().parents[2]
     dolfinx_recipe = repo_root / "recipes" / "dolfinx" / "recipe.yaml"
     recipe_text = dolfinx_recipe.read_text(encoding="utf-8")
-    if "fenics-jit-llvm-mingw ==20260826" not in recipe_text:
+    if "fenics-jit-micro-clang ==20260826" not in recipe_text:
         raise RuntimeError(
-            "repository Windows fenics-dolfinx recipe no longer declares the "
-            "LLVM-MinGW default backend dependency"
+            "repository Windows fenics-dolfinx recipe does not declare the "
+            "micro-Clang default backend dependency"
         )
+    if "fenics-jit-micro-clang" not in dolfinx_deps:
+        raise RuntimeError("installed fenics-dolfinx does not depend on micro-Clang")
+    if "fenics-jit-llvm-mingw" in dolfinx_deps:
+        raise RuntimeError("installed fenics-dolfinx still depends on LLVM-MinGW")
 
     return {
         "status": "pass",
         "file_counts": {name: len(files[name]) for name in PACKAGES},
         "dependencies": {name: sorted(deps[name]) for name in PACKAGES},
         "pairwise_overlap": {},
-        "dolfinx_recipe_backend_dependency": "fenics-jit-llvm-mingw ==20260826",
+        "dolfinx_recipe_backend_dependency": "fenics-jit-micro-clang ==20260826",
         "installed_dolfinx_dependencies": sorted(dolfinx_deps),
-        "normal_install_footprint_reduction_claimed": False,
+        "normal_install_footprint_reduction_claimed": True,
     }
 
 
@@ -207,8 +211,8 @@ def main() -> int:
 
     with _selector_value(None):
         default = selector.discover_runtime()
-    if default.selected_backend != "llvm-mingw":
-        raise RuntimeError(f"default backend changed unexpectedly: {default.selected_backend}")
+    if default.selected_backend != "micro-clang":
+        raise RuntimeError(f"default backend is not micro-clang: {default.selected_backend}")
 
     unavailable = {
         name: _validate_unavailable_no_fallback(selector, name)

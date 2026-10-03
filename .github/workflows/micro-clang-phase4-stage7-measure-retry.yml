@@ -1,9 +1,6 @@
 name: micro-clang-phase4-stage7-measure-retry
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/micro-clang-phase4-stage7-measure-retry.yml"
   workflow_dispatch:
 
 permissions:

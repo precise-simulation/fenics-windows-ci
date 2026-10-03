@@ -40,3 +40,30 @@ or standalone/MPI qualification unless the measured Full-LTO result shows a
 material additional size reduction that justifies adoption work.
 
 The strong <=81.2 MiB and stretch <=54.1 MiB objectives remain aspirational.
+
+
+## Qualification result
+
+Stage 7 is complete and qualified.
+
+- Full-LTO source build: run `37093105472`, passed.
+- Focused measurement retry: run `37100266040`, passed.
+- Complete pre-conda backend: **103.8251 MiB**.
+- Reduction versus qualified ThinLTO: **2.3765 MiB / 2.2377%**.
+- Conda package: **103.98 MiB installed / 30.41 MiB compressed**.
+- Paired installed backend: **103.8560 MiB**.
+- Python 3.12-3.14 shared-runtime integration: passed.
+- Paired three-backend performance: passed.
+- Micro-Clang-only serial/MPI Nuitka standalone qualification: passed in
+  downstream run `37100978194`.
+- Standalone incremental micro-Clang payload: **103.8633 MiB**.
+
+The strong <=81.2 MiB target remains unmet. Full LTO nevertheless provides a
+larger incremental reduction than ThinLTO without a measured generated-code or
+runtime-quality regression, so Full LTO supersedes ThinLTO as the preferred
+qualified micro-Clang build profile.
+
+The cost is source-build time: the observed Full-LTO host build was about
+67m20s versus about 49m14s for ThinLTO. Completed Stage-7 experiment workflows
+are therefore retained as manual reproducibility workflows rather than normal
+pull-request checks.

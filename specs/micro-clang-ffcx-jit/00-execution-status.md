@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** complete — Phases 0-6 and post-qualification **Phase 4 Stage 6 ThinLTO** are qualified. Stage 6 is the preferred micro-Clang payload; LLVM-MinGW remains the actual default pending a separate dependency/default-switch change.
+**Status:** complete — Phases 0-6 plus post-qualification **Phase 4 Stage 6 ThinLTO** and **Stage 7 Full LTO** are qualified. Stage 7 Full LTO is the preferred micro-Clang payload; LLVM-MinGW remains the actual default pending a separate dependency/default-switch change.
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -506,10 +506,68 @@ ThinLTO changes only how the host compiler is built. Generated FFCx target-code
 flags remain unchanged, and measured generated-code performance remains
 LLVM-class. Stage 6 is therefore the preferred qualified micro-Clang payload.
 
+## Phase 4 stage 7 Full-LTO qualification evidence
+
+Stage 7 is qualified and supersedes Stage 6 ThinLTO as the preferred
+micro-Clang payload. ThinLTO remains retained as the historical LTO control.
+
+The pinned source build run `37093105472` at head
+`5e6bd7fdf23b2c36fd3a6426039f5348035c7cb3` successfully built the
+MinSizeRel/X86-only/shared-`libLLVM` host toolchain with llvm-mingw
+`--lto` / `LLVM_ENABLE_LTO=full`. The Full-LTO host build took about
+67m20s versus about 49m14s for ThinLTO, so the size reduction has a measurable
+CI build-cost tradeoff.
+
+Focused measurement retry `micro-clang-phase4-stage7-measure-retry` #1
+(run `37100266040`) reused that successful host-build artifact, repaired the
+missing build-evidence handoff in the initial measurement workflow, and passed
+the unchanged Stage-AW, Stage-3 and Stage-5 pruning plus relocation/package
+smoke. The complete pre-conda backend measured **103.8251 MiB**, removing
+**2.3765 MiB / 2.2377%** versus the qualified 106.2016 MiB ThinLTO parent.
+
+Current-head downstream workflow `micro-clang-phase4-stage7-downstream` #2
+(run `37100978194`) at head
+`dbcc097f2a1084d89b92b280c96d98dc5a7f8a9d` cleared every adoption gate:
+
+- conda package: **103.98 MiB installed / 30.41 MiB compressed**;
+- installed backend in paired comparison: **103.8560 MiB**;
+- selector/ownership/cache-isolation/switching/concurrency passed on Python
+  3.12, 3.13 and 3.14;
+- paired same-run performance against LLVM-MinGW passed on all supported Python
+  versions;
+- micro-Clang-only Nuitka serial and two-rank MPI standalone qualification
+  passed with the original prefix hidden and both other compiler backends
+  absent.
+
+Paired Stage-7 micro-Clang / LLVM-MinGW ratios were:
+
+| Python | assembly aggregate median | worst representative form | worst cold JIT | end-to-end Poisson |
+| --- | ---: | ---: | ---: | ---: |
+| 3.12 | 1.0007x | 1.0049x | 1.1396x | 1.0044x |
+| 3.13 | 1.0017x | 1.0080x | 1.1189x | 1.0123x |
+| 3.14 | 1.0002x | 1.0025x | 1.0786x | 1.0063x |
+
+The Stage-7 standalone distribution measured **307,924,966 bytes /
+293.6601 MiB** total. Common runtime + micro-Clang measured **108,957,186
+bytes / 103.9097 MiB**, and the micro-Clang incremental payload measured
+**108,908,574 bytes / 103.8633 MiB**. The serial proof produced four generated
+FFCx modules, captured eight micro-Clang compiler/linker commands, and retained
+the Poisson solution norm `0.4922541639224417`. The two-rank MPI proof again
+passed compile ownership/cache sharing.
+
+The Stage-7 downstream evidence artifact is
+`micro-clang-phase4-stage7-downstream`, artifact `11266342583`, digest
+`sha256:22a732813801ac6bd9753a7d1952e38420c1e18ba1d7f6ee016c2e487bcbe984`.
+
+The <=81.2 MiB strong target remains unmet. Full LTO nevertheless provides a
+further reproducible size reduction with no measured runtime-quality regression
+and is therefore the preferred qualified micro-Clang build profile.
+
 ## Gates before further implementation
 
-All Phase 0-6 gates in this epic are complete. No further implementation is
-required for micro-Clang qualification itself.
+All Phase 0-6 gates and the post-qualification Stage-6/Stage-7 minimization
+gates are complete. No further implementation is required for micro-Clang
+qualification itself.
 
 A normal-install dependency/default switch is intentionally outside this epic.
 Such a change must be proposed separately, must remove or replace the current

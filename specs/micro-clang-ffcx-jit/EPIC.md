@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** complete — Phase 6 selects **Option D: micro-Clang default candidate**; post-qualification Stage 6 ThinLTO is the preferred qualified payload. See [06-qualification-result.md](06-qualification-result.md).
+**Status:** complete — Phase 6 selects **Option D: micro-Clang default candidate**; post-qualification Stage 7 Full LTO is the preferred qualified payload. See [06-qualification-result.md](06-qualification-result.md).
 
 The experiment qualified a purpose-built minimal Clang/LLD toolchain as a third Windows FFCx/CFFI JIT backend between the qualified TinyCC and LLVM-MinGW options. The qualified micro-Clang package is roughly half the installed size of the immutable LLVM-MinGW reference while retaining LLVM-class generated-code performance.
 
@@ -417,10 +417,10 @@ The final candidate must perform fresh JIT from the actual standalone/Nuitka lay
 
 micro-Clang passed the ordered Phase 0-6 gates using the same LLVM/Clang/LLD and mingw-w64 source identities as the immutable Stage-AW LLVM-MinGW reference:
 
-- the preferred Stage-6 ThinLTO conda package is **106.35 MiB installed / 30.67 MiB compressed**, versus **216.43 MiB installed / 51.34 MiB compressed** for Stage AW;
-- the package-owned Stage-6 backend measured **106.2326 MiB** in the paired-comparison environment;
+- the preferred Stage-7 Full-LTO conda package is **103.98 MiB installed / 30.41 MiB compressed**, versus **216.43 MiB installed / 51.34 MiB compressed** for Stage AW;
+- the package-owned Stage-7 backend measured **103.8560 MiB** in the paired-comparison environment;
 - the initial <=108.2 MiB continuation gate is satisfied, although the aspirational <=81.2 MiB strong target and <=54.1 MiB stretch target are not;
-- paired same-run Stage-6 Python 3.12-3.14 benchmarks retain LLVM-class generated-code performance, with assembly aggregate medians **0.9942x-1.0054x**, worst representative form **1.0169x**, and worst cold-JIT ratio **1.1602x** versus LLVM-MinGW;
+- paired same-run Stage-7 Python 3.12-3.14 benchmarks retain LLVM-class generated-code performance, with assembly aggregate medians **1.0002x-1.0017x**, worst representative form **1.0080x**, and worst cold-JIT ratio **1.1396x** versus LLVM-MinGW;
 - numerical and end-to-end Poisson results remain equivalent within the qualified gates;
 - the shared selector explicitly supports llvm-mingw, tinycc, and micro-clang with isolated cache namespaces and no silent fallback;
 - the micro-Clang-only Nuitka bundle passes fresh serial JIT, cache reuse, representative forms, PE/ABI/hermeticity inspection, and the two-rank MPI ownership proof with the original build prefix inaccessible and both other compiler backends absent.

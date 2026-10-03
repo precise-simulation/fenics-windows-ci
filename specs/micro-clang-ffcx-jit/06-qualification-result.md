@@ -10,6 +10,9 @@ This decision qualifies micro-Clang technically for a future default switch. It 
 - base Phase-6 implementation head: `b632e35d3114c0787393cfdd04c637bde79897a6`.
 - preferred Stage-6 ThinLTO payload source head: `cce65aafa0bf8a63bcd717eee25a01af910ea0a4`.
 - Stage-6 downstream qualification head: `c4e0e4cb47d2cb983ca3eed313fa2ff8cac54b7b`.
+- preferred Stage-7 Full-LTO source-build head: `5e6bd7fdf23b2c36fd3a6426039f5348035c7cb3`.
+- Stage-7 focused measurement head: `52a3da9bfc999492d2cfb3fac6aaece446cbe638`.
+- preferred Stage-7 downstream qualification head: `dbcc097f2a1084d89b92b280c96d98dc5a7f8a9d`.
 - full Phase-6 workflow: `micro-clang-phase6` #8, run `37078092998`, successful.
 - focused standalone confirmation: `micro-clang-phase6-standalone-retry` #3, run `37078092955`, successful.
 - focused evidence artifact: `micro-clang-phase6-standalone-retry`, artifact `11257857090`.
@@ -26,26 +29,26 @@ The qualified micro-Clang package is materially smaller than Stage-AW LLVM-MinGW
 
 | Measurement | micro-Clang | Stage-AW LLVM-MinGW |
 | --- | ---: | ---: |
-| package-owned backend in paired comparison | 106.2326 MiB | reference backend |
-| conda installed package contents | 106.35 MiB | 216.43 MiB |
-| compressed conda package | 30.67 MiB | 51.34 MiB |
-| standalone incremental micro-Clang payload | 111,400,550 bytes / 106.2398 MiB | not redefined here |
+| package-owned backend in paired comparison | 103.8560 MiB | reference backend |
+| conda installed package contents | 103.98 MiB | 216.43 MiB |
+| compressed conda package | 30.41 MiB | 51.34 MiB |
+| standalone incremental micro-Clang payload | 108,908,574 bytes / 103.8633 MiB | not redefined here |
 
 The mandatory early continuation gate (<=108.2 MiB) passes. The aspirational <=81.2 MiB strong-middle target and <=54.1 MiB stretch target are not reached.
 
-The preferred Stage-6 standalone distribution is 310,416,942 bytes total. Common runtime + micro-Clang is 111,449,162 bytes; the micro-Clang incremental payload is 111,400,550 bytes / 106.2398 MiB; staged development headers contribute 1,274,080 bytes.
+The preferred Stage-7 standalone distribution is 307,924,966 bytes / 293.6601 MiB total. Common runtime + micro-Clang is 108,957,186 bytes / 103.9097 MiB; the micro-Clang incremental payload is 108,908,574 bytes / 103.8633 MiB.
 
 ## Generated-code and JIT performance
 
-Dedicated paired same-run comparison run `36875583148` measured all three backends in the same runner/interpreter environment with alternating backend order.
+Stage-7 downstream run `37100978194` measured all three backends in the same runner/interpreter environment with alternating backend order.
 
 micro-Clang versus freshly measured LLVM-MinGW:
 
 | Python | assembly aggregate median | worst representative form | worst cold JIT | end-to-end Poisson |
 | --- | ---: | ---: | ---: | ---: |
-| 3.12 | 0.9975x | 1.0074x | 1.1602x | 0.9970x |
-| 3.13 | 0.9942x | 1.0003x | 1.1534x | 1.0150x |
-| 3.14 | 1.0054x | 1.0169x | 1.1096x | 1.0015x |
+| 3.12 | 1.0007x | 1.0049x | 1.1396x | 1.0044x |
+| 3.13 | 1.0017x | 1.0080x | 1.1189x | 1.0123x |
+| 3.14 | 1.0002x | 1.0025x | 1.0786x | 1.0063x |
 
 All supported versions satisfy the EPIC limits: assembly aggregate median <=1.10x, representative cases <=1.20x, cold JIT <=1.25x, numerical equivalence, and no material end-to-end PETSc regression.
 
@@ -104,10 +107,42 @@ the shared-runtime integration matrix, paired three-backend benchmark and
 micro-Clang-only serial/MPI Nuitka standalone gate. The conda package is
 **106.35 MiB installed / 30.67 MiB compressed**.
 
-ThinLTO therefore becomes part of the preferred qualified micro-Clang build
-profile. The reduction is modest and the <=81.2 MiB aspirational target remains
-unmet, but there is no measured runtime-quality regression and no change to
-generated FFCx target-code policy.
+ThinLTO became the preferred qualified micro-Clang build profile at Stage 6.
+It is retained as the historical LTO control; Stage 7 Full LTO subsequently
+qualified a smaller payload without changing generated FFCx target-code policy.
+
+## Post-qualification Stage 7 Full LTO
+
+Stage 7 changed only the host compiler build from llvm-mingw `--thinlto` to
+`--lto` / `LLVM_ENABLE_LTO=full`, while retaining the same pinned sources,
+X86-only MinSizeRel/shared-`libLLVM` structure, strip policy, qualified target
+sysroot/resource pruning and generated FFCx `-O2` policy.
+
+Source build run `37093105472` passed. Focused measurement run
+`37100266040` produced a **103.8251 MiB** complete backend, **2.3765 MiB /
+2.2377%** smaller than the qualified ThinLTO parent. Full LTO increased the host
+build time to about **67m20s**, so this reduction trades CI build cost for a
+smaller shipped runtime.
+
+Current-head downstream run `37100978194` passed Python 3.12-3.14
+shared-runtime integration, paired three-backend performance and the
+micro-Clang-only serial/MPI Nuitka standalone gate. The final conda package is
+**103.98 MiB installed / 30.41 MiB compressed**, and the paired installed
+backend is **103.8560 MiB**.
+
+The standalone distribution is **307,924,966 bytes / 293.6601 MiB** total;
+common runtime + micro-Clang is **108,957,186 bytes / 103.9097 MiB**, and the
+micro-Clang incremental payload is **108,908,574 bytes / 103.8633 MiB**.
+Serial fresh/cache JIT and representative forms passed, with four generated
+modules, eight captured compiler/linker commands and Poisson solution norm
+`0.4922541639224417`. The two-rank MPI ownership proof also passed.
+
+Stage-7 evidence artifact `11266342583`
+(`micro-clang-phase4-stage7-downstream`) has digest
+`sha256:22a732813801ac6bd9753a7d1952e38420c1e18ba1d7f6ee016c2e487bcbe984`.
+
+Full LTO is therefore the preferred qualified micro-Clang build profile. The
+<=81.2 MiB aspirational target remains unmet.
 
 ## Release decision
 

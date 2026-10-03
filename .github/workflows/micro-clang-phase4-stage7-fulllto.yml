@@ -1,16 +1,6 @@
 name: micro-clang-phase4-stage7-fulllto
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/micro-clang-phase4-stage7-fulllto.yml"
-      - "scripts/micro-clang-jit/build-source-toolchain.sh"
-      - "scripts/micro-clang-jit/apply-stageaw-pruning.ps1"
-      - "scripts/micro-clang-jit/phase4-stage3-prune.py"
-      - "scripts/micro-clang-jit/phase4-stage5-prune-resource-headers.py"
-      - "scripts/micro-clang-jit/package-phase2.ps1"
-      - "scripts/micro-clang-jit/phase2-package-smoke.py"
-      - "specs/micro-clang-ffcx-jit/phase4-stage7-plan.md"
   workflow_dispatch:
 
 permissions:
@@ -94,6 +84,12 @@ jobs:
         with:
           name: micro-clang-phase4-stage7-fulllto-raw
           path: stage7-raw
+
+      - name: Download Stage-7 build evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: micro-clang-phase4-stage7-build-evidence
+          path: micro-clang-phase4-stage7-build-evidence
 
       - name: Download qualified ThinLTO Stage-6 parent
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

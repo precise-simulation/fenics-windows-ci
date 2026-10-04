@@ -64,13 +64,23 @@ jobs:
           New-Item -ItemType Directory -Force channel-test-lists | Out-Null
           micromamba list -n channel-test --explicit > channel-test-lists/explicit.txt
           micromamba list -n channel-test           > channel-test-lists/list.txt
+          micromamba list -n channel-test --json    > channel-test-lists/list.json
           Get-Content channel-test-lists/list.txt
+
+      # Uploaded before assertions/tests run, so the exact selection is
+      # retained even if public-channel expectations fail.
+      - name: Upload selected package lists
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: channel-smoke-py${{ matrix.python }}
+          path: channel-test-lists/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Assert public default JIT package selection
         shell: pwsh
         run: |
-          $packages = @(micromamba list -n channel-test --json | ConvertFrom-Json)
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packages = @(Get-Content channel-test-lists/list.json -Raw | ConvertFrom-Json)
           $names = @($packages | ForEach-Object { [string]$_.name })
 
           foreach ($required in @("fenics-jit-runtime", "fenics-jit-micro-clang")) {
@@ -83,16 +93,6 @@ jobs:
               throw "non-default JIT backend unexpectedly installed by public solve: $forbidden"
             }
           }
-
-      # Uploaded before the tests run, so the exact selection is retained
-      # even when a later step fails.
-      - name: Upload selected package lists
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: channel-smoke-py${{ matrix.python }}
-          path: channel-test-lists/
-          if-no-files-found: error
-          retention-days: 14
 
       - name: Put test environment on PATH
         shell: pwsh

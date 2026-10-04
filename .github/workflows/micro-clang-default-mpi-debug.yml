@@ -1,0 +1,69 @@
+name: micro-clang-default-mpi-debug
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/micro-clang-default-mpi-debug.yml"
+      - "scripts/micro-clang-jit/default-mpi-proof.py"
+      - "recipes/fenics-jit-runtime/fenics_jit_selector.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: micro-clang-default-mpi-debug-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  reproduce:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install published FEniCS environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: default-mpi-debug
+          create-args: >-
+            -c precise-simulation
+            -c conda-forge
+            python=3.12
+            libblas=*=*openblas
+            fenics-dolfinx
+            fenics-jit-micro-clang=20260826=h9490d1a_1
+
+      - name: Overlay current selector and run two-rank default proof
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/default-mpi-debug"
+          $selectorTarget = Join-Path $prefix "Library/fenics-jit/runtime/fenics_jit_selector.py"
+          Copy-Item -Force "recipes/fenics-jit-runtime/fenics_jit_selector.py" $selectorTarget
+
+          Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
+          $python = Join-Path $prefix "python.exe"
+          $mpiexec = Get-ChildItem $prefix -Recurse -Filter mpiexec.exe -File | Select-Object -First 1
+          if (-not $mpiexec) { throw "mpiexec.exe not found" }
+
+          $mpiPath = @(
+            $prefix,
+            (Join-Path $prefix "Scripts"),
+            (Join-Path $prefix "Library/bin"),
+            "$env:SystemRoot/System32",
+            $env:SystemRoot
+          ) -join ";"
+          $pythonPath = Join-Path $prefix "Lib/site-packages"
+          $cache = Join-Path $env:RUNNER_TEMP "default mpi debug cache with spaces"
+
+          $mpiArgs = @(
+            "-localonly", "-n", "2",
+            "-env", "PATH", $mpiPath,
+            "-env", "PYTHONPATH", $pythonPath,
+            "-env", "FENICS_JIT_VERBOSE", "1",
+            $python,
+            "scripts/micro-clang-jit/default-mpi-proof.py",
+            $cache
+          )
+          & $mpiexec.FullName @mpiArgs
+          if ($LASTEXITCODE -ne 0) { throw "focused default MPI reproducer failed" }

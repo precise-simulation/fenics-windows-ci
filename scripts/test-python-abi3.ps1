@@ -92,12 +92,12 @@ foreach ($pythonVersion in $pythonVersions) {
             if ($LASTEXITCODE -ne 0) {
                 throw "Could not inspect Phase 4 consumer environment"
             }
-            foreach ($required in @("fenics-jit-llvm-mingw", "cffi", "setuptools")) {
+            foreach ($required in @("fenics-jit-runtime", "fenics-jit-micro-clang", "cffi", "setuptools")) {
                 if ($packageList -notmatch "(?m)^\s*$([regex]::Escape($required))\s") {
                     throw "Phase 4 runtime environment is missing required package: $required"
                 }
             }
-            foreach ($forbidden in @("vs2022_win-64", "vswhere")) {
+            foreach ($forbidden in @("fenics-jit-llvm-mingw", "fenics-jit-tinycc", "vs2022_win-64", "vswhere")) {
                 if ($packageList -match "(?m)^\s*$([regex]::Escape($forbidden))\s") {
                     throw "Phase 4 runtime environment still contains compiler activation package: $forbidden"
                 }
@@ -127,27 +127,83 @@ foreach ($pythonVersion in $pythonVersions) {
 
             $savedXdgCache = $env:XDG_CACHE_HOME
             $savedJitVerbose = $env:FENICS_JIT_VERBOSE
+            $hadCompiler = Test-Path Env:FENICS_JIT_COMPILER
+            $savedCompiler = $env:FENICS_JIT_COMPILER
             try {
+                Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
                 $env:XDG_CACHE_HOME = $jitCache
                 $env:FENICS_JIT_VERBOSE = "1"
+                $jitStopwatch = [Diagnostics.Stopwatch]::StartNew()
                 & micromamba run -n $envName python (Join-Path $root "scripts/test-poisson.py") 2>&1 |
                     Tee-Object -FilePath $jitLog
                 if ($LASTEXITCODE -ne 0) {
                     throw "Phase 4 fresh Poisson JIT failed on Python $pythonVersion"
                 }
+                $jitStopwatch.Stop()
+                if ($jitStopwatch.Elapsed.TotalSeconds -gt 20.0) {
+                    throw "Default micro-Clang Poisson JIT sanity bound exceeded on Python ${pythonVersion}: $($jitStopwatch.Elapsed.TotalSeconds)s"
+                }
             }
             finally {
                 $env:XDG_CACHE_HOME = $savedXdgCache
                 $env:FENICS_JIT_VERBOSE = $savedJitVerbose
+                if ($hadCompiler) {
+                    $env:FENICS_JIT_COMPILER = $savedCompiler
+                } else {
+                    Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
+                }
             }
 
             $jitText = Get-Content $jitLog -Raw
-            if ($jitText -notmatch "FFCx JIT compiler:\s+LLVM-MinGW") {
-                throw "Direct DOLFINx JIT did not report automatic LLVM-MinGW helper activation"
+            if ($jitText -notmatch "FEniCS JIT backend:\s+micro-clang") {
+                throw "Direct DOLFINx JIT did not report automatic micro-Clang default activation"
             }
             $jitModules = @(Get-ChildItem (Join-Path $jitCache "fenics") -Filter "*.pyd" -File -Recurse -ErrorAction SilentlyContinue)
             if ($jitModules.Count -eq 0) {
                 throw "Phase 4 fresh Poisson solve produced no JIT modules"
+            }
+
+            # Prove the same implicit default under two-rank MPI. Rank 0 must
+            # compile while rank 1 consumes the shared cache.
+            $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs\$envName"
+            $python = Join-Path $prefix "python.exe"
+            $mpiexec = Get-ChildItem $prefix -Recurse -Filter mpiexec.exe -File -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if (-not $mpiexec) {
+                throw "mpiexec.exe not found in default micro-Clang environment"
+            }
+            $mpiCache = Join-Path $logOutput "phase4-mpi-$modeTag-cache"
+            $mpiLog = Join-Path $logOutput "phase4-mpi-$modeTag.txt"
+            Remove-Item -Recurse -Force $mpiCache -ErrorAction SilentlyContinue
+
+            $hadMpiCompiler = Test-Path Env:FENICS_JIT_COMPILER
+            $savedMpiCompiler = $env:FENICS_JIT_COMPILER
+            try {
+                Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
+                $mpiPath = @(
+                    $prefix,
+                    (Join-Path $prefix "Scripts"),
+                    (Join-Path $prefix "Library\bin"),
+                    "$env:SystemRoot\System32",
+                    $env:SystemRoot
+                ) -join ";"
+                $pythonPath = Join-Path $prefix "Lib\site-packages"
+                & $mpiexec.FullName -localonly -n 2 `
+                    -env PATH $mpiPath `
+                    -env PYTHONPATH $pythonPath `
+                    -env FENICS_JIT_VERBOSE 1 `
+                    $python (Join-Path $root "scripts/micro-clang-jit/default-mpi-proof.py") $mpiCache 2>&1 |
+                    Tee-Object -FilePath $mpiLog
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Default micro-Clang MPI proof failed on Python $pythonVersion"
+                }
+            }
+            finally {
+                if ($hadMpiCompiler) {
+                    $env:FENICS_JIT_COMPILER = $savedMpiCompiler
+                } else {
+                    Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
+                }
             }
         }
     }

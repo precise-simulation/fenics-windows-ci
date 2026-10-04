@@ -152,7 +152,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     try:
-        raise SystemExit(main())
+        exit_code = main()
     except BaseException:
         traceback.print_exc()
         sys.stderr.flush()
@@ -163,3 +163,4 @@ if __name__ == "__main__":
             finally:
                 os._exit(1)
         raise
+    raise SystemExit(exit_code)

@@ -92,8 +92,28 @@ def main() -> int:
         + beta * u * v * ufl.ds
     )
 
-    with record_commands() as calls:
-        ffcx_jit(comm, form, jit_options={"cache_dir": cache, "cffi_verbose": True})
+    calls = []
+    try:
+        with record_commands() as calls:
+            ffcx_jit(comm, form, jit_options={"cache_dir": cache, "cffi_verbose": True})
+    except BaseException:
+        print(
+            json.dumps(
+                {
+                    "rank": comm.rank,
+                    "compile_commands_before_failure": calls,
+                    "cc_after_failure": os.environ.get("CC"),
+                    "cxx_after_failure": os.environ.get("CXX"),
+                    "ld_after_failure": os.environ.get("LD"),
+                    "path_after_failure": os.environ.get("PATH"),
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        raise
 
     rendered = "\n".join(calls).lower()
     if comm.rank == 0:

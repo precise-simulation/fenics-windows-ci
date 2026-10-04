@@ -76,8 +76,13 @@ def main() -> None:
     if args.json:
         print(json.dumps(record, indent=2, sort_keys=True))
     else:
+        backend_name = Path(str(record["toolchain_root"])).name
+        backend_label = {
+            "micro-clang": "micro-Clang",
+            "llvm-mingw": "LLVM-MinGW",
+        }.get(backend_name, backend_name)
         print(
-            f"LLVM-MinGW / {record['clang_version']} / {config.backend} / "
+            f"{backend_label} / {record['clang_version']} / {config.backend} / "
             f"{record['clang_reported_target']} / {config.crt}"
         )
         print(f"Python: {config.python_include} / {config.python_dll.name}")

@@ -52,6 +52,16 @@ def _load_fenics_windows_jit_runtime():
     )
     helper_path = root / "runtime" / "fenics_jit_selector.py"
     if not helper_path.is_file():
+        # Backend activation in older qualified runtime packages may temporarily
+        # expose FENICS_JIT_ROOT as <jit>/backends/<name>. Recover the shared
+        # runtime root for nested DOLFINx JIT calls without changing selection.
+        if root.parent.name == "backends":
+            shared_root = root.parent.parent
+            shared_helper = shared_root / "runtime" / "fenics_jit_selector.py"
+            if shared_helper.is_file():
+                root = shared_root
+                helper_path = shared_helper
+    if not helper_path.is_file():
         raise RuntimeError(
             "FEniCS Windows JIT shared runtime is missing. Expected "
             f"{helper_path}; install fenics-jit-runtime."

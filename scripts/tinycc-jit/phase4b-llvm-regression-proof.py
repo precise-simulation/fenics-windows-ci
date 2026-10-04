@@ -1,4 +1,4 @@
-"""Default-vs-explicit LLVM-MinGW regression qualification for TinyCC Phase 4B."""
+"""Explicit LLVM-MinGW regression qualification for TinyCC after the default switch."""
 
 from __future__ import annotations
 
@@ -121,73 +121,72 @@ def main() -> int:
     selector = load_shared_selector()
 
     with selector_value(None):
-        default_runtime = selector.discover_runtime()
-    if default_runtime.selected_backend != "llvm-mingw":
+        default_backend = selector.selected_backend_name()
+    if default_backend != "micro-clang":
         raise RuntimeError(
-            "unset FENICS_JIT_COMPILER did not select LLVM-MinGW: "
-            f"{default_runtime.selected_backend!r}"
+            "unset FENICS_JIT_COMPILER did not select micro-Clang: "
+            f"{default_backend!r}"
         )
 
-    with selector_value("llvm-mingw"):
-        explicit_runtime = selector.discover_runtime()
+    # This TinyCC regression environment intentionally installs only TinyCC and
+    # LLVM-MinGW. After the production default switch, an unset selector must
+    # therefore fail clearly rather than silently falling back to LLVM-MinGW.
+    with selector_value(None):
+        try:
+            selector.discover_runtime()
+        except RuntimeError as exc:
+            missing_default_error = str(exc)
+            if "micro-clang" not in missing_default_error or "unavailable" not in missing_default_error:
+                raise
+        else:
+            raise RuntimeError(
+                "TinyCC/LLVM-MinGW regression environment unexpectedly provides "
+                "the default micro-Clang backend"
+            )
 
-    if explicit_runtime.selected_backend != "llvm-mingw":
+    with selector_value("llvm-mingw"):
+        shared_runtime = selector.discover_runtime()
+
+    if shared_runtime.selected_backend != "llvm-mingw":
         raise RuntimeError(
             "explicit FENICS_JIT_COMPILER=llvm-mingw did not select LLVM-MinGW"
         )
-    if explicit_runtime.backend_cache_id != default_runtime.backend_cache_id:
-        raise RuntimeError(
-            "default and explicit LLVM-MinGW cache identities differ: "
-            f"default={default_runtime.backend_cache_id}, "
-            f"explicit={explicit_runtime.backend_cache_id}"
-        )
-    if explicit_runtime.backend_root.resolve() != default_runtime.backend_root.resolve():
-        raise RuntimeError(
-            "default and explicit LLVM-MinGW backend roots differ: "
-            f"default={default_runtime.backend_root}, explicit={explicit_runtime.backend_root}"
-        )
 
     base_cache = work / "cache"
-    default_cache = default_runtime.cache_root(base_cache)
-    explicit_cache = explicit_runtime.cache_root(base_cache)
-    if explicit_cache != default_cache:
-        raise RuntimeError(
-            "default and explicit LLVM-MinGW physical cache roots differ: "
-            f"default={default_cache}, explicit={explicit_cache}"
-        )
+    shared_cache = shared_runtime.cache_root(base_cache)
 
-    default_value = compile_form_with_shared(
-        default_runtime,
-        default_cache,
-        work / "diag-default",
-    )
-    assert_value("default shared LLVM-MinGW", default_value)
-    default_modules = pyd_snapshot(default_cache)
-    if not default_modules:
-        raise RuntimeError("default shared LLVM-MinGW JIT did not produce a cached .pyd")
-
-    explicit_value = compile_form_with_shared(
-        explicit_runtime,
-        explicit_cache,
+    shared_value = compile_form_with_shared(
+        shared_runtime,
+        shared_cache,
         work / "diag-explicit",
     )
-    assert_value("explicit shared LLVM-MinGW", explicit_value)
-    explicit_modules = pyd_snapshot(explicit_cache)
-    if explicit_modules != default_modules:
+    assert_value("explicit shared LLVM-MinGW", shared_value)
+    shared_modules = pyd_snapshot(shared_cache)
+    if not shared_modules:
+        raise RuntimeError("explicit shared LLVM-MinGW JIT did not produce a cached .pyd")
+
+    reuse_value = compile_form_with_shared(
+        shared_runtime,
+        shared_cache,
+        work / "diag-reuse",
+    )
+    assert_value("reused shared LLVM-MinGW", reuse_value)
+    reused_modules = pyd_snapshot(shared_cache)
+    if reused_modules != shared_modules:
         raise RuntimeError(
-            "explicit LLVM-MinGW selector did not reuse the default selector cache unchanged"
+            "explicit LLVM-MinGW selector did not reuse its cache unchanged"
         )
 
     direct_runtime = load_module(
-        default_runtime.backend_root / "fenics_jit_runtime.py",
+        shared_runtime.backend_root / "fenics_jit_runtime.py",
         "phase4b_llvm_regression_direct_runtime",
     )
     direct_config = direct_runtime.RuntimeConfig.discover(
-        toolchain_root=default_runtime.backend_root,
+        toolchain_root=shared_runtime.backend_root,
         python_prefix=Path(sys.prefix),
     )
     direct_record = direct_config.diagnostic_record()
-    shared_record = default_runtime.diagnostic_record(default_cache)
+    shared_record = shared_runtime.diagnostic_record(shared_cache)
     backend_record = shared_record.get("backend")
     if not isinstance(backend_record, dict):
         raise RuntimeError("shared LLVM-MinGW diagnostics do not contain a backend record")
@@ -214,12 +213,12 @@ def main() -> int:
     if not direct_modules:
         raise RuntimeError("direct LLVM-MinGW runtime JIT did not produce a cached .pyd")
 
-    default_names = {Path(path).name for path in default_modules}
+    shared_names = {Path(path).name for path in shared_modules}
     direct_names = {Path(path).name for path in direct_modules}
-    common_names = sorted(default_names & direct_names)
+    common_names = sorted(shared_names & direct_names)
     if not common_names:
         raise RuntimeError(
-            "shared default and direct LLVM-MinGW runtime did not compile a common FFCx module"
+            "shared explicit and direct LLVM-MinGW runtime did not compile a common FFCx module"
         )
 
     if dict(os.environ) != baseline:
@@ -229,19 +228,19 @@ def main() -> int:
         "status": "pass",
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         "default_selector": {
-            "selected_backend": default_runtime.selected_backend,
-            "backend_cache_id": default_runtime.backend_cache_id,
-            "backend_root": str(default_runtime.backend_root.resolve()),
-            "cache_root": str(default_cache),
-            "value": default_value,
-            "modules": default_modules,
+            "selected_backend": default_backend,
+            "backend_available_in_regression_environment": False,
+            "error": missing_default_error,
+            "no_silent_fallback": True,
         },
         "explicit_selector": {
-            "selected_backend": explicit_runtime.selected_backend,
-            "backend_cache_id": explicit_runtime.backend_cache_id,
-            "backend_root": str(explicit_runtime.backend_root.resolve()),
-            "cache_root": str(explicit_cache),
-            "value": explicit_value,
+            "selected_backend": shared_runtime.selected_backend,
+            "backend_cache_id": shared_runtime.backend_cache_id,
+            "backend_root": str(shared_runtime.backend_root.resolve()),
+            "cache_root": str(shared_cache),
+            "value": shared_value,
+            "reuse_value": reuse_value,
+            "modules": shared_modules,
             "cache_reuse_unchanged": True,
         },
         "direct_runtime": {

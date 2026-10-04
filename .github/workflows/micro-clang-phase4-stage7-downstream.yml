@@ -203,7 +203,7 @@ jobs:
           $env:PYTHONHASHSEED = "0"
           $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
 
-          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-selector-validation.py --work-dir $selectorWork --output (Join-Path $diag "selector-validation.json")
+          & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-selector-validation.py --work-dir $selectorWork --output (Join-Path $diag "selector-validation.json") --expected-default-backend llvm-mingw --expected-installed-dolfinx-backend none
           if ($LASTEXITCODE -ne 0) { throw "Stage-7 selector validation failed" }
 
           & (Join-Path $prefix "python.exe") ./scripts/micro-clang-jit/phase5-concurrency-proof.py --work-dir $concurrencyWork --output (Join-Path $diag "concurrency-validation.json")

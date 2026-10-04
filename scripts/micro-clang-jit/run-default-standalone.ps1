@@ -31,14 +31,17 @@ $args += @(
 & micromamba @args | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "default standalone environment installation failed" }
 
-$packages = (& micromamba list -p $prefix --json | ConvertFrom-Json)
-$micro = @($packages | Where-Object { $_.name -eq "fenics-jit-micro-clang" })
-if ($micro.Count -ne 1) { throw "normal standalone environment does not contain exactly one micro-Clang package" }
-if ([string]$micro[0].version -ne "20260826" -or [string]$micro[0].build_string -ne "h9490d1a_1") {
+$condaMeta = Join-Path $prefix "conda-meta"
+$microRecords = @(Get-ChildItem -LiteralPath $condaMeta -Filter "fenics-jit-micro-clang-*.json" -File)
+if ($microRecords.Count -ne 1) {
+    throw "normal standalone environment does not contain exactly one micro-Clang package record"
+}
+$micro = Get-Content -LiteralPath $microRecords[0].FullName -Raw | ConvertFrom-Json
+if ([string]$micro.version -ne "20260826" -or [string]$micro.build -ne "h9490d1a_1") {
     throw "standalone environment did not select the qualified Full-LTO package: $($micro | ConvertTo-Json -Compress)"
 }
 foreach ($forbidden in @("fenics-jit-llvm-mingw", "fenics-jit-tinycc")) {
-    if (@($packages | Where-Object { $_.name -eq $forbidden }).Count) {
+    if (Get-ChildItem -LiteralPath $condaMeta -Filter "$forbidden-*.json" -File -ErrorAction SilentlyContinue) {
         throw "normal standalone environment unexpectedly contains $forbidden"
     }
 }

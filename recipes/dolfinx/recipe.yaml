@@ -1,8 +1,12 @@
 context:
   name: fenics-dolfinx
-  version: "0.11.0"
+  # Package version may carry a local post-release suffix so a rebuilt
+  # precise-simulation package supersedes earlier Windows revisions while
+  # still consuming the exact upstream DOLFINx source tag.
+  version: "0.11.0.post0"
+  source_version: "0.11.0"
   build: 12
-  major_minor: ${{ (version | split('.'))[:2] | join('.') }}.*
+  major_minor: ${{ (source_version | split('.'))[:2] | join('.') }}.*
   ufl_version: "2026.1.*"
   # Python Stable ABI (SABI with nanobind requires 3.12)
   abi3_tag: cp312
@@ -20,16 +24,16 @@ recipe:
 source:
   - if: win
     then:
-      - url: https://github.com/fenics/dolfinx/archive/refs/tags/v${{ version }}.tar.gz
+      - url: https://github.com/fenics/dolfinx/archive/refs/tags/v${{ source_version }}.tar.gz
         sha256: 4df167823d316da519c1b2f8d5d0afc20de1405de601dab51da67a405b25cc2f
-        file_name: dolfinx-${{ version }}.tar.gz
+        file_name: dolfinx-${{ source_version }}.tar.gz
         # The MSVC nanobind caster fix is applied by build-dolfinx.bat after
         # prepare-dolfinx-source.bat extracts the archive (rattler-build does
         # not extract sources on Windows, so `patches:` never reaches the
         # compiled tree). See caster-petsc-msvc-nanobind.patch.
   - if: not win
     then:
-      - url: https://github.com/fenics/dolfinx/archive/refs/tags/v${{ version }}.tar.gz
+      - url: https://github.com/fenics/dolfinx/archive/refs/tags/v${{ source_version }}.tar.gz
         sha256: 4df167823d316da519c1b2f8d5d0afc20de1405de601dab51da67a405b25cc2f
         patches:
           - remove-symlink.patch
@@ -320,7 +324,7 @@ about:
   license_file: COPYING.LESSER
   homepage: https://fenicsproject.org
   repository: https://github.com/fenics/dolfinx
-  documentation: https://docs.fenicsproject.org/dolfinx/v${{ version }}/
+  documentation: https://docs.fenicsproject.org/dolfinx/v${{ source_version }}/
 
 extra:
   feedstock-name: fenics-dolfinx

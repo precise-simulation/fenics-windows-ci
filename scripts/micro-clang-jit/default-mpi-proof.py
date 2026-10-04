@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 import ufl
@@ -133,6 +134,9 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except BaseException:
+        traceback.print_exc()
+        sys.stderr.flush()
+        sys.stdout.flush()
         if MPI.COMM_WORLD.size > 1:
             try:
                 MPI.COMM_WORLD.Abort(1)

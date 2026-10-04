@@ -38,6 +38,7 @@ jobs:
         shell: pwsh
         run: |
           $prefix = Join-Path $env:MAMBA_ROOT_PREFIX "envs/default-mpi-debug"
+          $python = Join-Path $prefix "python.exe"
           $selectorTarget = Join-Path $prefix "Library/fenics-jit/runtime/fenics_jit_selector.py"
           Copy-Item -Force "recipes/fenics-jit-runtime/fenics_jit_selector.py" $selectorTarget
 
@@ -54,7 +55,6 @@ jobs:
           Copy-Item -Force (Join-Path $patchDolfinx "jit.py") $installedJit
 
           Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
-          $python = Join-Path $prefix "python.exe"
           $mpiexec = Get-ChildItem $prefix -Recurse -Filter mpiexec.exe -File | Select-Object -First 1
           if (-not $mpiexec) { throw "mpiexec.exe not found" }
 

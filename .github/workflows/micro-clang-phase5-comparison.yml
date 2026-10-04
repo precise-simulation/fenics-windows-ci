@@ -1,11 +1,8 @@
 name: micro-clang-phase5-comparison
 
+# Historical qualification workflow retained for reproducibility only.
+# Production regression coverage is owned by stack.yml.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/micro-clang-phase5-comparison.yml"
-      - "scripts/micro-clang-jit/phase5-three-backend-benchmark.py"
-      - "specs/micro-clang-ffcx-jit/**"
   workflow_dispatch:
 
 permissions:

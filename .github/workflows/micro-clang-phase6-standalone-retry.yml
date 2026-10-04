@@ -1,12 +1,8 @@
 name: micro-clang-phase6-standalone-retry
 
+# Historical qualification workflow retained for reproducibility only.
+# Production regression coverage is owned by stack.yml.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/micro-clang-phase6-standalone-retry.yml"
-      - "scripts/micro-clang-jit/phase6-standalone.py"
-      - "scripts/fenicsx-nuitka.ps1"
-      - "scripts/fenicsx-nuitka-runtime.nuitka-package.config.yml"
   workflow_dispatch:
 
 permissions:

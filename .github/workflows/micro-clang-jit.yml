@@ -1,13 +1,8 @@
 name: micro-clang-jit
 
-# Experimental source-build qualification. This workflow is deliberately
-# path-scoped so it does not add a second automatic run to unrelated PRs.
+# Historical qualification workflow retained for reproducibility only.
+# Production regression coverage is owned by stack.yml.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/micro-clang-jit.yml"
-      - "scripts/micro-clang-jit/**"
-      - "specs/micro-clang-ffcx-jit/**"
   workflow_dispatch:
 
 permissions:

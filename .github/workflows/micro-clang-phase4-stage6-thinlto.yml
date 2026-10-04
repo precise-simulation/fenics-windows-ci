@@ -1,17 +1,8 @@
 name: micro-clang-phase4-stage6-thinlto
 
+# Historical qualification workflow retained for reproducibility only.
+# Production regression coverage is owned by stack.yml.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/micro-clang-phase4-stage6-thinlto.yml"
-      - "scripts/micro-clang-jit/build-source-toolchain.sh"
-      - "scripts/micro-clang-jit/apply-stageaw-pruning.ps1"
-      - "scripts/micro-clang-jit/phase4-stage3-prune.py"
-      - "scripts/micro-clang-jit/phase4-stage5-prune-resource-headers.py"
-      - "scripts/micro-clang-jit/package-phase2.ps1"
-      - "scripts/micro-clang-jit/phase2-package-smoke.py"
-      - "scripts/micro-clang-jit/phase3-private-validation.py"
-      - "specs/micro-clang-ffcx-jit/phase4-stage6-plan.md"
   workflow_dispatch:
 
 permissions:

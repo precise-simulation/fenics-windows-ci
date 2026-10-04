@@ -13,8 +13,10 @@ Release prerequisite:
 
 ## Production changes
 
-- shared selector default: `micro-clang`;
-- shared selector default: `micro-clang` is the production default;\n- the legacy `fenics_jit_runtime.py` compatibility facade keeps its historical\n  LLVM-MinGW fallback when no toolchain root is supplied, so pinned/reference\n  environments without micro-Clang remain reproducible;
+- shared selector default: `micro-clang` is the production default;
+- the legacy `fenics_jit_runtime.py` compatibility facade keeps its historical
+  LLVM-MinGW fallback when no toolchain root is supplied, so pinned/reference
+  environments without micro-Clang remain reproducible;
 - Windows `fenics-dolfinx` runtime dependency:
   `fenics-jit-micro-clang ==20260826`;
 - LLVM-MinGW remains installable explicitly but is no longer part of a normal

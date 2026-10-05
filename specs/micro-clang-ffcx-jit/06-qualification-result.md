@@ -2,7 +2,7 @@
 
 **Decision:** COMPLETE — select **Option D: micro-Clang default candidate**.
 
-This decision qualifies micro-Clang technically for a future default switch. It does **not** change the current default: LLVM-MinGW remains the normal/reference backend and the unconditional Windows `fenics-dolfinx` runtime dependency until a separate reviewed change updates package dependencies/default selection.
+This was the qualification decision recorded before the production default switch. At this point in the sequence, LLVM-MinGW remained the normal/reference backend and the unconditional Windows `fenics-dolfinx` runtime dependency. The separate reviewed switch was subsequently completed in PR #18; micro-Clang is now the normal Windows backend. See [08-default-switch.md](08-default-switch.md).
 
 ## Qualified implementation
 

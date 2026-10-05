@@ -56,6 +56,25 @@ jobs:
             -c conda-forge
             python=3.12
 
+      - name: Validate embedded-runtime scripts
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/fenics-embed-bootstrap.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($Path in @('scripts/package-embedded-runtime.ps1','scripts/test-embedded-runtime.ps1')) {
+            $Tokens = $null
+            $Errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $Path),
+              [ref]$Tokens,
+              [ref]$Errors
+            ) | Out-Null
+            if ($Errors.Count -ne 0) {
+              $Errors | ForEach-Object { Write-Error "$Path:$($_.Extent.StartLineNumber): $($_.Message)" }
+              throw "PowerShell syntax validation failed: $Path"
+            }
+          }
+
       - name: Create qualified FEniCS source prefix
         shell: pwsh
         run: |

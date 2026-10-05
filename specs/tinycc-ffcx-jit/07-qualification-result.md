@@ -1,6 +1,8 @@
 # Phase 7 qualification result
 
-**Decision:** COMPLETE — select **Option B: TinyCC compact standalone backend, LLVM-MinGW normal/reference runtime**.
+**Decision:** COMPLETE — select **Option B: TinyCC compact standalone backend, LLVM-MinGW normal/reference runtime** at the time of this qualification.
+
+**Current context:** the later micro-Clang qualification and production switch made micro-Clang the normal Windows backend. TinyCC remains the explicit compact alternative; see [`../micro-clang-ffcx-jit/08-default-switch.md`](../micro-clang-ffcx-jit/08-default-switch.md).
 
 ## Qualified implementation
 

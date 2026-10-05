@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Prefix,
     [string]$Output = "dist",
-    [string]$Version = "0.1.0"
+    [string]$Version = "0.1.0",
+    [string]$Micromamba = ""
 )
 
 Set-StrictMode -Version Latest
@@ -81,15 +82,14 @@ if ($recordByName["fenics-jit-micro-clang"].version -ne "20260826") {
     throw "FEniCS embedded runtime requires qualified micro-Clang 20260826, got $($recordByName["fenics-jit-micro-clang"].version)"
 }
 
-$oldPath = $env:PATH
-try {
-    $env:PATH = @(
-        $prefixPath,
-        (Join-Path $prefixPath "Scripts"),
-        (Join-Path $prefixPath "Library\bin"),
-        $oldPath
-    ) -join ";"
-    $probeText = & $python -c @'
+$mamba = if ($Micromamba) {
+    (Resolve-Path -LiteralPath $Micromamba -ErrorAction Stop).Path
+} elseif ($env:MAMBA_EXE) {
+    (Resolve-Path -LiteralPath $env:MAMBA_EXE -ErrorAction Stop).Path
+} else {
+    (Get-Command micromamba.exe -ErrorAction Stop).Source
+}
+$probeCode = @'
 import json, platform, struct, sys
 import basix, dolfinx, ffcx, mpi4py, numpy, petsc4py, ufl
 print(json.dumps({
@@ -106,12 +106,9 @@ print(json.dumps({
     "prefix": sys.prefix,
 }))
 '@
-    if ($LASTEXITCODE -ne 0) {
-        throw "FEniCS prefix import probe failed"
-    }
-}
-finally {
-    $env:PATH = $oldPath
+$probeText = & $mamba run -p $prefixPath python -c $probeCode
+if ($LASTEXITCODE -ne 0) {
+    throw "FEniCS prefix import probe failed under micromamba activation"
 }
 $probe = ($probeText | Select-Object -Last 1) | ConvertFrom-Json
 if ($probe.implementation -ne "CPython" -or $probe.pointer_bits -ne 64 -or $probe.python -notmatch '^3\.12\.') {

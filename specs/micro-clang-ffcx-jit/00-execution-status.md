@@ -1,6 +1,6 @@
 # micro-Clang execution status
 
-**Status:** complete — Phases 0-6 plus post-qualification **Phase 4 Stage 6 ThinLTO** and **Stage 7 Full LTO** are qualified. Stage 7 Full LTO is the preferred micro-Clang payload; LLVM-MinGW remains the actual default pending a separate dependency/default-switch change.
+**Status:** complete — Phases 0-6 plus post-qualification **Phase 4 Stage 6 ThinLTO** and **Stage 7 Full LTO** are qualified. Stage 7 Full LTO is the preferred micro-Clang payload. The later production default switch completed in PR #18, so micro-Clang is now the normal Windows backend; see [08-default-switch.md](08-default-switch.md).
 
 This file records execution of `EPIC.md`. The epic is intentionally sequential:
 later phases must not be implemented merely because their code could be written
@@ -447,10 +447,11 @@ The standalone proof established:
   payload was 113,143,546 bytes (about 107.90 MiB).
 
 Together with the Phase-5 paired comparison, Phase 6 satisfies the EPIC release
-gate. The release classification is **Option D: default candidate**. This is a
-qualification result only: LLVM-MinGW remains the normal dependency and selector
-default, and no normal-install footprint reduction is claimed until a separate
-package/default-switch change is qualified.
+gate. The release classification is **Option D: default candidate**. At the time
+of this qualification result, LLVM-MinGW remained the normal dependency and
+selector default, and no normal-install footprint reduction was claimed until a
+separate package/default-switch change was qualified. That follow-up later
+completed in PR #18; see [08-default-switch.md](08-default-switch.md).
 
 
 ## Phase 4 stage 6 ThinLTO qualification evidence

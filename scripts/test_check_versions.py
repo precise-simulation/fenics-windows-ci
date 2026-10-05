@@ -172,6 +172,20 @@ class ReferenceTest(unittest.TestCase):
         self.assertEqual(targets["dolfinx"], "0.11.7")
         self.assertEqual(targets["petsc"], "3.25.5")
 
+    def test_matching_published_dolfinx_post_release_is_retained(self):
+        targets = check_versions.reference_targets(REFERENCE)
+        channel = {"dolfinx": "0.11.0.post0"}
+        resolved = check_versions.retain_published_dolfinx_post_release(targets, channel)
+        self.assertEqual(resolved["dolfinx"], "0.11.0.post0")
+
+    def test_new_upstream_dolfinx_release_supersedes_old_local_post(self):
+        reference = json.loads(json.dumps(REFERENCE))
+        reference["packages"]["fenics-dolfinx"]["version"] = "0.11.1"
+        targets = check_versions.reference_targets(reference)
+        channel = {"dolfinx": "0.11.0.post9"}
+        resolved = check_versions.retain_published_dolfinx_post_release(targets, channel)
+        self.assertEqual(resolved["dolfinx"], "0.11.1")
+
 
 class RecipePatchTest(unittest.TestCase):
     @patch.object(check_versions, "download_sha256", return_value="a" * 64)
@@ -194,6 +208,31 @@ class RecipePatchTest(unittest.TestCase):
             updated = recipe.read_text(encoding="utf-8")
             self.assertIn(expected_url, updated)
             download_sha256.assert_called_once_with(expected_url)
+
+    @patch.object(check_versions, "download_sha256", return_value="b" * 64)
+    def test_patch_dolfinx_post_release_uses_upstream_source_tag(self, download_sha256):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            recipe_dir = root / "dolfinx"
+            recipe_dir.mkdir()
+            recipe = recipe_dir / "recipe.yaml"
+            recipe.write_text(
+                'context:\n'
+                '  version: "0.11.0"\n'
+                '  source_version: "0.11.0"\n'
+                'source:\n'
+                '  url: https://github.com/fenics/dolfinx/archive/refs/tags/v${{ source_version }}.tar.gz\n'
+                f"  sha256: {'0' * 64}\n",
+                encoding="utf-8",
+            )
+            with patch.object(check_versions, "RECIPES", root):
+                check_versions.patch_recipe("dolfinx", "0.11.0.post0")
+            updated = recipe.read_text(encoding="utf-8")
+            self.assertIn('version: "0.11.0.post0"', updated)
+            self.assertIn('source_version: "0.11.0"', updated)
+            download_sha256.assert_called_once_with(
+                "https://github.com/fenics/dolfinx/archive/refs/tags/v0.11.0.tar.gz"
+            )
 
 
 if __name__ == "__main__":

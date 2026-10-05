@@ -91,6 +91,27 @@ def version_family(version: str) -> str:
     return ".".join(parts[:2])
 
 
+def dolfinx_source_version(package_version: str) -> str:
+    """Return the upstream DOLFINx tag represented by a local package version."""
+    return re.sub(r"\.post\d+$", "", package_version)
+
+
+def retain_published_dolfinx_post_release(
+    targets: dict[str, str], channel: dict[str, str | None]
+) -> dict[str, str]:
+    """Keep a newer local .postN version when it wraps the same upstream source."""
+    resolved = dict(targets)
+    reference = targets["dolfinx"]
+    published = channel.get("dolfinx")
+    if (
+        published
+        and dolfinx_source_version(published) == reference
+        and vkey(published) > vkey(reference)
+    ):
+        resolved["dolfinx"] = published
+    return resolved
+
+
 def run_reference_solve(micromamba: str) -> dict:
     """Ask libmamba for the current coherent linux-64 DOLFINx environment."""
     cmd = [
@@ -214,7 +235,8 @@ def read_recipe(name: str) -> tuple[str, str]:
 
 def source_url(name: str, version: str) -> str:
     if name == "dolfinx":
-        return f"https://github.com/fenics/dolfinx/archive/refs/tags/v{version}.tar.gz"
+        source_version = dolfinx_source_version(version)
+        return f"https://github.com/fenics/dolfinx/archive/refs/tags/v{source_version}.tar.gz"
     if name == "hdf5":
         major_minor = "_".join(version.split(".")[:2])
         return (
@@ -238,6 +260,16 @@ def patch_recipe(name: str, new_version: str) -> None:
     if name == "hdf5":
         text = re.sub(r"(url:\s*)\S+", rf"\g<1>{url}", text, count=1)
     text = re.sub(r'(version:\s*")([^"]+)(")', rf"\g<1>{new_version}\g<3>", text, count=1)
+    if name == "dolfinx":
+        source_version = dolfinx_source_version(new_version)
+        text, count = re.subn(
+            r'(?m)^(  source_version:\s*")([^"]+)(")',
+            rf"\g<1>{source_version}\g<3>",
+            text,
+            count=1,
+        )
+        if count != 1:
+            raise RuntimeError(f"could not update DOLFINx source_version in {path}")
     text = re.sub(r"(sha256:\s*)([0-9a-f]{64})", rf"\g<1>{sha}", text, count=1)
     path.write_text(text, encoding="utf-8")
     print(f"[plan] {name}: recipe pinned to {new_version} (sha256 {sha[:12]}...)", file=sys.stderr)
@@ -358,16 +390,18 @@ def main() -> int:
     # Resolve once. Nothing is installed: libmamba only computes the linux-64
     # environment that current conda-forge DOLFINx would receive.
     reference = resolve_reference(args.micromamba)
-    targets = reference_targets(reference)
-    print_parity(reference, targets)
+    reference_target_versions = reference_targets(reference)
     assert_supported_families(reference)
     assert_dolfinx_dependency_policy()
+
+    channel = channel_versions()
+    targets = retain_published_dolfinx_post_release(reference_target_versions, channel)
+    print_parity(reference, targets)
 
     # HDF5 is a variant input to downstream recipes, not just a source version.
     patch_variant_value("petsc", "hdf5", targets["hdf5"])
     patch_variant_value("dolfinx", "hdf5", targets["hdf5"])
 
-    channel = channel_versions()
     print(f"[plan] targets : {targets}", file=sys.stderr)
     print(f"[plan] channel : {channel}", file=sys.stderr)
 

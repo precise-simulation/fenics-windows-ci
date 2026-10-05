@@ -36,6 +36,8 @@ $records = @(
                 build_number = [int]$record.build_number
                 channel = [string]$record.channel
                 url = [string]$record.url
+                sha256 = [string]$record.sha256
+                md5 = [string]$record.md5
                 files = @($record.files)
             }
         }
@@ -72,8 +74,8 @@ foreach ($forbidden in @("fenics-jit-llvm-mingw", "fenics-jit-tinycc", "vs2022_w
         throw "FEniCS embedded runtime unexpectedly contains forbidden package: $forbidden"
     }
 }
-if ($recordByName["python"].version -notmatch '^3\.12\.') {
-    throw "FEniCS embedded runtime requires CPython 3.12, got $($recordByName["python"].version)"
+if ($recordByName["python"].version -ne "3.12.10") {
+    throw "FEniCS embedded runtime requires CPython 3.12.10, got $($recordByName["python"].version)"
 }
 if ($recordByName["numpy"].version -ne "2.5.2") {
     throw "FEniCS embedded runtime is pinned to NumPy 2.5.2, got $($recordByName["numpy"].version)"
@@ -111,8 +113,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "FEniCS prefix import probe failed under micromamba activation"
 }
 $probe = ($probeText | Select-Object -Last 1) | ConvertFrom-Json
-if ($probe.implementation -ne "CPython" -or $probe.pointer_bits -ne 64 -or $probe.python -notmatch '^3\.12\.') {
-    throw "FEniCS prefix does not provide 64-bit CPython 3.12: $($probeText -join [Environment]::NewLine)"
+if ($probe.implementation -ne "CPython" -or $probe.pointer_bits -ne 64 -or $probe.python -ne "3.12.10") {
+    throw "FEniCS prefix does not provide 64-bit CPython 3.12.10: $($probeText -join [Environment]::NewLine)"
 }
 if ($probe.numpy -ne "2.5.2") {
     throw "Imported NumPy version differs from package pin: $($probe.numpy)"
@@ -201,6 +203,8 @@ try {
                     build_number = $_.build_number
                     channel = $_.channel
                     url = $_.url
+                    sha256 = $_.sha256
+                    md5 = $_.md5
                 }
             }
     )

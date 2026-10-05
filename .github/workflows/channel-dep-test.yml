@@ -64,10 +64,11 @@ jobs:
           New-Item -ItemType Directory -Force channel-test-lists | Out-Null
           micromamba list -n channel-test --explicit > channel-test-lists/explicit.txt
           micromamba list -n channel-test           > channel-test-lists/list.txt
+          micromamba list -n channel-test --json    > channel-test-lists/list.json
           Get-Content channel-test-lists/list.txt
 
-      # Uploaded before the tests run, so the exact selection is retained
-      # even when a later step fails.
+      # Uploaded before assertions/tests run, so the exact selection is
+      # retained even if public-channel expectations fail.
       - name: Upload selected package lists
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -76,12 +77,44 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Assert public default JIT package selection
+        shell: pwsh
+        run: |
+          $packages = @(Get-Content channel-test-lists/list.json -Raw | ConvertFrom-Json)
+          $names = @($packages | ForEach-Object { [string]$_.name })
+
+          foreach ($required in @("fenics-jit-runtime", "fenics-jit-micro-clang")) {
+            if ($required -notin $names) {
+              throw "required default JIT package is missing from public solve: $required"
+            }
+          }
+          foreach ($forbidden in @("fenics-jit-llvm-mingw", "fenics-jit-tinycc")) {
+            if ($forbidden -in $names) {
+              throw "non-default JIT backend unexpectedly installed by public solve: $forbidden"
+            }
+          }
+
       - name: Put test environment on PATH
         shell: pwsh
         run: |
           "$env:MAMBA_ROOT_PREFIX/envs/channel-test" >> $env:GITHUB_PATH
           "$env:MAMBA_ROOT_PREFIX/envs/channel-test/Library/bin" >> $env:GITHUB_PATH
           "$env:MAMBA_ROOT_PREFIX/envs/channel-test/Scripts" >> $env:GITHUB_PATH
+
+      - name: Verify implicit micro-Clang selector
+        shell: pwsh
+        run: |
+          Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
+          $prefix = "$env:MAMBA_ROOT_PREFIX/envs/channel-test"
+          $selector = Join-Path $prefix "Library/fenics-jit/runtime/fenics_jit_selector.py"
+          if (-not (Test-Path -LiteralPath $selector)) {
+            throw "shared JIT selector is missing from public installation"
+          }
+          $record = (& python $selector | Out-String) | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ([string]$record.selected_backend -ne "micro-clang") {
+            throw "implicit public JIT backend is '$($record.selected_backend)', expected 'micro-clang'"
+          }
 
       - name: Run tests
         shell: pwsh

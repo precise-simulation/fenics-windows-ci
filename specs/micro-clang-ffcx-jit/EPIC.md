@@ -2,11 +2,11 @@
 
 ## Status
 
-**Status:** complete — Phase 6 selects **Option D: micro-Clang default candidate**; post-qualification Stage 7 Full LTO is the preferred qualified payload. See [06-qualification-result.md](06-qualification-result.md).
+**Status:** complete — Phase 6 selected **Option D: micro-Clang default candidate**; post-qualification Stage 7 Full LTO is the preferred qualified payload. The production default switch subsequently completed in PR #18; see [06-qualification-result.md](06-qualification-result.md) and [08-default-switch.md](08-default-switch.md).
 
 The experiment qualified a purpose-built minimal Clang/LLD toolchain as a third Windows FFCx/CFFI JIT backend between the qualified TinyCC and LLVM-MinGW options. The qualified micro-Clang package is roughly half the installed size of the immutable LLVM-MinGW reference while retaining LLVM-class generated-code performance.
 
-This epic does **not** change the normal Windows DOLFINx compiler dependency or selector default. LLVM-MinGW remains the actual normal/reference backend until a separate reviewed default-switch/package-dependency change is qualified and merged. No silent fallback is introduced.
+This epic itself did **not** change the normal Windows DOLFINx compiler dependency or selector default; LLVM-MinGW remained the normal/reference backend throughout qualification. The separate reviewed default-switch/package-dependency change was completed later by PR #18. No silent fallback was introduced.
 
 ## Motivation
 
@@ -425,15 +425,9 @@ micro-Clang passed the ordered Phase 0-6 gates using the same LLVM/Clang/LLD and
 - the shared selector explicitly supports llvm-mingw, tinycc, and micro-clang with isolated cache namespaces and no silent fallback;
 - the micro-Clang-only Nuitka bundle passes fresh serial JIT, cache reuse, representative forms, PE/ABI/hermeticity inspection, and the two-rank MPI ownership proof with the original build prefix inaccessible and both other compiler backends absent.
 
-These results make micro-Clang technically suitable for evaluation as the normal/default backend. They do **not** switch the default in this epic.
+These results made micro-Clang technically suitable for evaluation as the normal/default backend. This qualification epic itself did **not** switch the default.
 
-The current Windows `fenics-dolfinx` package still installs `fenics-jit-llvm-mingw` unconditionally and the shared selector still defaults to `llvm-mingw`. Therefore:
-
-- merging this implementation makes micro-Clang an explicitly selectable qualified backend;
-- normal installs continue to use and install LLVM-MinGW;
-- no normal-install footprint reduction is claimed by this PR;
-- a default switch requires a separate reviewed change that updates package dependencies/default selection and reruns the relevant stack/runtime/standalone qualification;
-- TinyCC remains the compact backend and is not replaced by this decision.
+That follow-up was completed by PR #18 after publication of the qualified Stage-7 package. The current Windows `fenics-dolfinx` package installs `fenics-jit-runtime` plus `fenics-jit-micro-clang`, and the shared selector defaults to `micro-clang`. LLVM-MinGW remains explicitly installable as the reference backend, TinyCC remains the compact alternative, and no silent fallback is used.
 
 ## CI policy
 
@@ -466,4 +460,4 @@ The experiment succeeds only if:
 - any claimed normal-install footprint reduction is demonstrated with a qualified dependency/profile variant that does not also install LLVM-MinGW;
 - the final decision records measured backend size, effective installation size, cold-JIT, generated-code, maintenance, and release tradeoffs.
 
-Until all of those gates pass, LLVM-MinGW remains the normal/reference backend and TinyCC remains the compact backend.
+The blocking qualification and release gates were satisfied. PR #18 subsequently made micro-Clang the normal Windows backend; LLVM-MinGW remains the reference backend and TinyCC remains the compact alternative.

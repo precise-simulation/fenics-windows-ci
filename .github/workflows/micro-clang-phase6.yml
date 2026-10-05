@@ -1,17 +1,8 @@
 name: micro-clang-phase6
 
+# Historical qualification workflow retained for reproducibility only.
+# Production regression coverage is owned by stack.yml.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/micro-clang-phase6.yml"
-      - "scripts/fenicsx-nuitka.ps1"
-      - "scripts/fenicsx-nuitka-runtime.nuitka-package.config.yml"
-      - "scripts/micro-clang-jit/phase5-selector-validation.py"
-      - "scripts/micro-clang-jit/phase5-concurrency-proof.py"
-      - "scripts/micro-clang-jit/phase5-three-backend-benchmark.py"
-      - "scripts/micro-clang-jit/phase6-standalone.py"
-      - "recipes/fenics-jit-micro-clang/**"
-      - "specs/micro-clang-ffcx-jit/**"
   workflow_dispatch:
 
 permissions:

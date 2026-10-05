@@ -2,9 +2,9 @@
 
 ## Status
 
-**Status:** complete — Phase 7 selects **Option B: TinyCC compact standalone backend, LLVM-MinGW normal/reference runtime**.
+**Status:** complete — Phase 7 selected **Option B: TinyCC compact standalone backend, LLVM-MinGW normal/reference runtime** at the time of this qualification.
 
-The Windows FFCx/CFFI normal runtime compiler remains the bundled LLVM-MinGW package. This epic qualified TinyCC (TCC) as a much smaller self-contained backend without changing the VS2022 toolchain used to build PETSc, DOLFINx, Basix, or other native packages.
+This epic qualified TinyCC (TCC) as a much smaller self-contained backend without changing the VS2022 toolchain used to build PETSc, DOLFINx, Basix, or other native packages. The later micro-Clang qualification and production switch superseded LLVM-MinGW as the normal Windows FFCx/CFFI runtime compiler; TinyCC remains the explicit compact alternative. See [`../micro-clang-ffcx-jit/08-default-switch.md`](../micro-clang-ffcx-jit/08-default-switch.md).
 
 TinyCC remains explicit/opt-in for normal installs and is qualified for the compact standalone profile. No automatic fallback or default-backend switch is part of this epic; see [07-qualification-result.md](07-qualification-result.md).
 

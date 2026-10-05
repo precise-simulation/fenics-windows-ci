@@ -2,6 +2,8 @@
 
 **Status:** done — **Option B selected**. See [07-qualification-result.md](07-qualification-result.md).
 
+**Current context:** this document records the decision relative to LLVM-MinGW at that time. The later micro-Clang production switch made micro-Clang the normal Windows backend; TinyCC remains the explicit compact alternative. See [`../micro-clang-ffcx-jit/08-default-switch.md`](../micro-clang-ffcx-jit/08-default-switch.md).
+
 ## Objective
 
 Prove the qualified TinyCC backend in the actual standalone/release context and make an explicit shipping decision relative to LLVM-MinGW.

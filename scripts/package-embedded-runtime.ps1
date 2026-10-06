@@ -108,9 +108,16 @@ print(json.dumps({
     "prefix": sys.prefix,
 }))
 '@
-$probeText = & $mamba run -p $prefixPath python -c $probeCode
-if ($LASTEXITCODE -ne 0) {
-    throw "FEniCS prefix import probe failed under micromamba activation"
+$probePath = Join-Path ([IO.Path]::GetTempPath()) ("fenics-embed-probe-" + [guid]::NewGuid().ToString("N") + ".py")
+try {
+    Set-Content -LiteralPath $probePath -Value $probeCode -Encoding utf8NoBOM
+    $probeText = & $mamba run -p $prefixPath python $probePath
+    if ($LASTEXITCODE -ne 0) {
+        throw "FEniCS prefix import probe failed under micromamba activation"
+    }
+}
+finally {
+    Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
 }
 $probe = ($probeText | Select-Object -Last 1) | ConvertFrom-Json
 if ($probe.implementation -ne "CPython" -or $probe.pointer_bits -ne 64 -or $probe.python -ne "3.12.10") {

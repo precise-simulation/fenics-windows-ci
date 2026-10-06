@@ -1,6 +1,6 @@
 # Relocatable embedded-runtime overlay for the MATLAB/Octave bridge
 
-**Status:** in-progress
+**Status:** done
 
 ## Goal
 
@@ -32,20 +32,20 @@ toolchain, or the original conda prefix at runtime.
 
 ## Acceptance criteria
 
-- [ ] A normal published fenics-dolfinx environment with Python 3.12.10,
+- [x] A normal published fenics-dolfinx environment with Python 3.12.10,
       NumPy 2.5.2 and OpenBLAS produces the overlay.
-- [ ] The payload contains the default micro-Clang backend and no LLVM-MinGW,
+- [x] The payload contains the default micro-Clang backend and no LLVM-MinGW,
       TinyCC, VS2022 activation package, or ambient compiler dependency.
-- [ ] Every payload file is integrity-listed with package ownership/provenance.
-- [ ] The exact ZIP is merged into a clean non-conda CPython 3.12.10 runtime
+- [x] Every payload file is integrity-listed with package ownership/provenance.
+- [x] The exact ZIP is merged into a clean non-conda CPython 3.12.10 runtime
       extracted to a path containing spaces.
-- [ ] Ambient Python and compiler/SDK variables are poisoned/removed during
+- [x] Ambient Python and compiler/SDK variables are poisoned/removed during
       validation.
-- [ ] Relocated imports of NumPy, DOLFINx and petsc4py succeed and PETSc reports
+- [x] Relocated imports of NumPy, DOLFINx and petsc4py succeed and PETSc reports
       the relocated runtime/Library root.
-- [ ] A fresh FFCx Poisson JIT uses bundled micro-Clang, creates a generated
+- [x] A fresh FFCx Poisson JIT uses bundled micro-Clang, creates a generated
       .pyd, solves with PETSc, and prints the numerical result.
-- [ ] The original conda prefix is not required by the relocated runtime.
+- [x] The original conda prefix is not required by the relocated runtime.
 
 ## Out of scope
 

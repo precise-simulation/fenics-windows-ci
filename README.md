@@ -156,6 +156,26 @@ set OPENBLAS_NUM_THREADS=1
 
 This is optional for normal serial use.
 
+## MATLAB/Octave embedded-runtime overlay
+
+The repository also contains a bridge-oriented packaging path for embedding the
+qualified Windows FEniCS stack into a separate CPython 3.12 host runtime.
+
+    .\scripts\package-embedded-runtime.ps1 -Prefix <fenics-conda-prefix> -Output .\dist
+    .\scripts\test-embedded-runtime.ps1 -Zip .\dist\fenics-embed-runtime-v0.1.0-win-x64-cp312.zip -Python <python-3.12.10.exe>
+
+The resulting ZIP is an overlay, not a Python installation. It preserves the
+package-owned Lib/site-packages, native Library/bin closure,
+Library/fenics-jit runtime/backend, CPython headers, runtime data and provenance
+needed by DOLFINx/PETSc/FFCx. The fenics_embed_runtime.activate() bootstrap
+relocates DLL, PETSc and JIT roots against the embedding runtime's sys.prefix.
+
+Hosted qualification merges the exact overlay into a clean non-conda CPython
+3.12.10 runtime, removes ambient compiler/SDK state, then performs a fresh
+micro-Clang FFCx Poisson JIT and PETSc solve. This payload is intended for the
+optional FEniCS runtime profile of the Python MATLAB/Octave bridge; normal conda
+installation remains the primary direct-Python distribution path.
+
 ## Updating
 
 Update the environment with conda:

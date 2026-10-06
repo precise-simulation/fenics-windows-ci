@@ -1,0 +1,108 @@
+name: embedded-runtime
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/fenics-embed-bootstrap.py"
+      - "scripts/package-embedded-runtime.ps1"
+      - "scripts/test-embedded-runtime.ps1"
+      - "specs/bridge-embed-runtime/**"
+      - ".github/workflows/embedded-runtime.yml"
+      - "README.md"
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/fenics-embed-bootstrap.py"
+      - "scripts/package-embedded-runtime.ps1"
+      - "scripts/test-embedded-runtime.ps1"
+      - "specs/bridge-embed-runtime/**"
+      - ".github/workflows/embedded-runtime.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('embedded-runtime-pr-{0}', github.event.pull_request.number) || 'embedded-runtime-main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  qualify:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install reference CPython 3.12.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12.10"
+          architecture: x64
+
+      - name: Capture non-conda Python
+        shell: pwsh
+        run: |
+          $python = (Get-Command python.exe -ErrorAction Stop).Source
+          "REFERENCE_PYTHON=$python" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          python -c "import platform,sys; print(sys.executable); print(platform.python_version())"
+
+      - name: Install micromamba
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: packaging
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Validate embedded-runtime scripts
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/fenics-embed-bootstrap.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($Path in @('scripts/package-embedded-runtime.ps1','scripts/test-embedded-runtime.ps1')) {
+            $Tokens = $null
+            $Errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $Path),
+              [ref]$Tokens,
+              [ref]$Errors
+            ) | Out-Null
+            if ($Errors.Count -ne 0) {
+              $Errors | ForEach-Object { Write-Error "${Path}:$($_.Extent.StartLineNumber): $($_.Message)" }
+              throw "PowerShell syntax validation failed: $Path"
+            }
+          }
+
+      - name: Create qualified FEniCS source prefix
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "fenics bridge source prefix with spaces"
+          $args = @("create","-y","-p",$prefix,"--override-channels","--strict-channel-priority","-c","precise-simulation","-c","conda-forge","python=3.12.10","numpy=2.5.2","libblas=*=*openblas","fenics-dolfinx")
+          & $env:MAMBA_EXE @args
+          if ($LASTEXITCODE -ne 0) { throw "FEniCS source-prefix installation failed" }
+          "FENICS_SOURCE_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $env:MAMBA_EXE list -p $prefix --explicit | Out-File -FilePath "fenics-embed-explicit.txt" -Encoding utf8
+
+      - name: Package embedded-runtime overlay
+        shell: pwsh
+        run: |
+          .\scripts\package-embedded-runtime.ps1 -Prefix $env:FENICS_SOURCE_PREFIX -Output .\dist -Version 0.1.0
+
+      - name: Qualify exact overlay against non-conda CPython
+        shell: pwsh
+        run: |
+          $zip = Resolve-Path ".\dist\fenics-embed-runtime-v0.1.0-win-x64-cp312.zip"
+          .\scripts\test-embedded-runtime.ps1 -Zip $zip -Python $env:REFERENCE_PYTHON
+
+      - name: Upload qualified overlay
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fenics-embed-runtime-win-x64-cp312
+          path: |
+            dist/fenics-embed-runtime-v0.1.0-win-x64-cp312.zip
+            dist/SHA256SUMS-embedded-runtime.txt
+            fenics-embed-explicit.txt
+          if-no-files-found: error
+          retention-days: 30

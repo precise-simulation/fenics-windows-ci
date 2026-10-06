@@ -76,7 +76,7 @@ try {
     $saved = @{}
     $names = @(
         "PATH","PYTHONPATH","PYTHONUSERBASE","PYTHONHOME","FENICS_JIT_ROOT","FENICS_JIT_COMPILER",
-        "PETSC_DIR","XDG_CACHE_HOME","CC","CXX","CPP","LD","LDSHARED","INCLUDE","LIB","LIBPATH",
+        "PETSC_DIR","XDG_CACHE_HOME","FENICS_JIT_VERBOSE","CC","CXX","CPP","LD","LDSHARED","INCLUDE","LIB","LIBPATH",
         "LIBRARY_PATH","CPATH","C_INCLUDE_PATH","CPLUS_INCLUDE_PATH","COMPILER_PATH","GCC_EXEC_PREFIX",
         "VSINSTALLDIR","VCINSTALLDIR","VCToolsInstallDir","WindowsSdkDir","WindowsSDKVersion",
         "UniversalCRTSdkDir","UCRTVersion","DISTUTILS_USE_SDK","MSSdk"
@@ -91,6 +91,7 @@ try {
         $env:PYTHONUSERBASE = $poisonRoot
         Remove-Item Env:PYTHONHOME,Env:FENICS_JIT_ROOT,Env:FENICS_JIT_COMPILER,Env:PETSC_DIR -ErrorAction SilentlyContinue
         $env:XDG_CACHE_HOME = $cacheRoot
+        $env:FENICS_JIT_VERBOSE = "1"
         foreach ($name in @(
             "CC","CXX","CPP","LD","LDSHARED","INCLUDE","LIB","LIBPATH","LIBRARY_PATH","CPATH",
             "C_INCLUDE_PATH","CPLUS_INCLUDE_PATH","COMPILER_PATH","GCC_EXEC_PREFIX","VSINSTALLDIR",

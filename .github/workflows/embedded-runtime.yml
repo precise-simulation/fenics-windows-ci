@@ -70,7 +70,7 @@ jobs:
               [ref]$Errors
             ) | Out-Null
             if ($Errors.Count -ne 0) {
-              $Errors | ForEach-Object { Write-Error "$Path:$($_.Extent.StartLineNumber): $($_.Message)" }
+              $Errors | ForEach-Object { Write-Error "${Path}:$($_.Extent.StartLineNumber): $($_.Message)" }
               throw "PowerShell syntax validation failed: $Path"
             }
           }

@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $revision = "0fb54300b56512754221d80adda85ddb9815bceb"
-$backendCacheId = "tinycc-0fb54300b565-aaa86e30769a96f90b37"
+$backendCacheId = "tinycc-0fb54300b565-e78e53fe84d727879247"
 $sourceBase = if ($env:SRC_DIR) { $env:SRC_DIR } else { Join-Path $env:TEMP "fenics-jit-tinycc-build" }
 $source = Join-Path $sourceBase "tinycc-source"
 $stage = Join-Path $sourceBase "tinycc-stage"
@@ -95,9 +95,9 @@ $metadata = [ordered]@{
     adapter_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "tinycc_adapter.py")).Hash.ToLowerInvariant()
     runtime_integration_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "tinycc_runtime.py")).Hash.ToLowerInvariant()
     backend_cache_id = $backendCacheId
-    qualified_dependencies = [ordered]@{ cffi = "2.1.*"; setuptools = "84.*"; python = ">=3.12,<3.16" }
+    qualified_dependencies = [ordered]@{ cffi = "2.1.*"; setuptools = "84.*"; python = ">=3.12,<3.16"; python_gil = "required" }
     policy = [ordered]@{
-        adapter_schema = "tinycc-cffi-adapter-v2"
+        adapter_schema = "tinycc-cffi-adapter-v3"
         external_config = "suppress-all-v1"
         python_link = "stable-abi-python3-def-v1"
         pe_hardening = "dynamicbase-highentropyva-nxcompat-v1"

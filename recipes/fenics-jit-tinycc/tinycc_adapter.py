@@ -25,7 +25,7 @@ from typing import Iterator, Sequence
 from cffi import _shimmed_dist_utils as _dist
 
 
-ADAPTER_SCHEMA_VERSION = "tinycc-cffi-adapter-v2"
+ADAPTER_SCHEMA_VERSION = "tinycc-cffi-adapter-v3"
 EXTERNAL_CONFIG_POLICY_VERSION = "suppress-all-v1"
 PYTHON_LINK_POLICY_VERSION = "stable-abi-python3-def-v1"
 PE_HARDENING_POLICY_VERSION = "dynamicbase-highentropyva-nxcompat-v1"
@@ -84,6 +84,11 @@ class TinyCCConfig:
         tcc = (root / "tcc.exe").resolve()
         python_def = python_def.resolve()
         diagnostics_dir = diagnostics_dir.resolve()
+        if bool(sysconfig.get_config_var("Py_GIL_DISABLED")):
+            raise RuntimeError(
+                "TinyCC backend supports standard GIL-enabled CPython only; "
+                "free-threaded CPython requires a separately qualified python3t.dll ABI path"
+            )
         if not tcc.is_file():
             raise RuntimeError(f"TinyCC executable is missing: {tcc}")
         if not python_def.is_file():

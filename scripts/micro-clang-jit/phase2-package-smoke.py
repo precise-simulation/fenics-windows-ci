@@ -53,6 +53,7 @@ def main() -> None:
         root / "lib" / "python" / "libpython312.a",
         root / "lib" / "python" / "libpython313.a",
         root / "lib" / "python" / "libpython314.a",
+        root / "lib" / "python" / "libpython315.a",
         root / "metadata.json",
         root / "manifest.csv",
         root / "size.txt",

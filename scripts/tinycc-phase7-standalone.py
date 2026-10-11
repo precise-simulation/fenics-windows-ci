@@ -317,13 +317,6 @@ def _run_mpi_child(runtime, work: Path, output: Path, bundle: Path, original_pre
 
         diagnostics = work / "diagnostics" / "mpi" / f"rank-{comm.rank}"
         diagnostics.mkdir(parents=True, exist_ok=True)
-        # DOLFINx enters the production selector inside ffcx_jit. Give each MPI
-        # process its own default diagnostics root so the nested activation's
-        # compiler transcript still proves rank-0-only compilation.
-        os.environ["TEMP"] = str(diagnostics)
-        os.environ["TMP"] = str(diagnostics)
-        tempfile.tempdir = str(diagnostics)
-
         domain = mesh.create_unit_square(comm, 3, 3)
         V = fem.functionspace(domain, ("Lagrange", 2))
         u, v = ufl.TrialFunction(V), ufl.TestFunction(V)

@@ -34,6 +34,7 @@ _REMOVED_ENV = {
     "DISTUTILS_USE_SDK", "MSSdk",
 }
 _REMOVED_PREFIXES = ("VSCMD_",)
+_ACTIVE_DIAGNOSTICS_ENV = "_FENICS_JIT_ACTIVE_DIAGNOSTICS_DIR"
 
 _ACTIVATION_LOCK = threading.RLock()
 _ACTIVE_BACKEND: str | None = None
@@ -199,9 +200,18 @@ class SelectedRuntime:
         """Activate the selected backend under the shared serialization contract."""
         cache = Path(cache_root).expanduser().resolve()
         cache.mkdir(parents=True, exist_ok=True)
+        inherited_diagnostics = os.environ.get(_ACTIVE_DIAGNOSTICS_ENV)
+        inherit_active_diagnostics = (
+            inherited_diagnostics is not None
+            and os.environ.get("FENICS_JIT_COMPILER") == self.selected_backend
+            and os.environ.get("FENICS_JIT_BACKEND_CACHE_ID") == self.backend_cache_id
+            and os.environ.get("FENICS_JIT_BACKEND_ROOT") == str(self.backend_root)
+        )
         diagnostics = (
             Path(diagnostics_dir).expanduser().resolve()
             if diagnostics_dir is not None
+            else Path(inherited_diagnostics).expanduser().resolve()
+            if inherit_active_diagnostics
             else Path(tempfile.gettempdir()).resolve()
             / "fenics-jit-diagnostics"
             / self.selected_backend
@@ -219,6 +229,7 @@ class SelectedRuntime:
                 os.environ["FENICS_JIT_BACKEND_CACHE_ID"] = self.backend_cache_id
                 os.environ["FENICS_JIT_CACHE_ROOT"] = str(cache)
                 os.environ["FENICS_JIT_BACKEND_ROOT"] = str(self.backend_root)
+                os.environ[_ACTIVE_DIAGNOSTICS_ENV] = str(diagnostics)
 
                 if self.selected_backend == "tinycc":
                     sanitized = _sanitized_tinycc_environment()
@@ -389,22 +400,33 @@ def _self_test() -> None:
         try:
             # Same-backend nesting must be reentrant and restore the outer
             # activation's exact process environment when the inner scope exits.
+            outer_diagnostics = temp_root / "diag-nested-outer"
             with tinycc.activate(
                 cache_root=tinycc.cache_root(base_cache),
-                diagnostics_dir=temp_root / "diag-nested-outer",
+                diagnostics_dir=outer_diagnostics,
             ):
                 assert _ACTIVE_BACKEND == "tinycc"
                 assert _ACTIVE_OWNER_THREAD == threading.get_ident()
                 assert _ACTIVE_DEPTH == 1
+                assert Path(os.environ[_ACTIVE_DIAGNOSTICS_ENV]).resolve() == outer_diagnostics
                 outer_environment = dict(os.environ)
                 with tinycc.activate(
                     cache_root=tinycc.cache_root(base_cache),
-                    diagnostics_dir=temp_root / "diag-nested-inner",
                 ):
                     assert _ACTIVE_BACKEND == "tinycc"
                     assert _ACTIVE_DEPTH == 2
+                    assert Path(os.environ[_ACTIVE_DIAGNOSTICS_ENV]).resolve() == outer_diagnostics
                     os.environ[nested_name] = "inner"
                 assert _ACTIVE_DEPTH == 1
+                assert dict(os.environ) == outer_environment
+
+                inner_diagnostics = temp_root / "diag-nested-inner"
+                with tinycc.activate(
+                    cache_root=tinycc.cache_root(base_cache),
+                    diagnostics_dir=inner_diagnostics,
+                ):
+                    assert _ACTIVE_DEPTH == 2
+                    assert Path(os.environ[_ACTIVE_DIAGNOSTICS_ENV]).resolve() == inner_diagnostics
                 assert dict(os.environ) == outer_environment
             assert _ACTIVE_BACKEND is None
             assert _ACTIVE_OWNER_THREAD is None

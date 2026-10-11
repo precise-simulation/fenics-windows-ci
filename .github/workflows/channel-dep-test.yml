@@ -25,8 +25,6 @@ jobs:
   smoke:
     runs-on: windows-2022
     timeout-minutes: 120
-    # Python 3.15 is exploratory until its complete conda dependency stack qualifies.
-    continue-on-error: ${{ matrix.python == '3.15' }}
     strategy:
       fail-fast: false
       matrix:

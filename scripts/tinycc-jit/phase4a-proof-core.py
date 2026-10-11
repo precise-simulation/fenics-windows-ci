@@ -865,7 +865,7 @@ def main() -> int:
             os.environ["HOME"] = str(hostile_home)
             os.environ["USERPROFILE"] = str(hostile_home)
         manager, backend_cache_id = runtime_context(args.mode, backend_root, diagnostics)
-        with manager:
+        with selected_backend(args.mode), manager:
             first = assemble_metrics(cache)
             middle = command_count(diagnostics)
             second = assemble_metrics(cache)

@@ -12,8 +12,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  STAGE7_RUN_ID: "37100266040"
-  QUALIFIED_PHASE5_RUN_ID: "36825854094"
+  BASE_PACKAGE_FILE: "fenics-jit-micro-clang-20260826-h9490d1a_1.conda"
+  BASE_PACKAGE_SHA256: "d8a3510eb08615cb890dbf8f6da8b0d26f573e16a7b0bbee657edf563d40ad01"
+  BASE_PACKAGE_BYTES: "31890069"
+  BASE_PACKAGE_URL: "https://api.anaconda.org/download/precise-simulation/fenics-jit-micro-clang/20260826/win-64/fenics-jit-micro-clang-20260826-h9490d1a_1.conda"
+  BASE_QUALIFICATION_RUN_ID: "37100978194"
+  BASE_QUALIFICATION_HEAD: "dbcc097f2a1084d89b92b280c96d98dc5a7f8a9d"
 
 jobs:
   repackage:
@@ -24,30 +28,50 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Download privately qualified Stage-7 backend
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Install package build tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
         with:
-          name: micro-clang-phase4-stage7-fulllto-package-retry
-          path: stage7-backend
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ env.STAGE7_RUN_ID }}
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: micro-clang-stage7-package-tools
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            rattler-build=0.74.0
 
-      - name: Download qualified Phase-5 package channel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: micro-clang-phase5-package-channel
-          path: phase5-qualified-output
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ env.QUALIFIED_PHASE5_RUN_ID }}
+      - name: Verify exact published Stage-7 base package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force base-package | Out-Null
+          $package = Join-Path $PWD "base-package/$env:BASE_PACKAGE_FILE"
+          Invoke-WebRequest -Uri $env:BASE_PACKAGE_URL -OutFile $package -UseBasicParsing
+          $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant()
+          $bytes = (Get-Item -LiteralPath $package).Length
+          if ($hash -ne $env:BASE_PACKAGE_SHA256) { throw "published Stage-7 base package SHA-256 mismatch: $hash" }
+          if ($bytes -ne [int64]$env:BASE_PACKAGE_BYTES) { throw "published Stage-7 base package size mismatch: $bytes" }
+          [pscustomobject]@{
+            package = $env:BASE_PACKAGE_FILE
+            sha256 = $hash
+            bytes = $bytes
+            qualification_run = [int64]$env:BASE_QUALIFICATION_RUN_ID
+            qualification_head = $env:BASE_QUALIFICATION_HEAD
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 base-package.json
 
       - name: Stage Stage-7 backend source and refresh package identity
         shell: pwsh
         run: |
-          $backend = Join-Path $PWD "stage7-backend/Library/fenics-jit/backends/micro-clang"
+          $sourcePrefix = Join-Path $env:RUNNER_TEMP "stage7 published build1 source"
+          Remove-Item -Recurse -Force $sourcePrefix -ErrorAction SilentlyContinue
+          & $env:MAMBA_EXE create -y -p $sourcePrefix --override-channels --strict-channel-priority -c precise-simulation -c conda-forge "python=3.12.*" "fenics-jit-micro-clang=20260826=h9490d1a_1" | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw "could not install exact published Stage-7 base package" }
+          $recordPath = Get-ChildItem -LiteralPath (Join-Path $sourcePrefix "conda-meta") -Filter "fenics-jit-micro-clang-*.json" -File | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $recordPath) { throw "installed Stage-7 base package record is missing" }
+          $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
+          if ([string]$record.version -ne "20260826" -or [string]$record.build -ne "h9490d1a_1") { throw "unexpected installed Stage-7 base package identity" }
+          if ($record.sha256 -and [string]$record.sha256 -ne $env:BASE_PACKAGE_SHA256) { throw "installed Stage-7 base package SHA-256 differs from the pinned public file" }
+
+          $backend = Join-Path $sourcePrefix "Library/fenics-jit/backends/micro-clang"
           if (-not (Test-Path -LiteralPath (Join-Path $backend "metadata.json") -PathType Leaf)) {
-            throw "Stage-7 backend artifact is missing"
+            throw "installed Stage-7 base backend is missing"
           }
 
           $staged = Join-Path $PWD "micro-clang-phase5-source"
@@ -131,23 +155,16 @@ jobs:
           }
 
           [pscustomobject]@{
-            source_run = [int64]$env:STAGE7_RUN_ID
-            source_head = "52a3da9bfc999492d2cfb3fac6aaece446cbe638"
+            base_package = $env:BASE_PACKAGE_FILE
+            base_package_sha256 = $env:BASE_PACKAGE_SHA256
+            base_package_bytes = [int64]$env:BASE_PACKAGE_BYTES
+            base_qualification_run = [int64]$env:BASE_QUALIFICATION_RUN_ID
+            base_qualification_head = $env:BASE_QUALIFICATION_HEAD
             payload_bytes = $bytes
             payload_mib = $bytes / 1MB
             wrapper_sha256 = (Get-FileHash -LiteralPath (Join-Path $staged "micro_clang_runtime.py") -Algorithm SHA256).Hash.ToLowerInvariant()
             manifest_sha256 = (Get-FileHash -LiteralPath (Join-Path $staged "manifest.csv") -Algorithm SHA256).Hash.ToLowerInvariant()
           } | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 stage7-derived-source.json
-
-      - name: Install package build tooling
-        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
-        with:
-          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
-          environment-name: micro-clang-stage7-package-tools
-          create-args: >-
-            -c conda-forge
-            python=3.12
-            rattler-build=0.74.0
 
       - name: Build Stage-7 micro-Clang package
         shell: pwsh
@@ -156,10 +173,7 @@ jobs:
           if (-not $rattler) { throw "rattler-build.exe not found" }
 
           Remove-Item -Recurse -Force stage7-output -ErrorAction SilentlyContinue
-          Copy-Item -LiteralPath phase5-qualified-output -Destination stage7-output -Recurse -Force
-          $channel = "file:///" + ((Resolve-Path stage7-output).Path -replace '\\','/')
-
-          & $rattler build --recipe recipes/fenics-jit-micro-clang/recipe.yaml --output-dir stage7-output --channel-priority strict -c $channel -c precise-simulation -c conda-forge
+          & $rattler build --recipe recipes/fenics-jit-micro-clang/recipe.yaml --output-dir stage7-output --channel-priority strict -c precise-simulation -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "Stage-7 micro-Clang package build failed" }
 
           $package = Get-ChildItem stage7-output -Recurse -Filter "fenics-jit-micro-clang-*.conda" |
@@ -180,6 +194,7 @@ jobs:
           name: micro-clang-phase4-stage7-package-channel
           path: |
             stage7-output/
+            base-package.json
             stage7-derived-source.json
             stage7-package.json
           if-no-files-found: error

@@ -157,7 +157,23 @@ class SelectedRuntime:
     backend_module: ModuleType
 
     def cache_root(self, base_cache: str | os.PathLike[str]) -> Path:
-        return backend_cache_root(base_cache, self.selected_backend, self.backend_cache_id)
+        """Map a cache path into this runtime's physical namespace exactly once."""
+        requested = Path(base_cache).expanduser().resolve()
+        namespace = tuple(
+            os.path.normcase(part)
+            for part in ("ffcx", self.selected_backend, self.backend_cache_id)
+        )
+        for candidate in (requested, *requested.parents):
+            if len(candidate.parts) < 3:
+                continue
+            suffix = tuple(os.path.normcase(part) for part in candidate.parts[-3:])
+            if suffix == namespace:
+                return requested
+        return backend_cache_root(
+            requested,
+            self.selected_backend,
+            self.backend_cache_id,
+        )
 
     def diagnostic_record(self, cache_root: Path | None = None) -> dict[str, object]:
         return {
@@ -337,6 +353,27 @@ def _self_test() -> None:
             "tinycc-selftest",
             {},
             _self_test_backend_module("_fenics_jit_selftest_tinycc"),
+        )
+
+        # Cache mapping is reentrant for this runtime's exact physical
+        # namespace, including subcaches used by nested DOLFINx JIT calls.
+        tinycc_cache = tinycc.cache_root(base_cache)
+        assert tinycc.cache_root(tinycc_cache) == tinycc_cache
+        tinycc_subcache = tinycc_cache / "phase6-jit" / "form"
+        assert tinycc.cache_root(tinycc_subcache) == tinycc_subcache
+
+        # A different backend or cache identity still gets a distinct namespace.
+        llvm_cache = llvm.cache_root(base_cache)
+        remapped_llvm_cache = tinycc.cache_root(llvm_cache)
+        assert remapped_llvm_cache != llvm_cache
+        assert remapped_llvm_cache.parts[-3:] == ("ffcx", "tinycc", "tinycc-selftest")
+        foreign_tinycc_cache = base_cache / "ffcx" / "tinycc" / "other-id"
+        remapped_foreign_tinycc_cache = tinycc.cache_root(foreign_tinycc_cache)
+        assert remapped_foreign_tinycc_cache != foreign_tinycc_cache
+        assert remapped_foreign_tinycc_cache.parts[-3:] == (
+            "ffcx",
+            "tinycc",
+            "tinycc-selftest",
         )
 
         sentinel_name = "FENICS_JIT_SELFTEST_SENTINEL"

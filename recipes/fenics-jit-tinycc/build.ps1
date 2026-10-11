@@ -95,7 +95,7 @@ $metadata = [ordered]@{
     adapter_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "tinycc_adapter.py")).Hash.ToLowerInvariant()
     runtime_integration_sha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $backend "tinycc_runtime.py")).Hash.ToLowerInvariant()
     backend_cache_id = $backendCacheId
-    qualified_dependencies = [ordered]@{ cffi = "2.1.*"; setuptools = "84.*"; python = ">=3.12,<3.15" }
+    qualified_dependencies = [ordered]@{ cffi = "2.1.*"; setuptools = "84.*"; python = ">=3.12,<3.16" }
     policy = [ordered]@{
         adapter_schema = "tinycc-cffi-adapter-v2"
         external_config = "suppress-all-v1"

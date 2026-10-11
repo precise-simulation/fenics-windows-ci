@@ -26,12 +26,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  QUALIFIED_RUN_ID: "37100978194"
-  QUALIFIED_HEAD: "dbcc097f2a1084d89b92b280c96d98dc5a7f8a9d"
+  QUALIFIED_RUN_ID: "38111201186"
+  QUALIFIED_HEAD: "f4fcd90b3cdc960c7f6e5d2eb2ee6a1407490423"
   QUALIFIED_ARTIFACT: "micro-clang-phase4-stage7-package-channel"
-  PACKAGE_FILE: "fenics-jit-micro-clang-20260826-h9490d1a_1.conda"
-  PACKAGE_SHA256: "d8a3510eb08615cb890dbf8f6da8b0d26f573e16a7b0bbee657edf563d40ad01"
-  PACKAGE_BYTES: "31890069"
+  PACKAGE_FILE: "fenics-jit-micro-clang-20260826-h9490d1a_2.conda"
+  PACKAGE_SHA256: "3cb9a8b2a1c16c3cba1bd89dc587637028a4fec8c5343380e4c7f4a67fa5de4d"
+  PACKAGE_BYTES: "31892148"
 
 jobs:
   promote:
@@ -40,6 +40,25 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Verify pinned qualification run succeeded
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $run = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:REPOSITORY/actions/runs/$env:QUALIFIED_RUN_ID"
+          if ([string]$run.status -ne "completed" -or [string]$run.conclusion -ne "success") {
+            throw "qualified run $env:QUALIFIED_RUN_ID is not a completed success"
+          }
+          if ([string]$run.head_sha -ne $env:QUALIFIED_HEAD) {
+            throw "qualified run head mismatch: $($run.head_sha)"
+          }
 
       - name: Download exact qualified Stage-7 package channel
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -57,9 +76,11 @@ jobs:
           $package = Join-Path $PWD "qualified-stage7/stage7-output/win-64/$env:PACKAGE_FILE"
           $packageJsonPath = Join-Path $PWD "qualified-stage7/stage7-package.json"
           $sourceJsonPath = Join-Path $PWD "qualified-stage7/stage7-derived-source.json"
+          $baseJsonPath = Join-Path $PWD "qualified-stage7/base-package.json"
           if (-not (Test-Path -LiteralPath $package)) { throw "qualified package is missing" }
           if (-not (Test-Path -LiteralPath $packageJsonPath)) { throw "stage7-package.json is missing" }
           if (-not (Test-Path -LiteralPath $sourceJsonPath)) { throw "stage7-derived-source.json is missing" }
+          if (-not (Test-Path -LiteralPath $baseJsonPath)) { throw "base-package.json is missing" }
 
           $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant()
           $bytes = (Get-Item -LiteralPath $package).Length
@@ -71,11 +92,21 @@ jobs:
           if ([string]$packageJson.sha256 -ne $env:PACKAGE_SHA256) { throw "qualified package record hash mismatch" }
           if ([int64]$packageJson.bytes -ne [int64]$env:PACKAGE_BYTES) { throw "qualified package record size mismatch" }
 
+          $baseJson = Get-Content -LiteralPath $baseJsonPath -Raw | ConvertFrom-Json
+          if ([string]$baseJson.package -ne "fenics-jit-micro-clang-20260826-h9490d1a_1.conda") { throw "unexpected base package filename" }
+          if ([string]$baseJson.sha256 -ne "d8a3510eb08615cb890dbf8f6da8b0d26f573e16a7b0bbee657edf563d40ad01") { throw "unexpected base package SHA-256" }
+          if ([int64]$baseJson.bytes -ne 31890069) { throw "unexpected base package size" }
+          if ([int64]$baseJson.qualification_run -ne 37100978194) { throw "unexpected base qualification run" }
+          if ([string]$baseJson.qualification_head -ne "dbcc097f2a1084d89b92b280c96d98dc5a7f8a9d") { throw "unexpected base qualification head" }
+
           $sourceJson = Get-Content -LiteralPath $sourceJsonPath -Raw | ConvertFrom-Json
-          if ([int64]$sourceJson.source_run -ne 37100266040) { throw "unexpected Stage-7 source run" }
-          if ([string]$sourceJson.source_head -ne "52a3da9bfc999492d2cfb3fac6aaece446cbe638") { throw "unexpected Stage-7 source head" }
-          if ([int64]$sourceJson.payload_bytes -ne 108891293) { throw "Stage-7 source payload mismatch" }
-          if ([string]$sourceJson.manifest_sha256 -ne "408b5bffdb62da06230165b3b51335ed6b088710f50624ddcfcea6acbad0fcc9") { throw "Stage-7 source manifest mismatch" }
+          if ([string]$sourceJson.base_package -ne [string]$baseJson.package) { throw "derived source base package filename mismatch" }
+          if ([string]$sourceJson.base_package_sha256 -ne [string]$baseJson.sha256) { throw "derived source base package hash mismatch" }
+          if ([int64]$sourceJson.base_package_bytes -ne [int64]$baseJson.bytes) { throw "derived source base package size mismatch" }
+          if ([int64]$sourceJson.base_qualification_run -ne [int64]$baseJson.qualification_run) { throw "derived source base qualification run mismatch" }
+          if ([string]$sourceJson.base_qualification_head -ne [string]$baseJson.qualification_head) { throw "derived source base qualification head mismatch" }
+          if ([int64]$sourceJson.payload_bytes -ne 109094136) { throw "Stage-7 source payload mismatch" }
+          if ([string]$sourceJson.manifest_sha256 -ne "205cb2af5fef7bf9b2456322a4dc188db247edad828fa6b399d3e225f7e3c3b5") { throw "Stage-7 source manifest mismatch" }
           if ([string]$sourceJson.wrapper_sha256 -ne "7f5c6a59a8e4b4e286f105bd94b27308fa162debf0814cecc9534a7ebb2c6d66") { throw "Stage-7 source wrapper mismatch" }
 
           [ordered]@{
@@ -85,6 +116,13 @@ jobs:
             package = $env:PACKAGE_FILE
             package_bytes = $bytes
             package_sha256 = $hash
+            base_package = [ordered]@{
+              package = [string]$baseJson.package
+              bytes = [int64]$baseJson.bytes
+              sha256 = [string]$baseJson.sha256
+              qualification_run = [int64]$baseJson.qualification_run
+              qualification_head = [string]$baseJson.qualification_head
+            }
             source_payload_bytes = [int64]$sourceJson.payload_bytes
             source_manifest_sha256 = [string]$sourceJson.manifest_sha256
             source_wrapper_sha256 = [string]$sourceJson.wrapper_sha256
@@ -112,30 +150,43 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $prefix = Join-Path $env:RUNNER_TEMP "micro clang release verification"
           $channelPath = (Resolve-Path "qualified-stage7/stage7-output").Path -replace "\\", "/"
           $localChannel = "file:///$channelPath"
-          $args = @("create", "-y", "-p", $prefix, "--override-channels", "--strict-channel-priority", "-c", $localChannel, "-c", "conda-forge", "python=3.12", "fenics-ffcx", "fenics-jit-micro-clang=20260826=h9490d1a_1")
-          & $env:MAMBA_EXE @args | Out-Host
-          if ($LASTEXITCODE -ne 0) { throw "qualified package clean install failed" }
+          foreach ($pythonVersion in @("3.12", "3.15")) {
+            $pythonTag = $pythonVersion -replace '\.', ''
+            $prefix = Join-Path $env:RUNNER_TEMP "micro clang release py$pythonTag"
+            $args = @(
+              "create", "-y", "-p", $prefix, "--override-channels", "--strict-channel-priority",
+              "-c", $localChannel, "-c", "precise-simulation", "-c", "conda-forge",
+              "python=$pythonVersion", "fenics-ffcx", "fenics-jit-micro-clang=20260826=h9490d1a_2"
+            )
+            & $env:MAMBA_EXE @args | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "qualified package clean install failed for Python $pythonVersion" }
 
-          $jit = Join-Path $prefix "Library/fenics-jit"
-          $backend = Join-Path $jit "backends/micro-clang"
-          $selector = Join-Path $jit "runtime/fenics_jit_selector.py"
-          foreach ($forbidden in @("llvm-mingw", "tinycc")) {
-            if (Test-Path -LiteralPath (Join-Path $jit "backends/$forbidden")) { throw "unexpected backend installed: $forbidden" }
+            $jit = Join-Path $prefix "Library/fenics-jit"
+            $backend = Join-Path $jit "backends/micro-clang"
+            $selector = Join-Path $jit "runtime/fenics_jit_selector.py"
+            foreach ($forbidden in @("llvm-mingw", "tinycc")) {
+              if (Test-Path -LiteralPath (Join-Path $jit "backends/$forbidden")) { throw "unexpected backend installed on Python ${pythonVersion}: $forbidden" }
+            }
+            $importLibrary = Join-Path $backend "lib/python/libpython${pythonTag}.a"
+            if (-not (Test-Path -LiteralPath $importLibrary -PathType Leaf)) { throw "promoted package is missing $importLibrary" }
+
+            $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
+            Remove-Item Env:FENICS_JIT_COMPILER -ErrorAction SilentlyContinue
+            $selectorText = (& (Join-Path $prefix "python.exe") $selector | Out-String)
+            if ($LASTEXITCODE -ne 0) { throw "shared selector could not activate promoted micro-Clang package on Python $pythonVersion" }
+            $selectorText | Set-Content -Encoding utf8 "selector-diagnostic-py${pythonTag}.json"
+            $selectorRecord = $selectorText | ConvertFrom-Json
+            if ([string]$selectorRecord.selected_backend -ne "micro-clang") { throw "promoted selector chose $($selectorRecord.selected_backend) on Python $pythonVersion" }
+
+            $clang = Join-Path $backend "bin/x86_64-w64-mingw32-clang.exe"
+            $smokeC = Join-Path $env:RUNNER_TEMP "micro-clang-release-smoke-py${pythonTag}.c"
+            $smokeDll = Join-Path $env:RUNNER_TEMP "micro-clang-release-smoke-py${pythonTag}.dll"
+            "__declspec(dllexport) int micro_clang_release_smoke(void) { return 42; }" | Set-Content -LiteralPath $smokeC -Encoding ascii
+            & $clang -shared $smokeC -o $smokeDll
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $smokeDll)) { throw "promoted compiler smoke failed on Python $pythonVersion" }
           }
-          $env:FENICS_JIT_COMPILER = "micro-clang"
-          $env:PATH = "$prefix;$prefix\Scripts;$prefix\Library\bin;$env:PATH"
-          & (Join-Path $prefix "python.exe") $selector | Tee-Object -FilePath selector-diagnostic.json
-          if ($LASTEXITCODE -ne 0) { throw "shared selector could not activate promoted micro-Clang package" }
-
-          $clang = Join-Path $backend "bin/x86_64-w64-mingw32-clang.exe"
-          $smokeC = Join-Path $env:RUNNER_TEMP "micro-clang-release-smoke.c"
-          $smokeDll = Join-Path $env:RUNNER_TEMP "micro-clang-release-smoke.dll"
-          "__declspec(dllexport) int micro_clang_release_smoke(void) { return 42; }" | Set-Content -LiteralPath $smokeC -Encoding ascii
-          & $clang -shared $smokeC -o $smokeDll
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $smokeDll)) { throw "promoted compiler smoke failed" }
 
       - name: Upload promotion evidence
         if: always()
@@ -144,7 +195,7 @@ jobs:
           name: micro-clang-release-promotion-evidence
           path: |
             promotion-record.json
-            selector-diagnostic.json
+            selector-diagnostic-py*.json
           if-no-files-found: warn
           retention-days: 30
 

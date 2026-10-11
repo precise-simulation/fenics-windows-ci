@@ -74,6 +74,16 @@ def main() -> None:
         raise RuntimeError(f"unexpected package phase: {metadata.get('phase')!r}")
     if metadata.get("production_selector_integrated") is not False:
         raise RuntimeError("Phase-2 package must not integrate the production selector")
+    if metadata.get("python_import_library_abi") != "python3.dll":
+        raise RuntimeError(
+            f"unexpected Python import-library ABI: {metadata.get('python_import_library_abi')!r}"
+        )
+    expected_aliases = {"python3", "python312", "python313", "python314", "python315"}
+    aliases = set(metadata.get("python_import_library_aliases") or [])
+    if not expected_aliases.issubset(aliases):
+        raise RuntimeError(
+            f"missing Python import-library aliases: {sorted(expected_aliases - aliases)}"
+        )
 
     py_compile.compile(str(root / "fenics_jit_runtime.py"), doraise=True)
 

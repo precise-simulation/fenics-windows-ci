@@ -8,6 +8,9 @@ if not exist "%BACKEND%\micro_clang_runtime.py" exit /b 1
 if not exist "%BACKEND%\fenics_jit_runtime.py" exit /b 1
 if not exist "%BACKEND%\metadata.json" exit /b 1
 if not exist "%BACKEND%\manifest.csv" exit /b 1
+if not exist "%BACKEND%\lib\python\libpython315.a" exit /b 1
+powershell.exe -NoProfile -Command "$meta = Get-Content -LiteralPath '%BACKEND%\metadata.json' -Raw | ConvertFrom-Json; if ([string]$meta.python_import_library_abi -ne 'python3.dll' -or 'python315' -notin @($meta.python_import_library_aliases)) { exit 1 }"
+if errorlevel 1 exit /b 1
 if not exist "%SELECTOR%" exit /b 1
 if exist "%PREFIX%\Library\fenics-jit\backends\llvm-mingw" exit /b 1
 if exist "%PREFIX%\Library\fenics-jit\backends\tinycc" exit /b 1

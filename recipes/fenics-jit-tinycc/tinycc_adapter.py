@@ -16,6 +16,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import sysconfig
 import threading
 from pathlib import Path
@@ -255,6 +256,10 @@ class TinyCCBuildExt(_dist.build_ext):
         ]
         if _header_supports_py_no_link_lib():
             command.append("-DPy_NO_LINK_LIB=1")
+        # CPython 3.15 requires a supported TLS spelling in pyport.h. TinyCC
+        # implements the C11 _Thread_local storage-class specifier.
+        if sys.version_info >= (3, 15):
+            command.append("-Dthread_local=_Thread_local")
 
         for name, value in (getattr(ext, "define_macros", None) or []):
             command.append(f"-D{name}" if value is None else f"-D{name}={value}")

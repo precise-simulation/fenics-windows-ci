@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -182,8 +183,15 @@ def test_abi_model(backend: Path, work: Path) -> dict[str, int]:
     return result
 
 
+@contextlib.contextmanager
+def _private_outer_runtime(_jit_options):
+    """Keep direct-adapter self-tests out of the production JIT selector."""
+    yield
+
+
 def run_poisson(adapter, config, work: Path) -> dict[str, float]:
     import basix.ufl
+    import dolfinx.jit
     import numpy as np
     import ufl
     from dolfinx import fem, mesh
@@ -198,17 +206,26 @@ def run_poisson(adapter, config, work: Path) -> dict[str, float]:
     u = ufl.TrialFunction(space); v = ufl.TestFunction(space)
     cache = work / "ffcx-cache"
     cache.mkdir(parents=True, exist_ok=True)
-    with adapter.activate(config):
-        problem = LinearProblem(
-            ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx,
-            fem.Constant(domain, 1.0) * v * ufl.dx,
-            bcs=[bc],
-            petsc_options={"ksp_type": "preonly", "pc_type": "lu"},
-            petsc_options_prefix="tinycc_package_",
-            jit_options={"cache_dir": cache},
-        )
-        solution = problem.solve()
-        norm = float(np.linalg.norm(solution.x.array))
+    original_dolfinx_context = getattr(
+        dolfinx.jit, "_fenics_windows_jit_runtime", None
+    )
+    if original_dolfinx_context is not None:
+        dolfinx.jit._fenics_windows_jit_runtime = _private_outer_runtime
+    try:
+        with adapter.activate(config):
+            problem = LinearProblem(
+                ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx,
+                fem.Constant(domain, 1.0) * v * ufl.dx,
+                bcs=[bc],
+                petsc_options={"ksp_type": "preonly", "pc_type": "lu"},
+                petsc_options_prefix="tinycc_package_",
+                jit_options={"cache_dir": cache},
+            )
+            solution = problem.solve()
+            norm = float(np.linalg.norm(solution.x.array))
+    finally:
+        if original_dolfinx_context is not None:
+            dolfinx.jit._fenics_windows_jit_runtime = original_dolfinx_context
     if not np.isfinite(norm) or norm <= 0:
         raise RuntimeError(f"Poisson solution norm invalid: {norm}")
     return {"solution_norm": norm, "generated_pyd_count": float(len(list(cache.rglob("*.pyd"))))}

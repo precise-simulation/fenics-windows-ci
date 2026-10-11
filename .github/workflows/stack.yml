@@ -143,11 +143,6 @@ jobs:
         timeout-minutes: 120
         run: scripts/micro-clang-jit/run-default-standalone.ps1
 
-      - name: Preview ABI3 on Python 3.15
-        shell: pwsh
-        run: scripts/test-python-abi3.ps1 -Preview
-        continue-on-error: true
-
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

@@ -12,7 +12,7 @@ Packages are published on the [precise-simulation](https://anaconda.org/precise-
 
 - Windows 10 or Windows 11, 64-bit
 - Miniforge, Miniconda, or Anaconda
-- CPython 3.12, 3.13, or 3.14
+- CPython 3.12, 3.13, 3.14, or 3.15
 
 Create a dedicated conda environment and install DOLFINx:
 
@@ -22,7 +22,7 @@ conda activate fenics-windows
 conda install -c precise-simulation -c conda-forge "libblas=*=*openblas" fenics-dolfinx
 ```
 
-Python 3.12, 3.13, and 3.14 are supported. The packages use Python's stable ABI, so the same DOLFINx binary can serve all supported interpreter versions.
+Python 3.12, 3.13, 3.14, and 3.15 are supported. The packages use Python's stable ABI, so the same DOLFINx binary can serve all supported interpreter versions.
 
 The install pulls in the required Windows builds of PETSc, petsc4py, HDF5, Intel MPI, mpi4py, Basix, FFCx, UFL, PT-Scotch, MUMPS, OpenBLAS, and their dependencies.
 

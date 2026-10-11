@@ -37,7 +37,15 @@ if ($microRecords.Count -ne 1) {
     throw "normal standalone environment does not contain exactly one micro-Clang package record"
 }
 $micro = Get-Content -LiteralPath $microRecords[0].FullName -Raw | ConvertFrom-Json
-if ([string]$micro.version -ne "20260826" -or [string]$micro.build -ne "h9490d1a_1") {
+$microRecipe = Get-Content -LiteralPath (Join-Path $root "recipes\fenics-jit-micro-clang\recipe.yaml") -Raw
+$versionMatch = [regex]::Match($microRecipe, '(?m)^  version:\s*"([^"]+)"\s*$')
+$buildMatch = [regex]::Match($microRecipe, '(?m)^  build:\s*(\d+)\s*$')
+if (-not $versionMatch.Success -or -not $buildMatch.Success) {
+    throw "could not read the expected micro-Clang package identity from its recipe"
+}
+$expectedVersion = $versionMatch.Groups[1].Value
+$expectedBuildNumber = [int]$buildMatch.Groups[1].Value
+if ([string]$micro.version -ne $expectedVersion -or [int]$micro.build_number -ne $expectedBuildNumber) {
     throw "standalone environment did not select the qualified Full-LTO package: $($micro | ConvertTo-Json -Compress)"
 }
 foreach ($forbidden in @("fenics-jit-llvm-mingw", "fenics-jit-tinycc")) {

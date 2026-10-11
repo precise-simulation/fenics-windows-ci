@@ -108,7 +108,8 @@ foreach ($libraryName in @(
     "libpython3.a",
     "libpython312.a",
     "libpython313.a",
-    "libpython314.a"
+    "libpython314.a",
+    "libpython315.a"
 )) {
     $libraryPath = Join-Path $pythonLibDir $libraryName
     & $dlltool -m i386:x86-64 -d $defPath -l $libraryPath -D python3.dll

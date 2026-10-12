@@ -16,6 +16,7 @@ if not exist "%JIT_ROOT%\lib\python\libpython3.a" exit /b 1
 if not exist "%JIT_ROOT%\lib\python\libpython312.a" exit /b 1
 if not exist "%JIT_ROOT%\lib\python\libpython313.a" exit /b 1
 if not exist "%JIT_ROOT%\lib\python\libpython314.a" exit /b 1
+if not exist "%JIT_ROOT%\lib\python\libpython315.a" exit /b 1
 if not exist "%JIT_ROOT%\manifest.csv" exit /b 1
 if not exist "%JIT_ROOT%\metadata.json" exit /b 1
 if not exist "%JIT_ROOT%\minimization-stage-w.json" exit /b 1

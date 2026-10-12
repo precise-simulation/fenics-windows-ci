@@ -454,7 +454,9 @@ def shared_cache_probe(selector, backend: str, base_cache: Path) -> float:
         domain = mesh.create_unit_square(MPI.COMM_WORLD, 2, 2)
         form = fem.form(
             fem.Constant(domain, 1.0) * ufl.dx,
-            jit_options={"cache_dir": cache},
+            # DOLFINx owns conversion from the logical base cache to the
+            # selected backend's physical cache namespace.
+            jit_options={"cache_dir": base_cache},
         )
         value = float(fem.assemble_scalar(form))
     if not math.isclose(value, 1.0, rel_tol=2e-10, abs_tol=2e-10):
@@ -863,7 +865,7 @@ def main() -> int:
             os.environ["HOME"] = str(hostile_home)
             os.environ["USERPROFILE"] = str(hostile_home)
         manager, backend_cache_id = runtime_context(args.mode, backend_root, diagnostics)
-        with manager:
+        with selected_backend(args.mode), manager:
             first = assemble_metrics(cache)
             middle = command_count(diagnostics)
             second = assemble_metrics(cache)

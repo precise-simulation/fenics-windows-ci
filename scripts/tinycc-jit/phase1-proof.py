@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import os
@@ -346,6 +347,12 @@ def _negative_inputs(config: TinyCCConfig, work: Path, diagnostics: Path) -> dic
     return results
 
 
+@contextlib.contextmanager
+def _private_outer_runtime(_jit_options):
+    """Keep DOLFINx inside the already-active private TinyCC adapter."""
+    yield
+
+
 def _run_poisson(config: TinyCCConfig, work: Path, poisson_script: Path) -> list[Path]:
     cache_root = work / "ffcx-cache-root"
     if cache_root.exists():
@@ -358,6 +365,7 @@ def _run_poisson(config: TinyCCConfig, work: Path, poisson_script: Path) -> list
     with activate(config):
         import cffi
         import dolfinx
+        import dolfinx.jit
         import ffcx
         import setuptools
 
@@ -371,7 +379,20 @@ def _run_poisson(config: TinyCCConfig, work: Path, poisson_script: Path) -> list
             ]
         ) + "\n"
         (config.diagnostics_dir / "versions.txt").write_text(version_text, encoding="utf-8")
-        runpy.run_path(str(poisson_script), run_name="__main__")
+
+        # Current DOLFINx packages wrap each FFCx JIT operation in the
+        # production selector. Phase 1 qualifies the source-stage TinyCC
+        # adapter, so keep that private activation in control of this proof.
+        original_dolfinx_context = getattr(
+            dolfinx.jit, "_fenics_windows_jit_runtime", None
+        )
+        if original_dolfinx_context is not None:
+            dolfinx.jit._fenics_windows_jit_runtime = _private_outer_runtime
+        try:
+            runpy.run_path(str(poisson_script), run_name="__main__")
+        finally:
+            if original_dolfinx_context is not None:
+                dolfinx.jit._fenics_windows_jit_runtime = original_dolfinx_context
 
     pyds = sorted(cache_root.rglob("*.pyd"))
     if not pyds:

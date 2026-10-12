@@ -1,12 +1,12 @@
 {
   "backend": {
-    "adapter_sha256": "3d5ca270e7d8e454720ab4ce30587fa7cf137009d883980c2373235f198d5ef2",
-    "cache_id": "tinycc-0fb54300b565-aaa86e30769a96f90b37",
+    "adapter_sha256": "387cf7dab331d7e1bf11b6a438565bfefe178e1bc8b299e654cb483a49fc3f4f",
+    "cache_id": "tinycc-0fb54300b565-e78e53fe84d727879247",
     "local_build_patch": "build-tcc-msvc-repro-v3: remove -Zi, enable deterministic source path mapping, and add linker -Brepro",
     "patched_build_script_sha256": "52e26b204d4c0273980ac057b9066d7e391d855b74f56c3499dd1626dfb3508a",
     "policy": {
       "abi": "mingw32-mswin64-msbitfields-longdouble8-v1",
-      "adapter_schema": "tinycc-cffi-adapter-v2",
+      "adapter_schema": "tinycc-cffi-adapter-v3",
       "crt": "msvcrt-owned-allocation-boundary-v1",
       "external_config": "suppress-all-v1",
       "pe_hardening": "dynamicbase-highentropyva-nxcompat-v1",
@@ -47,7 +47,7 @@
   "generator_versions": {
     "basix": "0.11.0",
     "cffi": "2.1.1",
-    "dolfinx": "0.11.0.post0",
+    "dolfinx": "0.11.0",
     "ffcx": "0.11.0",
     "ufl": "2026.1.0"
   },
@@ -235,11 +235,72 @@
           "test_identity": "fresh-cache-reload-proof"
         }
       ]
+    },
+    "3.15": {
+      "module_count": 8,
+      "modules": [
+        {
+          "logical_module": "libffcx_forms_7e8c9481d0a356cb19b83c1ad6f592ac660d9882",
+          "normalized_source_sha256": "597f2d500edd8058038f656cd1cd3a1dc92934e39cedd718c82933ef8f920faa",
+          "sequence_index": 0,
+          "source_path": "broad forms cache/libffcx_forms_7e8c9481d0a356cb19b83c1ad6f592ac660d9882.c",
+          "test_identity": "p2-poisson-module-1"
+        },
+        {
+          "logical_module": "libffcx_forms_d02a8a5bf03968d0542c9f66d3df1802f7d604c0",
+          "normalized_source_sha256": "164888f94fc7829785594cd9637399a551ceeed96acb3cf14c282dde106d50cb",
+          "sequence_index": 1,
+          "source_path": "broad forms cache/libffcx_forms_d02a8a5bf03968d0542c9f66d3df1802f7d604c0.c",
+          "test_identity": "p2-poisson-module-2"
+        },
+        {
+          "logical_module": "libffcx_forms_5aed470e9c72f0e0632690ab8cea9301c5afe35a",
+          "normalized_source_sha256": "50e6ab57f91e46a60dbcaf2cbe66675c230117fd08a00ef29dab8fdd149a1cd0",
+          "sequence_index": 2,
+          "source_path": "broad forms cache/libffcx_forms_5aed470e9c72f0e0632690ab8cea9301c5afe35a.c",
+          "test_identity": "vector-linear-elasticity"
+        },
+        {
+          "logical_module": "libffcx_forms_a8313fd592449500a8563233a6378af7dcfb8bf2",
+          "normalized_source_sha256": "c3e7dac5112e42f0b0bd0f62ecaff853ad93ab3e0b4df1fa0410f901fc3a06c7",
+          "sequence_index": 3,
+          "source_path": "broad forms cache/libffcx_forms_a8313fd592449500a8563233a6378af7dcfb8bf2.c",
+          "test_identity": "cell-facet-coefficients"
+        },
+        {
+          "logical_module": "libffcx_forms_f41c118247a4dc7d470f2642b617e5352e6e1984",
+          "normalized_source_sha256": "aded41294928d6b93bfb5dba757113f3bcdc4c413266c98f8423cfc8b644a37e",
+          "sequence_index": 4,
+          "source_path": "broad forms cache/libffcx_forms_f41c118247a4dc7d470f2642b617e5352e6e1984.c",
+          "test_identity": "nonlinear-residual-jacobian-module-1"
+        },
+        {
+          "logical_module": "libffcx_forms_32cd073b6fc0d3096a28f577fe445f496f86e8cc",
+          "normalized_source_sha256": "2038f46432ba5b95f53a017c709886e8f4a79cbc99f96513329adbcd0aa8ae20",
+          "sequence_index": 5,
+          "source_path": "broad forms cache/libffcx_forms_32cd073b6fc0d3096a28f577fe445f496f86e8cc.c",
+          "test_identity": "nonlinear-residual-jacobian-module-2"
+        },
+        {
+          "logical_module": "libffcx_expressions_9582b5b0656af0306b27296e50239e627fc9fe5e",
+          "normalized_source_sha256": "c708e06a52c1d1f19227b7fa784fddfbbaf5ece77861399bfed0c6d6d707d3e7",
+          "sequence_index": 6,
+          "source_path": "broad forms cache/libffcx_expressions_9582b5b0656af0306b27296e50239e627fc9fe5e.c",
+          "test_identity": "fem-expression"
+        },
+        {
+          "logical_module": "libffcx_forms_480aae72744a0647f99e0e00f7da63fabd09e6b6",
+          "normalized_source_sha256": "a6ff887449b3f84c1cf4594bd3854469fc630430d75ebddbef32cfa37446d24b",
+          "sequence_index": 7,
+          "source_path": "cache reload proof/libffcx_forms_480aae72744a0647f99e0e00f7da63fabd09e6b6.c",
+          "test_identity": "fresh-cache-reload-proof"
+        }
+      ]
     }
   },
   "qualified_from": {
-    "head_sha": "4542bc0acf10e8ce4a2076ce39ada65576b6b6f1",
-    "run_number": 68,
+    "head_sha": "e606efbbd95ce33d051f358782090965f757db43",
+    "run_number": 173,
     "workflow": "tinycc-jit"
   },
   "schema": 1,

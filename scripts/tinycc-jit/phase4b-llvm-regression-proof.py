@@ -128,21 +128,16 @@ def main() -> int:
             f"{default_backend!r}"
         )
 
-    # This TinyCC regression environment intentionally installs only TinyCC and
-    # LLVM-MinGW. After the production default switch, an unset selector must
-    # therefore fail clearly rather than silently falling back to LLVM-MinGW.
+    # The production DOLFINx package now brings the default micro-Clang backend
+    # into this side-by-side regression environment. Prove that the default
+    # remains available while the explicit LLVM-MinGW path is qualified below.
     with selector_value(None):
-        try:
-            selector.discover_runtime()
-        except RuntimeError as exc:
-            missing_default_error = str(exc)
-            if "micro-clang" not in missing_default_error or "unavailable" not in missing_default_error:
-                raise
-        else:
-            raise RuntimeError(
-                "TinyCC/LLVM-MinGW regression environment unexpectedly provides "
-                "the default micro-Clang backend"
-            )
+        default_runtime = selector.discover_runtime()
+    if default_runtime.selected_backend != "micro-clang":
+        raise RuntimeError(
+            "unset FENICS_JIT_COMPILER did not discover the micro-Clang runtime: "
+            f"{default_runtime.selected_backend!r}"
+        )
 
     with selector_value("llvm-mingw"):
         shared_runtime = selector.discover_runtime()
@@ -229,9 +224,9 @@ def main() -> int:
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         "default_selector": {
             "selected_backend": default_backend,
-            "backend_available_in_regression_environment": False,
-            "error": missing_default_error,
-            "no_silent_fallback": True,
+            "backend_available_in_regression_environment": True,
+            "backend_cache_id": default_runtime.backend_cache_id,
+            "backend_root": str(default_runtime.backend_root.resolve()),
         },
         "explicit_selector": {
             "selected_backend": shared_runtime.selected_backend,

@@ -34,6 +34,7 @@ _REMOVED_ENV = {
     "DISTUTILS_USE_SDK", "MSSdk",
 }
 _REMOVED_PREFIXES = ("VSCMD_",)
+_ACTIVE_DIAGNOSTICS_ENV = "_FENICS_JIT_ACTIVE_DIAGNOSTICS_DIR"
 
 _ACTIVATION_LOCK = threading.RLock()
 _ACTIVE_BACKEND: str | None = None
@@ -157,7 +158,23 @@ class SelectedRuntime:
     backend_module: ModuleType
 
     def cache_root(self, base_cache: str | os.PathLike[str]) -> Path:
-        return backend_cache_root(base_cache, self.selected_backend, self.backend_cache_id)
+        """Map a cache path into this runtime's physical namespace exactly once."""
+        requested = Path(base_cache).expanduser().resolve()
+        namespace = tuple(
+            os.path.normcase(part)
+            for part in ("ffcx", self.selected_backend, self.backend_cache_id)
+        )
+        for candidate in (requested, *requested.parents):
+            if len(candidate.parts) < 3:
+                continue
+            suffix = tuple(os.path.normcase(part) for part in candidate.parts[-3:])
+            if suffix == namespace:
+                return requested
+        return backend_cache_root(
+            requested,
+            self.selected_backend,
+            self.backend_cache_id,
+        )
 
     def diagnostic_record(self, cache_root: Path | None = None) -> dict[str, object]:
         return {
@@ -183,9 +200,18 @@ class SelectedRuntime:
         """Activate the selected backend under the shared serialization contract."""
         cache = Path(cache_root).expanduser().resolve()
         cache.mkdir(parents=True, exist_ok=True)
+        inherited_diagnostics = os.environ.get(_ACTIVE_DIAGNOSTICS_ENV)
+        inherit_active_diagnostics = (
+            inherited_diagnostics is not None
+            and os.environ.get("FENICS_JIT_COMPILER") == self.selected_backend
+            and os.environ.get("FENICS_JIT_BACKEND_CACHE_ID") == self.backend_cache_id
+            and os.environ.get("FENICS_JIT_BACKEND_ROOT") == str(self.backend_root)
+        )
         diagnostics = (
             Path(diagnostics_dir).expanduser().resolve()
             if diagnostics_dir is not None
+            else Path(inherited_diagnostics).expanduser().resolve()
+            if inherit_active_diagnostics
             else Path(tempfile.gettempdir()).resolve()
             / "fenics-jit-diagnostics"
             / self.selected_backend
@@ -203,6 +229,7 @@ class SelectedRuntime:
                 os.environ["FENICS_JIT_BACKEND_CACHE_ID"] = self.backend_cache_id
                 os.environ["FENICS_JIT_CACHE_ROOT"] = str(cache)
                 os.environ["FENICS_JIT_BACKEND_ROOT"] = str(self.backend_root)
+                os.environ[_ACTIVE_DIAGNOSTICS_ENV] = str(diagnostics)
 
                 if self.selected_backend == "tinycc":
                     sanitized = _sanitized_tinycc_environment()
@@ -339,6 +366,27 @@ def _self_test() -> None:
             _self_test_backend_module("_fenics_jit_selftest_tinycc"),
         )
 
+        # Cache mapping is reentrant for this runtime's exact physical
+        # namespace, including subcaches used by nested DOLFINx JIT calls.
+        tinycc_cache = tinycc.cache_root(base_cache)
+        assert tinycc.cache_root(tinycc_cache) == tinycc_cache
+        tinycc_subcache = tinycc_cache / "phase6-jit" / "form"
+        assert tinycc.cache_root(tinycc_subcache) == tinycc_subcache
+
+        # A different backend or cache identity still gets a distinct namespace.
+        llvm_cache = llvm.cache_root(base_cache)
+        remapped_llvm_cache = tinycc.cache_root(llvm_cache)
+        assert remapped_llvm_cache != llvm_cache
+        assert remapped_llvm_cache.parts[-3:] == ("ffcx", "tinycc", "tinycc-selftest")
+        foreign_tinycc_cache = base_cache / "ffcx" / "tinycc" / "other-id"
+        remapped_foreign_tinycc_cache = tinycc.cache_root(foreign_tinycc_cache)
+        assert remapped_foreign_tinycc_cache != foreign_tinycc_cache
+        assert remapped_foreign_tinycc_cache.parts[-3:] == (
+            "ffcx",
+            "tinycc",
+            "tinycc-selftest",
+        )
+
         sentinel_name = "FENICS_JIT_SELFTEST_SENTINEL"
         nested_name = "FENICS_JIT_SELFTEST_NESTED"
         old_sentinel = os.environ.get(sentinel_name)
@@ -352,22 +400,33 @@ def _self_test() -> None:
         try:
             # Same-backend nesting must be reentrant and restore the outer
             # activation's exact process environment when the inner scope exits.
+            outer_diagnostics = temp_root / "diag-nested-outer"
             with tinycc.activate(
                 cache_root=tinycc.cache_root(base_cache),
-                diagnostics_dir=temp_root / "diag-nested-outer",
+                diagnostics_dir=outer_diagnostics,
             ):
                 assert _ACTIVE_BACKEND == "tinycc"
                 assert _ACTIVE_OWNER_THREAD == threading.get_ident()
                 assert _ACTIVE_DEPTH == 1
+                assert Path(os.environ[_ACTIVE_DIAGNOSTICS_ENV]).resolve() == outer_diagnostics
                 outer_environment = dict(os.environ)
                 with tinycc.activate(
                     cache_root=tinycc.cache_root(base_cache),
-                    diagnostics_dir=temp_root / "diag-nested-inner",
                 ):
                     assert _ACTIVE_BACKEND == "tinycc"
                     assert _ACTIVE_DEPTH == 2
+                    assert Path(os.environ[_ACTIVE_DIAGNOSTICS_ENV]).resolve() == outer_diagnostics
                     os.environ[nested_name] = "inner"
                 assert _ACTIVE_DEPTH == 1
+                assert dict(os.environ) == outer_environment
+
+                inner_diagnostics = temp_root / "diag-nested-inner"
+                with tinycc.activate(
+                    cache_root=tinycc.cache_root(base_cache),
+                    diagnostics_dir=inner_diagnostics,
+                ):
+                    assert _ACTIVE_DEPTH == 2
+                    assert Path(os.environ[_ACTIVE_DIAGNOSTICS_ENV]).resolve() == inner_diagnostics
                 assert dict(os.environ) == outer_environment
             assert _ACTIVE_BACKEND is None
             assert _ACTIVE_OWNER_THREAD is None

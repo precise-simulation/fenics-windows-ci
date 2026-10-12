@@ -127,7 +127,8 @@ foreach ($libraryName in @(
     "libpython3.a",
     "libpython312.a",
     "libpython313.a",
-    "libpython314.a"
+    "libpython314.a",
+    "libpython315.a"
 )) {
     $libraryPath = Join-Path $pythonLibDir $libraryName
     & $dlltool -m i386:x86-64 -d $defPath -l $libraryPath -D python3.dll
@@ -156,7 +157,7 @@ $metadata = [ordered]@{
     clang_version = $clangVersion
     lld_version = $lldVersion
     python_import_library_abi = "python3.dll"
-    python_import_library_aliases = @("python3", "python312", "python313", "python314")
+    python_import_library_aliases = @("python3", "python312", "python313", "python314", "python315")
     minimization_stage = "stage-h"
     minimization_report = "minimization-stage-h.json"
     runtime_helper_owner = "fenics-jit-runtime"

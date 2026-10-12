@@ -317,7 +317,6 @@ def _run_mpi_child(runtime, work: Path, output: Path, bundle: Path, original_pre
 
         diagnostics = work / "diagnostics" / "mpi" / f"rank-{comm.rank}"
         diagnostics.mkdir(parents=True, exist_ok=True)
-
         domain = mesh.create_unit_square(comm, 3, 3)
         V = fem.functionspace(domain, ("Lagrange", 2))
         u, v = ufl.TrialFunction(V), ufl.TestFunction(V)

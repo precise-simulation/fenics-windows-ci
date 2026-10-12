@@ -111,9 +111,13 @@ def validate(root: Path = ROOT) -> list[str]:
         tiny_adapter = _read("recipes/fenics-jit-tinycc/tinycc_adapter.py")
         if tiny.get("requires_python_gil") and "Py_GIL_DISABLED" not in tiny_adapter:
             errors.append("TinyCC GIL-only policy is not enforced by adapter")
+        versioned_python_line = next(
+            (line for line in tiny_adapter.splitlines() if line.startswith("_VERSIONED_PYTHON = re.compile(")),
+            "",
+        )
         for version in supported:
-            tag = version.replace(".", "")
-            if f"python3{tag}" not in tiny_adapter:
+            minor_tag = version.split(".", 1)[1]
+            if minor_tag not in versioned_python_line:
                 errors.append(f"TinyCC versioned-Python rejection policy is missing Python {version}")
 
         micro = backends.get("micro-clang") or {}

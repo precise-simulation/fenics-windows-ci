@@ -8,6 +8,8 @@ This epic qualified TinyCC (TCC) as a much smaller self-contained backend withou
 
 TinyCC remains explicit/opt-in for normal installs and is qualified for the compact standalone profile. No automatic fallback or default-backend switch is part of this epic; see [07-qualification-result.md](07-qualification-result.md).
 
+**Current repository policy (2026-10-12):** standard GIL-enabled CPython 3.15 was promoted for the optional TinyCC backend by PR #24. The live package is build 3 with `python >=3.12,<3.16` plus `python-gil`; free-threaded CPython remains a separate, unqualified ABI target. Historical phase/qualification records below intentionally retain the support matrix that was true when each phase ran.
+
 ## Goal
 
 Provide a package provisionally named:

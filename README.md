@@ -193,6 +193,10 @@ Packages are published at:
 
 This repository contains the recipes and CI infrastructure used to build and publish the native Windows packages.
 
+## Maintainer policy
+
+The current supported Python/JIT backend matrix is defined in [`config/support-policy.json`](config/support-policy.json). The maintenance and release procedure for new Python minors and JIT backend revisions is documented in [`docs/jit-backend-maintenance.md`](docs/jit-backend-maintenance.md).
+
 ## Reporting problems
 
 For problems specific to these Windows packages, please open a GitHub issue and include:

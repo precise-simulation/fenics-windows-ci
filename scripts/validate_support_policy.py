@@ -53,6 +53,14 @@ def validate(root: Path = ROOT) -> list[str]:
         overlap = sorted(set(supported) & set(preview), key=_minor_key)
         if overlap:
             errors.append(f"python supported/preview overlap: {overlap}")
+        expected_next = None
+        if supported:
+            major, minor = _minor_key(supported[-1])
+            expected_next = f"{major}.{minor + 1}"
+            if python_policy.get("next_minor_candidate") != expected_next:
+                errors.append(
+                    f"python.next_minor_candidate must be {expected_next} for supported max {supported[-1]}"
+                )
 
         jit = policy.get("jit") or {}
         backends = jit.get("backends") or {}
@@ -61,6 +69,14 @@ def validate(root: Path = ROOT) -> list[str]:
             errors.append("jit.default_backend is not present in jit.backends")
         elif backends[default_backend].get("role") != "default":
             errors.append("jit.default_backend must have role=default")
+
+        runtime_spec = jit.get("runtime_package") or {}
+        runtime_recipe = _read("recipes/fenics-jit-runtime/recipe.yaml")
+        runtime_version, _ = _recipe_identity(runtime_recipe)
+        if runtime_version != str(runtime_spec.get("version")):
+            errors.append(
+                f"fenics-jit-runtime recipe version {runtime_version!r} != policy {runtime_spec.get('version')!r}"
+            )
 
         recipe_map = {
             "micro-clang": "recipes/fenics-jit-micro-clang/recipe.yaml",
@@ -84,11 +100,43 @@ def validate(root: Path = ROOT) -> list[str]:
         constraint = tiny.get("python_constraint")
         if constraint and f"- python {constraint}" not in tiny_recipe:
             errors.append("TinyCC runtime Python constraint does not match policy")
+        if supported and expected_next:
+            expected_constraint = f">={supported[0]},<{expected_next}"
+            if constraint != expected_constraint:
+                errors.append(
+                    f"TinyCC python_constraint must be {expected_constraint} for the supported matrix"
+                )
         if tiny.get("requires_python_gil") and "- python-gil" not in tiny_recipe:
             errors.append("TinyCC policy requires python-gil but recipe does not")
         tiny_adapter = _read("recipes/fenics-jit-tinycc/tinycc_adapter.py")
         if tiny.get("requires_python_gil") and "Py_GIL_DISABLED" not in tiny_adapter:
             errors.append("TinyCC GIL-only policy is not enforced by adapter")
+        for version in supported:
+            tag = version.replace(".", "")
+            if f"python3{tag}" not in tiny_adapter:
+                errors.append(f"TinyCC versioned-Python rejection policy is missing Python {version}")
+
+        micro = backends.get("micro-clang") or {}
+        dolfinx_recipe = _read("recipes/dolfinx/recipe.yaml")
+        runtime_name = runtime_spec.get("name")
+        runtime_version_policy = runtime_spec.get("version")
+        if runtime_name and runtime_version_policy:
+            runtime_pin = f"{runtime_name} =={runtime_version_policy}"
+            if runtime_pin not in dolfinx_recipe:
+                errors.append("DOLFINx JIT runtime dependency pin does not match policy")
+        micro_pin = f"{micro.get('package')} =={micro.get('version')}"
+        if micro_pin not in dolfinx_recipe:
+            errors.append("DOLFINx default micro-Clang dependency pin does not match policy")
+
+        micro_release = _read(".github/workflows/micro-clang-release.yml")
+        package_file = re.search(r'(?m)^\s*PACKAGE_FILE:\s*"([^"]+)"', micro_release)
+        expected_prefix = f"{micro.get('package')}-{micro.get('version')}-"
+        expected_suffix = f"_{micro.get('build')}.conda"
+        if not package_file or not (
+            package_file.group(1).startswith(expected_prefix)
+            and package_file.group(1).endswith(expected_suffix)
+        ):
+            errors.append("micro-clang release PACKAGE_FILE does not match policy")
 
         readme = _read("README.md")
         if supported:
@@ -110,6 +158,8 @@ def validate(root: Path = ROOT) -> list[str]:
             errors.append("optional-jit-release must read config/support-policy.json")
         if "python.supported" not in optional_release:
             errors.append("optional-jit-release must derive its Python matrix from policy")
+        if "ANACONDA_CHANNEL" not in optional_release:
+            errors.append("optional-jit-release must derive its channel from policy")
 
         channel_test = _read(".github/workflows/channel-dep-test.yml")
         expected_matrix = 'python: [' + ", ".join(f'\"{v}\"' for v in supported) + "]"

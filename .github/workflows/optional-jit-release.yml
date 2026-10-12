@@ -1,0 +1,198 @@
+name: optional-jit-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish qualified packages to precise-simulation"
+        type: boolean
+        required: true
+        default: false
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/optional-jit-release.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optional-jit-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Qualify and optionally publish optional JIT backends
+    if: ${{ github.event_name != 'push' || contains(github.event.head_commit.message, '[publish optional jit]') }}
+    runs-on: windows-2022
+    timeout-minutes: 240
+    env:
+      LLVM_VERSION: "20260826"
+      LLVM_BUILD: "55"
+      TINYCC_VERSION: "0.9.28rc0"
+      TINYCC_BUILD: "3"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install release tooling
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-url: https://github.com/mamba-org/micromamba-releases/releases/download/2.9.0-0/micromamba-win-64
+          environment-name: release-tools
+          create-args: >-
+            -c conda-forge
+            python=3.12
+            rattler-build=0.74.0
+            anaconda-client=1.14.1
+
+      - name: Put release tools on PATH
+        shell: pwsh
+        run: |
+          "$env:MAMBA_ROOT_PREFIX/envs/release-tools" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/release-tools/Library/bin" >> $env:GITHUB_PATH
+          "$env:MAMBA_ROOT_PREFIX/envs/release-tools/Scripts" >> $env:GITHUB_PATH
+
+      - name: Build LLVM-MinGW and TinyCC packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rattler = Get-ChildItem "$env:MAMBA_ROOT_PREFIX/envs/release-tools" -Recurse -Filter rattler-build.exe |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $rattler) { throw "rattler-build.exe not found" }
+
+          Remove-Item release-output -Recurse -Force -ErrorAction SilentlyContinue
+          & $rattler build `
+            --recipe recipes/fenics-jit-llvm-mingw/recipe.yaml `
+            --output-dir release-output `
+            --channel-priority strict `
+            -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "LLVM-MinGW release package build failed" }
+
+          $localChannel = "file:///" + ((Resolve-Path release-output).Path -replace '\\','/')
+          & $rattler build `
+            --recipe recipes/fenics-jit-tinycc/recipe.yaml `
+            --output-dir release-output `
+            --channel-priority strict `
+            -c $localChannel -c precise-simulation -c conda-forge
+          if ($LASTEXITCODE -ne 0) { throw "TinyCC release package build failed" }
+
+          $llvm = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-llvm-mingw-$env:LLVM_VERSION-*_55.conda")
+          $tiny = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-tinycc-$env:TINYCC_VERSION-*_3.conda")
+          if ($llvm.Count -ne 1) { throw "expected exactly one LLVM-MinGW build 55 package, found $($llvm.Count)" }
+          if ($tiny.Count -ne 1) { throw "expected exactly one TinyCC build 3 package, found $($tiny.Count)" }
+          Write-Host "LLVM-MinGW package: $($llvm[0].Name)"
+          Write-Host "TinyCC package: $($tiny[0].Name)"
+
+      - name: Qualify local packages on Python 3.12-3.15
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $mamba = if ($env:MAMBA_EXE) { $env:MAMBA_EXE } else { "micromamba" }
+          $localChannel = "file:///" + ((Resolve-Path release-output).Path -replace '\\','/')
+          New-Item -ItemType Directory -Force release-evidence | Out-Null
+
+          foreach ($py in @("3.12", "3.13", "3.14", "3.15")) {
+            $tag = $py -replace '\.',''
+            $prefix = Join-Path $env:RUNNER_TEMP "optional-jit-local-py$tag"
+            Remove-Item $prefix -Recurse -Force -ErrorAction SilentlyContinue
+            & $mamba create -y -p $prefix --override-channels --strict-channel-priority `
+              -c $localChannel -c precise-simulation -c conda-forge `
+              "python=$py" "libblas=*=*openblas" fenics-dolfinx pefile `
+              "cffi=2.1.*" "setuptools=84.*" `
+              "fenics-jit-llvm-mingw=$env:LLVM_VERSION=*_55" `
+              "fenics-jit-tinycc=$env:TINYCC_VERSION=*_3"
+            if ($LASTEXITCODE -ne 0) { throw "local package solve failed for Python $py" }
+
+            $reference = Join-Path $PWD "release-evidence/reference-py$py.json"
+            $tinyEvidence = Join-Path $PWD "release-evidence/tinycc-py$py.json"
+            & $mamba run -p $prefix python scripts/tinycc-jit/phase4a-proof-core.py `
+              --mode llvm-mingw `
+              --work-dir "release local llvm py$py" `
+              --output $reference
+            if ($LASTEXITCODE -ne 0) { throw "LLVM-MinGW local qualification failed for Python $py" }
+
+            $backend = Join-Path $prefix "Library/fenics-jit/backends/tinycc"
+            & $mamba run -p $prefix python scripts/tinycc-jit/phase4a-proof-core.py `
+              --mode tinycc `
+              --backend-root $backend `
+              --work-dir "release local tinycc py$py" `
+              --reference-json $reference `
+              --output $tinyEvidence
+            if ($LASTEXITCODE -ne 0) { throw "TinyCC local qualification failed for Python $py" }
+          }
+
+      - name: Publish qualified optional JIT packages
+        if: ${{ (github.event_name == 'push' && contains(github.event.head_commit.message, '[publish optional jit]')) || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+        shell: pwsh
+        env:
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $llvm = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-llvm-mingw-$env:LLVM_VERSION-*_55.conda")
+          $tiny = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-tinycc-$env:TINYCC_VERSION-*_3.conda")
+          if ($llvm.Count -ne 1 -or $tiny.Count -ne 1) { throw "release artifacts are missing or ambiguous" }
+          foreach ($package in @($llvm[0], $tiny[0])) {
+            Write-Host "== publishing $($package.Name) =="
+            anaconda upload --force --user precise-simulation $package.FullName
+            if ($LASTEXITCODE -ne 0) { throw "publication failed: $($package.Name)" }
+          }
+
+      - name: Verify published packages from public channels
+        if: ${{ (github.event_name == 'push' && contains(github.event.head_commit.message, '[publish optional jit]')) || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $mamba = if ($env:MAMBA_EXE) { $env:MAMBA_EXE } else { "micromamba" }
+
+          foreach ($py in @("3.12", "3.13", "3.14", "3.15")) {
+            $tag = $py -replace '\.',''
+            $prefix = Join-Path $env:RUNNER_TEMP "optional-jit-public-py$tag"
+            $installed = $false
+            for ($attempt = 1; $attempt -le 18; $attempt++) {
+              Remove-Item $prefix -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "public-channel solve attempt $attempt for Python $py"
+              & $mamba create -y -p $prefix --override-channels --strict-channel-priority `
+                -c precise-simulation -c conda-forge `
+                "python=$py" "libblas=*=*openblas" fenics-dolfinx pefile `
+                "cffi=2.1.*" "setuptools=84.*" `
+                "fenics-jit-llvm-mingw=$env:LLVM_VERSION=*_55" `
+                "fenics-jit-tinycc=$env:TINYCC_VERSION=*_3"
+              if ($LASTEXITCODE -eq 0) {
+                $installed = $true
+                break
+              }
+              Start-Sleep -Seconds 10
+            }
+            if (-not $installed) { throw "public packages did not become solvable for Python $py" }
+
+            $reference = Join-Path $PWD "release-evidence/public-reference-py$py.json"
+            $tinyEvidence = Join-Path $PWD "release-evidence/public-tinycc-py$py.json"
+            & $mamba run -p $prefix python scripts/tinycc-jit/phase4a-proof-core.py `
+              --mode llvm-mingw `
+              --work-dir "release public llvm py$py" `
+              --output $reference
+            if ($LASTEXITCODE -ne 0) { throw "published LLVM-MinGW qualification failed for Python $py" }
+
+            $backend = Join-Path $prefix "Library/fenics-jit/backends/tinycc"
+            & $mamba run -p $prefix python scripts/tinycc-jit/phase4a-proof-core.py `
+              --mode tinycc `
+              --backend-root $backend `
+              --work-dir "release public tinycc py$py" `
+              --reference-json $reference `
+              --output $tinyEvidence
+            if ($LASTEXITCODE -ne 0) { throw "published TinyCC qualification failed for Python $py" }
+          }
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: optional-jit-release-evidence
+          path: |
+            release-output/win-64/fenics-jit-llvm-mingw-*.conda
+            release-output/win-64/fenics-jit-tinycc-*.conda
+            release-evidence/
+          if-no-files-found: warn
+          retention-days: 14

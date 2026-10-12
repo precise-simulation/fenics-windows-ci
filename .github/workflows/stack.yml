@@ -20,9 +20,15 @@ on:
       - "scripts/micro-clang-jit/**"
       - "scripts/fenicsx-nuitka.ps1"
       - ".github/workflows/llvm-mingw-jit.yml"
+      - ".github/workflows/tinycc-jit.yml"
+      - ".github/workflows/channel-dep-test.yml"
+      - ".github/workflows/optional-jit-release.yml"
+      - "config/support-policy.json"
       - "scripts/build-stack.ps1"
       - "scripts/check_versions.py"
       - "scripts/test_check_versions.py"
+      - "scripts/test_support_policy.py"
+      - "scripts/validate_support_policy.py"
       - "scripts/test-python-abi3.ps1"
       - ".github/workflows/stack.yml"
   push:
@@ -34,9 +40,15 @@ on:
       - "scripts/micro-clang-jit/**"
       - "scripts/fenicsx-nuitka.ps1"
       - ".github/workflows/llvm-mingw-jit.yml"
+      - ".github/workflows/tinycc-jit.yml"
+      - ".github/workflows/channel-dep-test.yml"
+      - ".github/workflows/optional-jit-release.yml"
+      - "config/support-policy.json"
       - "scripts/build-stack.ps1"
       - "scripts/check_versions.py"
       - "scripts/test_check_versions.py"
+      - "scripts/test_support_policy.py"
+      - "scripts/validate_support_policy.py"
       - "scripts/test-python-abi3.ps1"
       - ".github/workflows/stack.yml"
 
@@ -80,6 +92,10 @@ jobs:
         shell: pwsh
         run: |
           python -m py_compile scripts/check_versions.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m py_compile scripts/validate_support_policy.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/validate_support_policy.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m py_compile scripts/llvm-mingw-jit/phase5-functional-validation.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

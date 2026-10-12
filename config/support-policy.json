@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-10-12",
+  "channel": "precise-simulation",
+  "python": {
+    "supported": ["3.12", "3.13", "3.14", "3.15"],
+    "preview": [],
+    "next_minor_candidate": "3.16"
+  },
+  "jit": {
+    "runtime_package": {
+      "name": "fenics-jit-runtime",
+      "version": "0.1.0"
+    },
+    "default_backend": "micro-clang",
+    "backends": {
+      "micro-clang": {
+        "package": "fenics-jit-micro-clang",
+        "role": "default",
+        "version": "20260826",
+        "build": 2,
+        "python_abi": "stable-abi",
+        "free_threaded": "not-qualified",
+        "release_workflow": ".github/workflows/micro-clang-release.yml"
+      },
+      "llvm-mingw": {
+        "package": "fenics-jit-llvm-mingw",
+        "role": "optional",
+        "version": "20260826",
+        "build": 55,
+        "python_abi": "stable-abi",
+        "free_threaded": "not-qualified",
+        "release_workflow": ".github/workflows/optional-jit-release.yml"
+      },
+      "tinycc": {
+        "package": "fenics-jit-tinycc",
+        "role": "optional",
+        "version": "0.9.28rc0",
+        "build": 3,
+        "source_revision": "0fb54300b56512754221d80adda85ddb9815bceb",
+        "python_constraint": ">=3.12,<3.16",
+        "requires_python_gil": true,
+        "python_abi": "stable-abi-python3-def",
+        "free_threaded": "unsupported",
+        "release_workflow": ".github/workflows/optional-jit-release.yml"
+      }
+    }
+  }
+}

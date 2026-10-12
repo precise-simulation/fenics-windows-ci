@@ -2,6 +2,15 @@ $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot | Split-Path
 $output = Join-Path $root "output"
 $logOutput = Join-Path $root "build-logs"
+$policyPath = Join-Path $root "config/support-policy.json"
+if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) {
+    throw "support policy not found: $policyPath"
+}
+$supportPolicy = Get-Content -LiteralPath $policyPath -Raw | ConvertFrom-Json
+$pythonVersions = @($supportPolicy.python.supported | ForEach-Object { ([string]$_) + ".*" })
+if ($pythonVersions.Count -eq 0) {
+    throw "support policy contains no supported Python versions"
+}
 New-Item -ItemType Directory -Force $logOutput | Out-Null
 
 $channels = @()
@@ -13,8 +22,7 @@ if (Test-Path "$output/win-64/repodata.json") {
     Write-Host "No local build output found; testing published packages only."
 }
 $channels += "precise-simulation"
-# Phase 4 runtime metadata/JIT gate covers every supported interpreter.
-$pythonVersions = @("3.12.*", "3.13.*", "3.14.*", "3.15.*")
+# Phase 4 runtime metadata/JIT gate covers every supported interpreter from policy.
 $channels += "conda-forge"
 
 function Invoke-Micromamba {

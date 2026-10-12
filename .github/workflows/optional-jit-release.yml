@@ -42,6 +42,7 @@ jobs:
           $llvm = $policy.jit.backends.'llvm-mingw'
           $tiny = $policy.jit.backends.tinycc
           "SUPPORTED_PYTHONS=$($supported -join ',')" >> $env:GITHUB_ENV
+          "ANACONDA_CHANNEL=$($policy.channel)" >> $env:GITHUB_ENV
           "LLVM_VERSION=$($llvm.version)" >> $env:GITHUB_ENV
           "LLVM_BUILD=$($llvm.build)" >> $env:GITHUB_ENV
           "TINYCC_VERSION=$($tiny.version)" >> $env:GITHUB_ENV
@@ -78,7 +79,7 @@ jobs:
             --recipe recipes/fenics-jit-llvm-mingw/recipe.yaml `
             --output-dir release-output `
             --channel-priority strict `
-            -c precise-simulation -c conda-forge
+            -c ${env:ANACONDA_CHANNEL} -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "LLVM-MinGW release package build failed" }
 
           $localChannel = "file:///" + ((Resolve-Path release-output).Path -replace '\\','/')
@@ -86,13 +87,13 @@ jobs:
             --recipe recipes/fenics-jit-tinycc/recipe.yaml `
             --output-dir release-output `
             --channel-priority strict `
-            -c $localChannel -c precise-simulation -c conda-forge
+            -c $localChannel -c ${env:ANACONDA_CHANNEL} -c conda-forge
           if ($LASTEXITCODE -ne 0) { throw "TinyCC release package build failed" }
 
-          $llvm = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-llvm-mingw-$env:LLVM_VERSION-*_$env:LLVM_BUILD.conda")
-          $tiny = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-tinycc-$env:TINYCC_VERSION-*_$env:TINYCC_BUILD.conda")
-          if ($llvm.Count -ne 1) { throw "expected exactly one LLVM-MinGW build $env:LLVM_BUILD package, found $($llvm.Count)" }
-          if ($tiny.Count -ne 1) { throw "expected exactly one TinyCC build $env:TINYCC_BUILD package, found $($tiny.Count)" }
+          $llvm = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-llvm-mingw-${env:LLVM_VERSION}-*_${env:LLVM_BUILD}.conda")
+          $tiny = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-tinycc-${env:TINYCC_VERSION}-*_${env:TINYCC_BUILD}.conda")
+          if ($llvm.Count -ne 1) { throw "expected exactly one LLVM-MinGW build ${env:LLVM_BUILD} package, found $($llvm.Count)" }
+          if ($tiny.Count -ne 1) { throw "expected exactly one TinyCC build ${env:TINYCC_BUILD} package, found $($tiny.Count)" }
           Write-Host "LLVM-MinGW package: $($llvm[0].Name)"
           Write-Host "TinyCC package: $($tiny[0].Name)"
 
@@ -109,11 +110,11 @@ jobs:
             $prefix = Join-Path $env:RUNNER_TEMP "optional-jit-local-py$tag"
             Remove-Item $prefix -Recurse -Force -ErrorAction SilentlyContinue
             & $mamba create -y -p $prefix --override-channels --strict-channel-priority `
-              -c $localChannel -c precise-simulation -c conda-forge `
+              -c $localChannel -c ${env:ANACONDA_CHANNEL} -c conda-forge `
               "python=$py" "libblas=*=*openblas" fenics-dolfinx pefile `
               "cffi=2.1.*" "setuptools=84.*" `
-              "fenics-jit-llvm-mingw=$env:LLVM_VERSION=*_$env:LLVM_BUILD" `
-              "fenics-jit-tinycc=$env:TINYCC_VERSION=*_$env:TINYCC_BUILD"
+              "fenics-jit-llvm-mingw=${env:LLVM_VERSION}=*_${env:LLVM_BUILD}" `
+              "fenics-jit-tinycc=${env:TINYCC_VERSION}=*_${env:TINYCC_BUILD}"
             if ($LASTEXITCODE -ne 0) { throw "local package solve failed for Python $py" }
 
             $reference = Join-Path $PWD "release-evidence/reference-py$py.json"
@@ -141,12 +142,12 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
-          $llvm = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-llvm-mingw-$env:LLVM_VERSION-*_$env:LLVM_BUILD.conda")
-          $tiny = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-tinycc-$env:TINYCC_VERSION-*_$env:TINYCC_BUILD.conda")
+          $llvm = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-llvm-mingw-${env:LLVM_VERSION}-*_${env:LLVM_BUILD}.conda")
+          $tiny = @(Get-ChildItem release-output/win-64 -Filter "fenics-jit-tinycc-${env:TINYCC_VERSION}-*_${env:TINYCC_BUILD}.conda")
           if ($llvm.Count -ne 1 -or $tiny.Count -ne 1) { throw "release artifacts are missing or ambiguous" }
           foreach ($package in @($llvm[0], $tiny[0])) {
             Write-Host "== publishing $($package.Name) =="
-            anaconda upload --force --user precise-simulation $package.FullName
+            anaconda upload --force --user ${env:ANACONDA_CHANNEL} $package.FullName
             if ($LASTEXITCODE -ne 0) { throw "publication failed: $($package.Name)" }
           }
 
@@ -165,11 +166,11 @@ jobs:
               Remove-Item $prefix -Recurse -Force -ErrorAction SilentlyContinue
               Write-Host "public-channel solve attempt $attempt for Python $py"
               & $mamba create -y -p $prefix --override-channels --strict-channel-priority `
-                -c precise-simulation -c conda-forge `
+                -c ${env:ANACONDA_CHANNEL} -c conda-forge `
                 "python=$py" "libblas=*=*openblas" fenics-dolfinx pefile `
                 "cffi=2.1.*" "setuptools=84.*" `
-                "fenics-jit-llvm-mingw=$env:LLVM_VERSION=*_$env:LLVM_BUILD" `
-                "fenics-jit-tinycc=$env:TINYCC_VERSION=*_$env:TINYCC_BUILD"
+                "fenics-jit-llvm-mingw=${env:LLVM_VERSION}=*_${env:LLVM_BUILD}" `
+                "fenics-jit-tinycc=${env:TINYCC_VERSION}=*_${env:TINYCC_BUILD}"
               if ($LASTEXITCODE -eq 0) {
                 $installed = $true
                 break

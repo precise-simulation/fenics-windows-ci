@@ -112,6 +112,10 @@ def _is_compiler_command(backend: str, cmd: object) -> bool:
     text = _render_command(cmd).lower()
     if backend == "tinycc":
         return "tcc.exe" in text
+    # Runtime activation may query the toolchain identity on warm cache hits.
+    # Those metadata probes are not compilation or linking invocations.
+    if text.rstrip().endswith(("--version", "-dumpmachine")):
+        return False
     return "x86_64-w64-mingw32-clang.exe" in text
 
 

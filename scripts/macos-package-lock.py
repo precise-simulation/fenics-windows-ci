@@ -16,7 +16,6 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
-from urllib.parse import urlparse
 
 
 REQUIRED_FIELDS = (
@@ -191,29 +190,6 @@ def verify_prefix(
     if mismatches:
         raise SystemExit("locked-prefix identity mismatch:\n" + json.dumps(mismatches, indent=2))
 
-    archives = []
-    for record in lock["packages"]:
-        filename = Path(urlparse(str(record["url"])).path).name
-        if not filename:
-            raise SystemExit(f"locked package URL has no archive filename: {record['url']!r}")
-        archive = package_cache / filename
-        if not archive.is_file():
-            raise SystemExit(f"locked package archive is missing from cache: {archive}")
-        actual_sha = sha256_file(archive)
-        expected_sha = str(record["sha256"]).lower()
-        if actual_sha != expected_sha:
-            raise SystemExit(
-                f"locked package archive SHA-256 mismatch: {filename}: {actual_sha} != {expected_sha}"
-            )
-        archives.append(
-            {
-                "name": record["name"],
-                "filename": filename,
-                "bytes": archive.stat().st_size,
-                "sha256": actual_sha,
-            }
-        )
-
     evidence.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "format_version": 1,
@@ -221,10 +197,8 @@ def verify_prefix(
         "lock_record_count": len(expected),
         "installed_record_count": len(installed),
         "lock_sha256": sha256_file(lock_path),
-        "package_hash_verification": "pass",
-        "package_archive_count": len(archives),
+        "package_hash_verification": "micromamba-explicit-sha256-plus-installed-record-match",
         "solver_used": False,
-        "archives": archives,
         "packages": [installed_by_name[name] for name in sorted(installed_by_name)],
     }
     evidence.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -269,6 +243,6 @@ elif args.command == "verify-prefix":
     )
     print(f"package_lock_sha256={sha256_file(lock_path)}")
     print(f"verified_records={len(lock['packages'])}")
-    print("package_hash_verification=pass")
+    print("package_hash_verification=micromamba-explicit-sha256-plus-installed-record-match")
 else:  # pragma: no cover
     raise AssertionError(args.command)

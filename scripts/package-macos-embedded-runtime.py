@@ -17,7 +17,6 @@ import sys
 import tempfile
 import zipfile
 from typing import Any, Iterable
-from urllib.parse import urlparse
 
 
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
@@ -221,28 +220,6 @@ def verify_locked_prefix(lock: dict[str, Any], records: dict[str, dict[str, Any]
             mismatches.append({"name": name, "fields": bad})
     if mismatches:
         raise SystemExit("locked prefix does not match package lock:\n" + json.dumps(mismatches, indent=2))
-
-
-def verify_package_archives(lock: dict[str, Any], package_cache: Path) -> list[dict[str, Any]]:
-    verified = []
-    for record in lock["packages"]:
-        filename = Path(urlparse(str(record["url"])).path).name
-        archive = package_cache / filename
-        if not archive.is_file():
-            raise SystemExit(f"locked package archive is missing from cache: {archive}")
-        actual = sha256_file(archive)
-        expected = str(record["sha256"]).lower()
-        if actual != expected:
-            raise SystemExit(f"locked package archive hash mismatch: {filename}: {actual} != {expected}")
-        verified.append(
-            {
-                "name": record["name"],
-                "filename": filename,
-                "bytes": archive.stat().st_size,
-                "sha256": actual,
-            }
-        )
-    return verified
 
 
 def copy_path(source: Path, destination: Path, source_prefix: Path, private_prefix: Path) -> None:
@@ -754,7 +731,6 @@ if not re.fullmatch(r"[0-9a-f]{64}", args.zig_sha256.lower()):
 lock = load_lock(lock_path, args.arch)
 records = installed_records(prefix)
 verify_locked_prefix(lock, records)
-verified_archives = verify_package_archives(lock, package_cache)
 
 required_versions = {
     "fenics-dolfinx": "0.11.0",
@@ -945,8 +921,7 @@ try:
             "package_lock": lock_copy.relative_to(stage_root).as_posix(),
             "package_lock_sha256": sha256_file(lock_path),
             "package_count": len(lock["packages"]),
-            "package_archive_hash_verification": "pass",
-            "package_archive_count": len(verified_archives),
+            "package_hash_verification": "micromamba-explicit-sha256-plus-installed-record-match",
             "retained_packages": retained_packages,
             "excluded_packages": excluded_packages,
             "not_staged_packages": not_staged_packages,

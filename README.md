@@ -193,8 +193,9 @@ qualification phase.
 
 The `embedded-runtime-macos-overlay` workflow replays those checked-in locks as
 solver-free `@EXPLICIT` transactions using the exact URL ordering retained by
-the qualified prototype, micromamba 2.10.0, and independent SHA-256 checks of
-all cached package archives. It packages the FEniCS/PETSc/MPI closure in a
+the qualified prototype and micromamba 2.10.0. Each exact URL is SHA-256
+anchored by the checked-in lock, and the installed package records are then
+compared field-for-field with that lock. It packages the FEniCS/PETSc/MPI closure in a
 private `fenics-runtime/` namespace, bundles the exact Zig toolchain, and
 excludes producer CPython and NumPy. It performs complete Mach-O closure and
 ad-hoc-signature audits, records package ownership and license inventory, then

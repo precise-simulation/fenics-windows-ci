@@ -35,10 +35,14 @@ The qualified explicit URL order is combined with the package-lock SHA-256
 values to produce an `@EXPLICIT` replay transaction.  The URL set must match the
 lock exactly and the retained explicit-file digest must match the prototype
 evidence.  Release qualification must not supply a channel, matchspec, version
-constraint, or other solver input while replaying that transaction.  After
-installation, every cached package archive is independently hashed against the
-lock and the installed package records are compared field-for-field with the
-checked-in lock before packaging starts.
+constraint, or other solver input while replaying that transaction.  The
+`@EXPLICIT` URLs carry the checked-in SHA-256 values so micromamba verifies the
+downloaded package bytes as part of replay; afterward the installed package
+records, including the recorded SHA-256/MD5 identities, are compared
+field-for-field with the checked-in lock before packaging starts.  The
+micromamba cache is used only for extracted package metadata/license material;
+qualification does not assume the action preserves downloaded `.conda`
+archives after successful linking.
 
 ## Ownership and layout
 
@@ -87,7 +91,8 @@ public.  A repository-scoped `GITHUB_TOKEN` from this workflow cannot and must
 not be widened with a private-repository credential merely to make producer CI
 cross that boundary.  Therefore:
 
-- this workflow proves exact lock replay, archive hashes, file ownership,
+- this workflow proves exact SHA-256-anchored lock replay, installed-record
+  identity, file ownership,
   licenses, relocation, Mach-O closure/signing, ZIP integrity and deterministic
   whole-file identity;
 - it does **not** reconstruct or execute the private consumer runtime;

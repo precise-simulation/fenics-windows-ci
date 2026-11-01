@@ -128,7 +128,8 @@ identified by its whole-archive input hash and phase-02 hosted JIT evidence.
 1. replay the exact lock without solving and verify the installed package set;
 2. package only explicit overlay ownership plus a complete package/Zig license
    inventory, retaining package-supplied license texts where present and
-   marking split outputs that expose only conda license metadata explicitly;
+   binding split outputs without duplicated texts to a sibling output only when
+   both carry byte-identical rendered recipe metadata;
 3. relocate and audit the complete shipped Mach-O closure;
 4. rebuild the same overlay a second time from the same installed lock and
    compare the ZIP, summary and checksum files byte-for-byte;
@@ -145,9 +146,9 @@ identified by its whole-archive input hash and phase-02 hosted JIT evidence.
       runtime files are absent from the emitted overlay.
 - [ ] Every retained overlay file has unambiguous package/tool ownership and an
       integrity hash; every retained third-party package/tool has explicit
-      license metadata and all package-supplied license texts/notices are
-      retained, with metadata-only split outputs identified rather than
-      silently omitted.
+      license evidence and all package-supplied license texts/notices are
+      retained, with split-output coverage mechanically bound to identical
+      rendered recipe metadata rather than inferred from package names.
 - [ ] Complete shipped Mach-O closure passes architecture, minimum-OS,
       dependency, rpath, producer-path and ad-hoc-signature checks.
 - [ ] Two independent packaging passes in the same clean hosted transaction

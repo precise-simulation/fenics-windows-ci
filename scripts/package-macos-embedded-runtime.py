@@ -307,12 +307,14 @@ def collect_package_licenses(
     owners: dict[str, list[str]],
 ) -> dict[str, Any]:
     license_root = stage_root / "fenics-runtime" / "licenses"
-    inventory = []
+    inventory: list[dict[str, Any]] = []
     for name in retained_packages:
         record = records[name]
         cache_record = find_cache_record(package_cache, record)
         copied = []
         metadata = {}
+        recipe_metadata_sha256 = None
+        recipe_metadata_path = None
         if cache_record is not None:
             destination_root = license_root / f"{name}-{record['version']}-{record['build']}"
             info_root = cache_record / "info"
@@ -324,6 +326,20 @@ def collect_package_licenses(
                     for key in ("license", "license_family", "license_file", "home", "dev_url", "doc_url")
                     if about.get(key) is not None
                 }
+
+            # Split conda outputs may omit top-level license fields and may
+            # carry no duplicate license text.  Retain the rendered recipe
+            # identity so such outputs can be bound to a sibling output from
+            # the exact same recipe that does carry the license text.
+            for candidate in (info_root / "recipe" / "meta.yaml", info_root / "recipe" / "recipe.yaml"):
+                if candidate.is_file():
+                    recipe_metadata_sha256 = sha256_file(candidate)
+                    recipe_destination = destination_root / "recipe" / candidate.name
+                    recipe_destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(candidate, recipe_destination)
+                    recipe_metadata_path = recipe_destination.relative_to(stage_root).as_posix()
+                    owners[recipe_metadata_path] = [name]
+                    break
 
             sources: list[tuple[Path, Path]] = []
             source_root = info_root / "licenses"
@@ -363,20 +379,18 @@ def collect_package_licenses(
             if name in path_owners and authoritative_license_path(relative)
         )
         license_expression = metadata.get("license") or record.get("license")
-        if not copied and not staged_license_paths and not license_expression:
-            raise SystemExit(
-                f"retained package has neither license files nor license metadata: {name}"
-            )
         if copied:
             evidence_kind = "package-license-files"
         elif staged_license_paths:
             evidence_kind = "staged-license-files"
-        else:
+        elif license_expression:
             # Conda recipes commonly split one upstream project into several
             # binary outputs while attaching the license text to only one
             # output.  Preserve the exact per-output license metadata instead
             # of pretending the split output shipped a duplicate text file.
             evidence_kind = "metadata-only-split-output"
+        else:
+            evidence_kind = "pending-sibling-recipe-license"
         inventory.append(
             {
                 "name": name,
@@ -388,7 +402,38 @@ def collect_package_licenses(
                 "license_files": copied,
                 "staged_license_paths": staged_license_paths,
                 "evidence_kind": evidence_kind,
+                "recipe_metadata_sha256": recipe_metadata_sha256,
+                "recipe_metadata_path": recipe_metadata_path,
             }
+        )
+
+    by_recipe: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in inventory:
+        recipe_sha = item.get("recipe_metadata_sha256")
+        if recipe_sha:
+            by_recipe[str(recipe_sha)].append(item)
+
+    for item in inventory:
+        if item["evidence_kind"] != "pending-sibling-recipe-license":
+            continue
+        recipe_sha = item.get("recipe_metadata_sha256")
+        siblings = by_recipe.get(str(recipe_sha), []) if recipe_sha else []
+        providers = [
+            sibling
+            for sibling in siblings
+            if sibling is not item
+            and sibling["evidence_kind"] in {"package-license-files", "staged-license-files"}
+        ]
+        if not providers:
+            raise SystemExit(
+                "retained package has no direct license evidence and no exact-recipe sibling "
+                f"with retained license text: {item['name']}"
+            )
+        provider = sorted(providers, key=lambda value: str(value["name"]))[0]
+        item["evidence_kind"] = "sibling-recipe-license-files"
+        item["license_covered_by"] = provider["name"]
+        item["covered_license_files"] = sorted(
+            set(provider["license_files"] + provider["staged_license_paths"])
         )
     return {"format_version": 1, "packages": inventory}
 

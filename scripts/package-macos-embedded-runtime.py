@@ -17,6 +17,7 @@ import sys
 import tempfile
 import zipfile
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
@@ -258,13 +259,33 @@ def copy_path(source: Path, destination: Path, source_prefix: Path, private_pref
 
 def find_cache_record(package_cache: Path, record: dict[str, Any]) -> Path | None:
     expected = (str(record["name"]), str(record["version"]), str(record["build"]))
-    direct = package_cache / "-".join(expected)
-    candidates: Iterable[Path]
-    if (direct / "info" / "index.json").is_file():
-        candidates = (direct,)
-    else:
-        candidates = (path for path in package_cache.iterdir() if path.is_dir())
+    dist = "-".join(expected)
+    direct = package_cache / dist
+    candidates: list[Path] = [direct]
+
+    url = str(record.get("url") or "")
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.netloc:
+        hierarchy = package_cache / parsed.scheme / parsed.netloc
+        for part in PurePosixPath(parsed.path).parent.parts:
+            if part not in {"", "/"}:
+                hierarchy /= part
+        candidates.append(hierarchy / dist)
+
+    # Micromamba 2.10 uses URL-hierarchical package caches.  Keep a bounded
+    # metadata fallback so the producer remains robust if the cache layout
+    # changes without accepting an unbound package identity.
+    candidates.extend(path.parent.parent for path in package_cache.rglob("info/index.json"))
+
+    seen: set[Path] = set()
     for candidate in candidates:
+        try:
+            candidate = candidate.resolve()
+        except OSError:
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
         index = candidate / "info" / "index.json"
         if not index.is_file():
             continue

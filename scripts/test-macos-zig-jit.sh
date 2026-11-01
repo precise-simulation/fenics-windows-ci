@@ -36,7 +36,33 @@ wrapper="$wrapper_root/fenics-zig-cc"
 cat >"$wrapper" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$zig_exe" cc -target "$zig_target" -mmacosx-version-min=14.0 "\$@"
+args=()
+python_extension_link=0
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+        -bundle)
+            python_extension_link=1
+            shift
+            ;;
+        -undefined)
+            if [[ "\${2:-}" == dynamic_lookup ]]; then
+                python_extension_link=1
+                shift 2
+            else
+                args+=("\$1")
+                shift
+            fi
+            ;;
+        *)
+            args+=("\$1")
+            shift
+            ;;
+    esac
+done
+if [[ \$python_extension_link -eq 1 ]]; then
+    exec "$zig_exe" cc -target "$zig_target" -mmacosx-version-min=14.0 -shared --allow-shlib-undefined "\${args[@]}"
+fi
+exec "$zig_exe" cc -target "$zig_target" -mmacosx-version-min=14.0 "\${args[@]}"
 EOF
 chmod +x "$wrapper"
 

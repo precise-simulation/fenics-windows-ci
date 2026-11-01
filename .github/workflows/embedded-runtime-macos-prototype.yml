@@ -66,7 +66,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          prefix="$RUNNER_TEMP/fenics macos source $TARGET_ARCH"
+          prefix="$RUNNER_TEMP/fenics-macos-source-$TARGET_ARCH"
           CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" create -y -p "$prefix" --override-channels --strict-channel-priority -c conda-forge "python=3.12" "numpy=2.5.2" "fenics-dolfinx=0.11.0" "mpich" "cffi" "setuptools"
           echo "FENICS_SOURCE_PREFIX=$prefix" >> "$GITHUB_ENV"
           CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" list -p "$prefix" --explicit > "fenics-macos-${TARGET_ARCH}-explicit.txt"

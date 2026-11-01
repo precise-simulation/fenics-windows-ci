@@ -176,6 +176,23 @@ micro-Clang FFCx Poisson JIT and PETSc solve. This payload is intended for the
 optional FEniCS runtime profile of the Python MATLAB/Octave bridge; normal conda
 installation remains the primary direct-Python distribution path.
 
+### macOS embedded-runtime producer prototype
+
+The manual `embedded-runtime-macos-prototype` workflow is the first
+qualification stage for macOS arm64 and Rosetta x86_64 bridge overlays. It
+creates a pinned FEniCS 0.11/PETSc 3.25.5 source environment for each
+architecture, downloads the exact official Zig 0.15.2 toolchain for that
+architecture, poisons ambient compiler/SDK discovery, and requires a fresh FFCx
+JIT plus serial PETSc Poisson solve through a `zig cc` wrapper targeting
+macOS 14.0.
+
+This workflow deliberately does not publish an overlay yet. Its retained
+explicit package transaction and Zig checksum are inputs to the subsequent
+relocatable-overlay packaging phase. The producer must not promote macOS
+artifacts until the same exact package transactions have been copied into the
+bridge's phase-03 NumPy runtime without replacing the bridge-owned NumPy 2.5.2
+payload and the final Mach-O closure has passed relocation/signing checks.
+
 ## Updating
 
 Update the environment with conda:

@@ -588,7 +588,13 @@ def staged_target_for_dependency(
 
 
 def loader_reference(binary: Path, target: Path) -> str:
-    relative = os.path.relpath(target, binary.parent).replace(os.sep, "/")
+    # macOS commonly exposes /var as a symlink to /private/var.  Dependency
+    # resolution canonicalizes targets, so canonicalize the binary directory as
+    # well before deriving a portable @loader_path reference; otherwise a
+    # temporary staging path can be baked into the replacement.
+    relative = os.path.relpath(
+        target.resolve(strict=False), binary.parent.resolve(strict=False)
+    ).replace(os.sep, "/")
     return f"@loader_path/{relative}"
 
 

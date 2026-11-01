@@ -1,0 +1,260 @@
+name: embedded-runtime-macos-overlay
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/embedded-runtime-macos-overlay.yml"
+      - "scripts/macos-package-lock.py"
+      - "scripts/package-macos-embedded-runtime.py"
+      - "scripts/fenics-embed-bootstrap-macos.py"
+      - "scripts/prepare-bridge-macos-numpy-runtime.sh"
+      - "scripts/test-macos-embedded-runtime-overlay.sh"
+      - "scripts/test-poisson.py"
+      - "specs/bridge-embed-runtime/**"
+      - "README.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: embedded-runtime-macos-overlay-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-overlay:
+    runs-on: macos-15
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            conda_subdir: osx-arm64
+            zig_asset: zig-aarch64-macos-0.15.2.tar.xz
+            zig_sha256: 3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
+            overlay_asset: fenics-embed-runtime-v0.1.0-macos-arm64-cp312.zip
+          - architecture: x86_64
+            conda_subdir: osx-64
+            zig_asset: zig-x86_64-macos-0.15.2.tar.xz
+            zig_sha256: 375b6909fc1495d16fc2c7db9538f707456bfc3373b14ee83fdd3e22b3d43f7f
+            overlay_asset: fenics-embed-runtime-v0.1.0-macos-x64-cp312.zip
+    env:
+      TARGET_ARCH: ${{ matrix.architecture }}
+      TARGET_SUBDIR: ${{ matrix.conda_subdir }}
+      ZIG_ASSET: ${{ matrix.zig_asset }}
+      ZIG_SHA256: ${{ matrix.zig_sha256 }}
+      ZIG_VERSION: 0.15.2
+      OVERLAY_ASSET: ${{ matrix.overlay_asset }}
+      BRIDGE_PHASE03_REVISION: cf5fecea11bd1c727d8ff2d9fc5ea1b74d323d8d
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Check out exact bridge Phase-03 implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: precsim/python-matlab-octave-bridge
+          ref: ${{ env.BRIDGE_PHASE03_REVISION }}
+          path: bridge-phase03
+
+      - name: Provision Rosetta 2 for x86_64
+        if: matrix.architecture == 'x86_64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          sudo softwareupdate --install-rosetta --agree-to-license >"$RUNNER_TEMP/rosetta-install.log" 2>&1 || {
+            cat "$RUNNER_TEMP/rosetta-install.log" >&2
+            /usr/bin/arch -x86_64 /usr/bin/uname -m >/dev/null 2>&1 || exit 1
+          }
+          test "$(/usr/bin/arch -x86_64 /usr/bin/uname -m)" = x86_64
+
+      - name: Install micromamba
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          micromamba-version: '2.10.0'
+
+      - name: Replay immutable package lock without solving
+        shell: bash
+        run: |
+          set -euo pipefail
+          lock="specs/bridge-embed-runtime/locks/macos-${TARGET_ARCH}-package-lock.json"
+          source_explicit="specs/bridge-embed-runtime/locks/macos-${TARGET_ARCH}-explicit.txt"
+          explicit="$RUNNER_TEMP/fenics-macos-${TARGET_ARCH}-explicit.txt"
+          prefix="$RUNNER_TEMP/fenics-macos-locked-${TARGET_ARCH}"
+          mamba_root="$RUNNER_TEMP/fenics-mamba-root-${TARGET_ARCH}"
+          evidence="build/macos-overlay-${TARGET_ARCH}"
+          mkdir -p "$evidence"
+          rm -rf "$prefix" "$mamba_root"
+
+          {
+            echo "ImageOS=${ImageOS:-unknown}"
+            echo "ImageVersion=${ImageVersion:-unknown}"
+            echo "runner_arch=$(uname -m)"
+            sw_vers
+            xcodebuild -version
+            clang --version
+            xcrun --show-sdk-path
+            xcrun --show-sdk-version
+          } > "$evidence/host-toolchain.txt"
+
+          python3 scripts/macos-package-lock.py explicit \
+            --lock "$lock" \
+            --source-explicit "$source_explicit" \
+            --arch "$TARGET_ARCH" \
+            --output "$explicit" \
+            | tee "$evidence/package-lock-render.log"
+          cp "$explicit" "$evidence/locked-explicit.txt"
+
+          # @EXPLICIT contains exact package URLs + SHA-256 fragments.  No
+          # channel, matchspec or dependency solve participates here.
+          CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" --root-prefix "$mamba_root" create -y \
+            -p "$prefix" \
+            --file "$explicit" \
+            2>&1 | tee "$evidence/package-lock-replay.log"
+
+          python3 scripts/macos-package-lock.py verify-prefix \
+            --lock "$lock" \
+            --arch "$TARGET_ARCH" \
+            --prefix "$prefix" \
+            --package-cache "$mamba_root/pkgs" \
+            --evidence "$evidence/package-lock-verification.json" \
+            | tee "$evidence/package-lock-verification.log"
+
+          echo "FENICS_LOCK_FILE=$lock" >> "$GITHUB_ENV"
+          echo "FENICS_LOCKED_PREFIX=$prefix" >> "$GITHUB_ENV"
+          echo "FENICS_PACKAGE_CACHE=$mamba_root/pkgs" >> "$GITHUB_ENV"
+          echo "FENICS_MAMBA_ROOT=$mamba_root" >> "$GITHUB_ENV"
+          echo "FENICS_OVERLAY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+
+      - name: Fetch pinned Zig toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/$ZIG_ASSET"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output "$archive" \
+            "https://ziglang.org/download/$ZIG_VERSION/$ZIG_ASSET"
+          actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          test "$actual" = "$ZIG_SHA256"
+          root="$RUNNER_TEMP/fenics-zig-$TARGET_ARCH"
+          rm -rf "$root"
+          mkdir -p "$root"
+          tar -xJf "$archive" -C "$root" --strip-components=1
+          test -x "$root/zig"
+          test -f "$root/LICENSE"
+          printf '%s  %s\n' "$actual" "$ZIG_ASSET" > "$FENICS_OVERLAY_EVIDENCE/zig-sha256.txt"
+          echo "FENICS_ZIG_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Package relocatable macOS overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          producer_revision="$(git rev-parse HEAD)"
+          mkdir -p dist
+          python3 scripts/package-macos-embedded-runtime.py \
+            --prefix "$FENICS_LOCKED_PREFIX" \
+            --lock "$FENICS_LOCK_FILE" \
+            --package-cache "$FENICS_PACKAGE_CACHE" \
+            --zig-root "$FENICS_ZIG_ROOT" \
+            --zig-archive "$ZIG_ASSET" \
+            --zig-sha256 "$ZIG_SHA256" \
+            --arch "$TARGET_ARCH" \
+            --output dist \
+            --version 0.1.0 \
+            --producer-revision "$producer_revision" \
+            2>&1 | tee "$FENICS_OVERLAY_EVIDENCE/package-overlay.log"
+          test -f "dist/$OVERLAY_ASSET"
+          test -f "dist/$OVERLAY_ASSET.json"
+          test -f "dist/$OVERLAY_ASSET.sha256"
+
+      - name: Remove producer source environments before consumer qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$FENICS_LOCKED_PREFIX" "$FENICS_MAMBA_ROOT" "$FENICS_ZIG_ROOT"
+          test ! -e "$FENICS_LOCKED_PREFIX"
+          test ! -e "$FENICS_ZIG_ROOT"
+
+      - name: Reconstruct exact bridge Phase-03 NumPy runtime
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/bridge-phase03-numpy-${TARGET_ARCH}"
+          chmod +x scripts/prepare-bridge-macos-numpy-runtime.sh
+          scripts/prepare-bridge-macos-numpy-runtime.sh \
+            --bridge-repo bridge-phase03 \
+            --arch "$TARGET_ARCH" \
+            --output-runtime "$runtime" \
+            --evidence "$FENICS_OVERLAY_EVIDENCE/bridge-phase03" \
+            2>&1 | tee "$FENICS_OVERLAY_EVIDENCE/bridge-phase03-reconstruction.log"
+          echo "BRIDGE_PHASE03_RUNTIME=$runtime" >> "$GITHUB_ENV"
+
+      - name: Qualify overlay relocation, ownership and fresh JIT
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/test-macos-embedded-runtime-overlay.sh
+          scripts/test-macos-embedded-runtime-overlay.sh \
+            --phase03-runtime "$BRIDGE_PHASE03_RUNTIME" \
+            --overlay "dist/$OVERLAY_ASSET" \
+            --arch "$TARGET_ARCH" \
+            --evidence "$FENICS_OVERLAY_EVIDENCE/qualification" \
+            2>&1 | tee "$FENICS_OVERLAY_EVIDENCE/overlay-qualification.log"
+
+      - name: Collect immutable handoff evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "dist/$OVERLAY_ASSET" "$FENICS_OVERLAY_EVIDENCE/"
+          cp "dist/$OVERLAY_ASSET.json" "$FENICS_OVERLAY_EVIDENCE/"
+          cp "dist/$OVERLAY_ASSET.sha256" "$FENICS_OVERLAY_EVIDENCE/"
+          unzip -p "dist/$OVERLAY_ASSET" fenics-embed-manifest.json \
+            > "$FENICS_OVERLAY_EVIDENCE/fenics-embed-manifest.json"
+          unzip -p "dist/$OVERLAY_ASSET" fenics-runtime/provenance/native-census.json \
+            > "$FENICS_OVERLAY_EVIDENCE/native-census.json"
+          unzip -p "dist/$OVERLAY_ASSET" fenics-runtime/provenance/third-party-licenses.json \
+            > "$FENICS_OVERLAY_EVIDENCE/third-party-licenses.json"
+          shasum -a 256 \
+            "$FENICS_OVERLAY_EVIDENCE/fenics-embed-manifest.json" \
+            "$FENICS_OVERLAY_EVIDENCE/native-census.json" \
+            "$FENICS_OVERLAY_EVIDENCE/third-party-licenses.json" \
+            > "$FENICS_OVERLAY_EVIDENCE/overlay-evidence-sha256.txt"
+          python3 - "$FENICS_OVERLAY_EVIDENCE" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          output = root / "top-level-sha256.txt"
+          lines = []
+          for path in sorted(root.iterdir()):
+              if path == output or not path.is_file():
+                  continue
+              lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
+          output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload macOS overlay qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fenics-macos-overlay-${{ matrix.architecture }}
+          path: build/macos-overlay-${{ matrix.architecture }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          find "build/macos-overlay-${TARGET_ARCH}" -maxdepth 3 -type f -print 2>/dev/null | sort
+          while IFS= read -r log; do
+            echo "===== $log ====="
+            tail -n 250 "$log"
+          done < <(find "build/macos-overlay-${TARGET_ARCH}" -type f -name '*.log' -print 2>/dev/null | sort)

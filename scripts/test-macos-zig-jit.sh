@@ -27,10 +27,12 @@ esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 work="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fenics macos zig prototype ${target_arch}"
+wrapper_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fenics-zig-bin-${target_arch}"
 rm -rf "$work"
-mkdir -p "$work/bin" "$work/cache" "$work/evidence" "$work/poison"
+rm -rf "$wrapper_root"
+mkdir -p "$work/cache" "$work/evidence" "$work/poison" "$wrapper_root"
 
-wrapper="$work/bin/fenics-zig-cc"
+wrapper="$wrapper_root/fenics-zig-cc"
 cat >"$wrapper" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail

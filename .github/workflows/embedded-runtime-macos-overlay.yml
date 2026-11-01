@@ -76,10 +76,10 @@ jobs:
           source_explicit="specs/bridge-embed-runtime/locks/macos-${TARGET_ARCH}-explicit.txt"
           explicit="$RUNNER_TEMP/fenics-macos-${TARGET_ARCH}-explicit.txt"
           prefix="$RUNNER_TEMP/fenics-macos-locked-${TARGET_ARCH}"
-          mamba_root="$RUNNER_TEMP/fenics-mamba-root-${TARGET_ARCH}"
+          package_cache="$MAMBA_ROOT_PREFIX/pkgs"
           evidence="build/macos-overlay-${TARGET_ARCH}"
           mkdir -p "$evidence"
-          rm -rf "$prefix" "$mamba_root"
+          rm -rf "$prefix"
 
           {
             echo "ImageOS=${ImageOS:-unknown}"
@@ -102,7 +102,7 @@ jobs:
 
           # @EXPLICIT contains exact package URLs + SHA-256 fragments.  No
           # channel, matchspec or dependency solve participates here.
-          CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" --root-prefix "$mamba_root" create -y \
+          CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" create -y \
             -p "$prefix" \
             --file "$explicit" \
             2>&1 | tee "$evidence/package-lock-replay.log"
@@ -111,14 +111,13 @@ jobs:
             --lock "$lock" \
             --arch "$TARGET_ARCH" \
             --prefix "$prefix" \
-            --package-cache "$mamba_root/pkgs" \
+            --package-cache "$package_cache" \
             --evidence "$evidence/package-lock-verification.json" \
             | tee "$evidence/package-lock-verification.log"
 
           echo "FENICS_LOCK_FILE=$lock" >> "$GITHUB_ENV"
           echo "FENICS_LOCKED_PREFIX=$prefix" >> "$GITHUB_ENV"
-          echo "FENICS_PACKAGE_CACHE=$mamba_root/pkgs" >> "$GITHUB_ENV"
-          echo "FENICS_MAMBA_ROOT=$mamba_root" >> "$GITHUB_ENV"
+          echo "FENICS_PACKAGE_CACHE=$package_cache" >> "$GITHUB_ENV"
           echo "FENICS_OVERLAY_EVIDENCE=$evidence" >> "$GITHUB_ENV"
 
       - name: Fetch pinned Zig toolchain
@@ -223,8 +222,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$FENICS_LOCKED_PREFIX" "$FENICS_MAMBA_ROOT" "$FENICS_ZIG_ROOT"
+          rm -rf "$FENICS_LOCKED_PREFIX" "$FENICS_PACKAGE_CACHE" "$FENICS_ZIG_ROOT"
           test ! -e "$FENICS_LOCKED_PREFIX"
+          test ! -e "$FENICS_PACKAGE_CACHE"
           test ! -e "$FENICS_ZIG_ROOT"
 
       - name: Collect immutable handoff evidence

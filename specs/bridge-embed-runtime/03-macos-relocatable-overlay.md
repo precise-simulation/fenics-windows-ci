@@ -62,7 +62,9 @@ from `sha256_in_prefix`, and cross-package path collisions fail closed.
 Runtime-irrelevant build/developer metadata is also excluded rather than
 shipping stale producer prefixes: static/libtool archives, pkg-config/CMake
 metadata, PETSc build-conf/bin metadata, and generated Python bytecode are not
-part of the embedded runtime contract.  The prefix-bound
+part of the embedded runtime contract.  Conda package test fixtures under
+`etc/conda/test-files/` are likewise producer validation content, not shipped
+runtime ownership.  The prefix-bound
 `petsc4py/lib/petsc.cfg` is excluded; activation
 supplies runtime-derived `PETSC_DIR` / `PETSC_ARCH` and a runtime-derived
 `petsc4py.get_config()` instead.  Any remaining linked text file that contains

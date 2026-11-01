@@ -123,6 +123,8 @@ def overlay_path_exclusion_reason(relative: PurePosixPath) -> str | None:
     text = relative.as_posix()
     if "__pycache__" in relative.parts or relative.suffix in {".pyc", ".pyo"}:
         return "generated-python-bytecode"
+    if text.startswith("etc/conda/test-files/"):
+        return "conda-package-test-fixture"
     if text == "lib/python3.12/site-packages/petsc4py/lib/petsc.cfg":
         return "runtime-derived-petsc4py-config"
     if text.startswith(("lib/pkgconfig/", "lib/cmake/", "share/cmake/", "share/pkgconfig/")):

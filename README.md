@@ -196,14 +196,17 @@ solver-free `@EXPLICIT` transactions using the exact URL ordering retained by
 the qualified prototype, micromamba 2.10.0, and independent SHA-256 checks of
 all cached package archives. It packages the FEniCS/PETSc/MPI closure in a
 private `fenics-runtime/` namespace, bundles the exact Zig toolchain, and
-excludes producer CPython and NumPy. It reconstructs the bridge's exact
-Phase-03 CPython 3.12.10 / NumPy 2.5.2 runtime, rejects every overlay overwrite,
-then relocates the combined runtime to a path containing spaces and requires
-zero-argument/idempotent activation, full imports, fresh Zig FFCx JIT and a
-serial PETSc solve with ambient Python/Homebrew/compiler/SDK/native discovery
-poisoned. Complete Mach-O closure, ad-hoc signing, package ownership, license
-inventory and artifact hashes are retained as qualification evidence rather
-than treated as public release assets.
+excludes producer CPython and NumPy. It performs complete Mach-O closure and
+ad-hoc-signature audits, records package ownership and license inventory, then
+builds the overlay twice and requires byte-identical ZIP/summary/checksum
+outputs. The resulting artifact hashes are retained as qualification evidence
+rather than treated as public release assets.
+
+The final consumer-runtime qualification is intentionally separate. This
+repository is public while the bridge consumer repository is private, so this
+workflow does not use a widened cross-repository credential. Consumer CI must
+reproduce the frozen producer ZIP by revision/hash and run its own exact-runtime
+overwrite, inherited-byte, activation, import, fresh-JIT and solve gates.
 
 ## Updating
 

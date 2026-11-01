@@ -5,21 +5,17 @@
 ## Goal
 
 Turn the qualified macOS Zig/JIT producer inputs from phase 02 into exact,
-relocatable arm64 and x86_64 FEniCS overlays that can be layered on the bridge's
-already-qualified macOS NumPy runtime without replacing any bridge-owned byte.
+relocatable arm64 and x86_64 FEniCS overlays with explicit ownership, native
+closure, licenses, and deterministic artifact identities.
 
-This phase owns producer qualification only.  It does not claim GNU Octave or
-MATLAB bridge integration and does not publish a permanent release asset.
+This phase owns **public producer qualification only**.  It does not claim a
+specific private consumer runtime, GNU Octave or MATLAB bridge integration, and
+does not publish a permanent release asset.  Consumer qualification belongs in
+the consumer repository, where its own CI token can access its private history.
 
 ## Immutable inputs
 
 - producer base revision: `68eff23716dd5a3fd46347184b6c89356586e3ed`;
-- bridge Phase-03 qualification revision:
-  `cf5fecea11bd1c727d8ff2d9fc5ea1b74d323d8d`;
-- CPython consumer runtime: 3.12.10 from the exact `actions/python-versions`
-  release inputs retained by the bridge;
-- NumPy consumer runtime: 2.5.2 from the exact architecture-specific wheels
-  retained by the bridge Phase-03 contract;
 - producer package locks:
   - arm64 SHA-256
     `566b1f9fd653871bbac8ba535ff75719cce74a43acc7fcca2f114869a5dc0944`;
@@ -65,8 +61,8 @@ metadata, and PETSc build-conf/bin metadata are not part of the embedded runtime
 contract.  The prefix-bound `petsc4py/lib/petsc.cfg` is excluded; activation
 supplies runtime-derived `PETSC_DIR` / `PETSC_ARCH` and a runtime-derived
 `petsc4py.get_config()` instead.  Any remaining linked text file that contains
-the producer prefix is explicitly enumerated in relocation evidence and must
-survive the hosted import/JIT/solve qualification after relocation.
+the producer prefix is explicitly enumerated in relocation evidence.  Final
+runtime execution of those relocated files is a consumer-qualification gate.
 
 The bootstrap's zero-argument `activate()` derives the runtime root from its own
 installed location, prepends the private FEniCS site-packages path, configures
@@ -76,61 +72,30 @@ cannot safely carry a compiler executable path containing spaces even though
 the relocated runtime and JIT cache themselves must be tested under paths that
 do contain spaces.
 
-Before consumer qualification starts, the workflow deletes the producer conda
-prefix/package cache, extracted producer Zig tree, and the CPython toolcache used
-to reconstruct Phase 03.  The generated compiler shim explicitly supplies the
-staged CPython and private FEniCS/PETSc include roots and discards ambient
-`-isysroot` / non-runtime `-isystem` inputs.  This turns an accidental absolute
-producer/compiler path into a hard failure instead of allowing the producer
-source environments to mask a relocation bug.
+After both deterministic builds compare byte-for-byte, the workflow removes the
+producer conda prefix/package cache and extracted Zig source tree.  No consumer
+checkout or cross-repository credential is used from this public repository.
+The generated compiler shim remains part of the overlay and explicitly supplies
+consumer-runtime Python plus private FEniCS/PETSc include roots while discarding
+ambient `-isysroot` / non-runtime `-isystem` inputs; its execution is verified by
+the consumer repository.
 
-## Exact bridge inheritance gates
+## Consumer-qualification boundary
 
-The producer workflow reconstructs the Phase-03 runtime at the exact qualified
-bridge revision and fails if its previously retained identities drift.  The
-current required identities are:
+The intended bridge consumer repository is private while this producer is
+public.  A repository-scoped `GITHUB_TOKEN` from this workflow cannot and must
+not be widened with a private-repository credential merely to make producer CI
+cross that boundary.  Therefore:
 
-| Identity | arm64 | x86_64 |
-| --- | --- | --- |
-| MEX SHA-256 | `23f172fb23db8cd599891246683a72ef343ac8717799a2c7a661c3f7babbc60e` | `188bc10b098e96ceb7791acd68953375d026fb0fa476fb079e0032b76d2bc50c` |
-| Staged CPython framework SHA-256 | `3b8548572d49de187aad18b0a176b6a5d204b64da623942e681e97ce85a525e0` | `3b8548572d49de187aad18b0a176b6a5d204b64da623942e681e97ce85a525e0` |
-| Staged CPython executable SHA-256 | `564913c68be0bcbd38867413ea778df0290d25a443225ba1a66c3b62dc5daf50` | `564913c68be0bcbd38867413ea778df0290d25a443225ba1a66c3b62dc5daf50` |
-| Core shared-map SHA-256 | `8fbb6dffb90498c7099ab1e9e1f0db697a5c5814f178c8a860e1661b1d2383df` | `575cacd0081f3d303c041c8ae1862c095b8fd52cd519be1a7ce75a467f04a370` |
-| NumPy 923-file payload-map SHA-256 | `d7a840c84cd5d4219478d931a683ef924f265d68c2d0a6e6f49a2fa0c3f41445` | `b35e3f59780f77e7130b2f2a73fcaac6480230d2ef0af06b75d19fbe26aa3ca6` |
-| NumPy payload-manifest SHA-256 | `957e7dfb1e4a246ada9f2f9713ebf980de0301fa24476e8f48a92cface7347a0` | `45ceeeadb54e43969b74059bc1bba5dafe37a49b2334fb29f275257f99533801` |
-| NumPy native-census SHA-256 | `a4061c9932031270feeaa00bc986dcb8288c4e0ae740cc70cd1f0dc73ec45860` | `2edb07f2902aa79d2654ffbfb1342b302d59ff0b56c04aa6e520249face20570` |
-
-The Phase-03 evidence also retained whole-file provenance hashes
-`cfe6d574...` / `481bf49d...` for core and `cb589f66...` / `e13f92e1...`
-for NumPy. Those JSON files include absolute `selected_prefix` and
-`selected_executable` values from the original runner and are therefore
-path-sensitive historical evidence, not byte-reproduction gates. The producer
-instead verifies their stable provenance fields plus the runtime byte-map
-identities above.
-
-Before overlay extraction, the qualification harness snapshots every inherited
-file and symlink.  Overlay extraction rejects every pre-existing destination.
-The full inherited snapshot and the complete Phase-03 NumPy payload manifest
-are verified again after extraction and after the JIT/PETSc test.
-
-The bridge's original Phase-03 hosted jobs used the floating `macos-15` runner
-label.  This producer therefore records the concrete Actions image version,
-Xcode, Clang, SDK and host OS used for every reconstruction run but does not
-permit those observations to redefine Phase-03.  If a later runner-image change
-causes the frozen MEX/core/NumPy identities above to drift, overlay qualification
-fails closed and Phase-03 must be requalified explicitly rather than accepting
-new bytes here.
-
-There is also an inherited compatibility-floor discrepancy that this producer
-must not conceal.  The qualified native-arm64 Phase-03 run `41278807666`
-records the frozen `bridge.mex` as the core maximum-minimum-OS object with
-`minos 15.0`, because that job built the MEX with the runner-default deployment
-target.  The qualified x86_64 Phase-03 MEX is explicitly 14.0.  This producer
-continues to require every **new overlay/JIT Mach-O** to be no newer than 14.0
-and preserves the exact Phase-03 MEX bytes; therefore it cannot by itself claim
-that the combined arm64 bridge runtime supports macOS 14.  The bridge Phase-04
-handoff must keep that issue open until the inherited arm64 core runtime is
-requalified at the intended floor or the release floor is explicitly revised.
+- this workflow proves exact lock replay, archive hashes, file ownership,
+  licenses, relocation, Mach-O closure/signing, ZIP integrity and deterministic
+  whole-file identity;
+- it does **not** reconstruct or execute the private consumer runtime;
+- consumer CI must reproduce the ZIP from the immutable producer revision and
+  lock/Zig inputs, assert the same whole-file SHA-256, then perform its own
+  overwrite, inherited-byte, activation, import, fresh-JIT and solve gates; and
+- producer Actions artifacts remain finite-retention diagnostic transport, not
+  durable release inputs.
 
 ## Relocation and native policy
 
@@ -143,28 +108,26 @@ requalified at the intended floor or the release floor is explicitly revised.
 - accepted private dependencies are rewritten to runtime-relative
   `@loader_path` references;
 - all shipped Mach-O objects are ad-hoc signed after relocation and verified;
-- fresh FFCx extensions are built through Zig targets
-  `aarch64-macos.14.0` / `x86_64-macos.14.0`, preserving Darwin dynamic lookup
-  as `-shared -Wl,-undefined,dynamic_lookup`.
+- the bundled compiler shim retains the phase-02-qualified Zig targets
+  `aarch64-macos.14.0` / `x86_64-macos.14.0` and Darwin dynamic-lookup form
+  `-shared -Wl,-undefined,dynamic_lookup` for consumer JIT qualification.
 
 Conda static `.a` archives are not shipped as runtime closure, avoiding an
 unaudited class of Mach-O archive members.  The bundled Zig distribution is
 retained as its exact upstream tree and the executed Zig binary is separately
-identified by its whole-archive input hash and hosted JIT evidence.
+identified by its whole-archive input hash and phase-02 hosted JIT evidence.
 
 ## Qualification sequence
 
 1. replay the exact lock without solving and verify the installed package set;
 2. package only explicit overlay ownership plus package/Zig license evidence;
 3. relocate and audit the complete shipped Mach-O closure;
-4. reconstruct the exact bridge Phase-03 runtime and verify its retained
-   identities;
-5. copy it to a path containing spaces and layer the overlay without overwrites;
-6. poison ambient Python, Homebrew, compiler, SDK and native-library state;
-7. call `fenics_embed_runtime.activate()` twice and import the complete stack;
-8. require bridge-owned NumPy and private-overlay DOLFINx/PETSc ownership;
-9. perform a fresh FFCx JIT and serial PETSc Poisson solve; and
-10. reverify every inherited Phase-03 byte after execution.
+4. rebuild the same overlay a second time from the same installed lock and
+   compare the ZIP, summary and checksum files byte-for-byte;
+5. verify ZIP integrity, bootstrap syntax, bundled Zig presence and absence of
+   producer-owned NumPy paths; and
+6. upload the ZIP plus immutable manifest/native/license/hash evidence as
+   finite-retention qualification diagnostics.
 
 ## Acceptance criteria
 
@@ -177,15 +140,15 @@ identified by its whole-archive input hash and hosted JIT evidence.
       evidence.
 - [ ] Complete shipped Mach-O closure passes architecture, minimum-OS,
       dependency, rpath, producer-path and ad-hoc-signature checks.
-- [ ] Exact Phase-03 MEX/core/NumPy identities are reproduced and remain
-      byte-identical before and after overlay qualification.
-- [ ] Zero-argument/idempotent activation succeeds from a runtime path with
-      spaces while the Zig compiler shim remains whitespace-safe.
-- [ ] Full imports, fresh Zig FFCx JIT and serial PETSc Poisson solve pass with
-      ambient compiler/SDK/Homebrew/Python/native discovery poisoned.
+- [ ] Two independent packaging passes in the same clean hosted transaction
+      produce byte-identical ZIP/summary/checksum outputs.
 - [ ] Final arm64 and x86_64 ZIP names, whole-file SHA-256 values, manifest
       digests, native census, license inventory and hosted run evidence are
       recorded here after successful qualification.
+
+Private-consumer activation/import/JIT/solve and inherited-runtime preservation
+are deliberately **not** acceptance criteria of this public producer phase;
+they gate the downstream consumer qualification against the frozen ZIP hashes.
 
 ## Planned artifact identities
 

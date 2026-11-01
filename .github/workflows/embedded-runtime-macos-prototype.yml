@@ -7,6 +7,7 @@ on:
       - ".github/workflows/embedded-runtime-macos-prototype.yml"
       - "scripts/test-macos-zig-jit.sh"
       - "scripts/test-poisson.py"
+      - "specs/bridge-embed-runtime/**"
       - "README.md"
 
 permissions:
@@ -109,6 +110,10 @@ jobs:
           print(f"package_lock_records={len(records)}")
           PY
           shasum -a 256 "fenics-macos-${TARGET_ARCH}-package-lock.json" > "fenics-macos-${TARGET_ARCH}-package-lock.sha256"
+          reference_lock="specs/bridge-embed-runtime/locks/macos-${TARGET_ARCH}-package-lock.json"
+          test -f "$reference_lock"
+          cmp "fenics-macos-${TARGET_ARCH}-package-lock.json" "$reference_lock"
+          echo "package_lock_replay_identity=pass"
 
       - name: Fetch pinned Zig toolchain
         shell: bash

@@ -1,0 +1,156 @@
+name: embedded-runtime-macos-prototype
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/embedded-runtime-macos-prototype.yml"
+      - "scripts/test-macos-zig-jit.sh"
+      - "scripts/test-poisson.py"
+      - "specs/bridge-embed-runtime/**"
+      - "README.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: embedded-runtime-macos-prototype-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-zig-jit:
+    runs-on: macos-15
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            conda_subdir: osx-arm64
+            zig_asset: zig-aarch64-macos-0.15.2.tar.xz
+            zig_sha256: 3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
+          - architecture: x86_64
+            conda_subdir: osx-64
+            zig_asset: zig-x86_64-macos-0.15.2.tar.xz
+            zig_sha256: 375b6909fc1495d16fc2c7db9538f707456bfc3373b14ee83fdd3e22b3d43f7f
+    env:
+      TARGET_ARCH: ${{ matrix.architecture }}
+      TARGET_SUBDIR: ${{ matrix.conda_subdir }}
+      ZIG_ASSET: ${{ matrix.zig_asset }}
+      ZIG_SHA256: ${{ matrix.zig_sha256 }}
+      ZIG_VERSION: 0.15.2
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Provision Rosetta 2 for x86_64
+        if: matrix.architecture == 'x86_64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          sudo softwareupdate --install-rosetta --agree-to-license >"$RUNNER_TEMP/rosetta-install.log" 2>&1 || {
+            cat "$RUNNER_TEMP/rosetta-install.log" >&2
+            /usr/bin/arch -x86_64 /usr/bin/uname -m >/dev/null 2>&1 || exit 1
+          }
+          test "$(/usr/bin/arch -x86_64 /usr/bin/uname -m)" = x86_64
+
+      - name: Install micromamba
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
+        with:
+          environment-name: packaging
+          create-args: >-
+            -c conda-forge
+            python=3.12
+
+      - name: Create pinned FEniCS prototype prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/fenics-macos-source-$TARGET_ARCH"
+          CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" create -y -p "$prefix" --override-channels --strict-channel-priority -c conda-forge "python=3.12" "numpy=2.5.2" "fenics-dolfinx=0.11.0" "mpich" "cffi" "setuptools"
+          echo "FENICS_SOURCE_PREFIX=$prefix" >> "$GITHUB_ENV"
+          CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" list -p "$prefix" --explicit > "fenics-macos-${TARGET_ARCH}-explicit.txt"
+          shasum -a 256 "fenics-macos-${TARGET_ARCH}-explicit.txt" > "fenics-macos-${TARGET_ARCH}-explicit.sha256"
+          python3 - "$prefix" "$TARGET_ARCH" "fenics-macos-${TARGET_ARCH}-package-lock.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          prefix = pathlib.Path(sys.argv[1]).resolve()
+          architecture = sys.argv[2]
+          output = pathlib.Path(sys.argv[3])
+          records = []
+          for path in sorted((prefix / "conda-meta").glob("*.json")):
+              record = json.loads(path.read_text(encoding="utf-8"))
+              records.append(
+                  {
+                      "name": record["name"],
+                      "version": record["version"],
+                      "build": record["build"],
+                      "build_number": record["build_number"],
+                      "subdir": record.get("subdir"),
+                      "channel": record.get("channel"),
+                      "url": record.get("url"),
+                      "sha256": record.get("sha256"),
+                      "md5": record.get("md5"),
+                  }
+              )
+          if not records or any(not item["url"] for item in records):
+              raise SystemExit("conda package lock is incomplete")
+          if any(not (item["sha256"] or item["md5"]) for item in records):
+              raise SystemExit("conda package lock has an unhashed package")
+          payload = {
+              "format_version": 1,
+              "architecture": architecture,
+              "record_count": len(records),
+              "packages": records,
+          }
+          output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          print(f"package_lock_records={len(records)}")
+          PY
+          shasum -a 256 "fenics-macos-${TARGET_ARCH}-package-lock.json" > "fenics-macos-${TARGET_ARCH}-package-lock.sha256"
+          reference_lock="specs/bridge-embed-runtime/locks/macos-${TARGET_ARCH}-package-lock.json"
+          test -f "$reference_lock"
+          cmp "fenics-macos-${TARGET_ARCH}-package-lock.json" "$reference_lock"
+          echo "package_lock_replay_identity=pass"
+
+      - name: Fetch pinned Zig toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/$ZIG_ASSET"
+          curl --fail --location --retry 3 --retry-all-errors --output "$archive" "https://ziglang.org/download/$ZIG_VERSION/$ZIG_ASSET"
+          actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          test "$actual" = "$ZIG_SHA256"
+          root="$RUNNER_TEMP/zig-$TARGET_ARCH"
+          rm -rf "$root"
+          mkdir -p "$root"
+          tar -xJf "$archive" -C "$root" --strip-components=1
+          test -x "$root/zig"
+          echo "FENICS_ZIG_EXE=$root/zig" >> "$GITHUB_ENV"
+          printf '%s  %s\n' "$actual" "$ZIG_ASSET" > "zig-${TARGET_ARCH}-sha256.txt"
+
+      - name: Run fresh FFCx/PETSc solve through bundled Zig
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/test-macos-zig-jit.sh
+          scripts/test-macos-zig-jit.sh "$FENICS_SOURCE_PREFIX" "$TARGET_ARCH" "$FENICS_ZIG_EXE"
+          evidence="$RUNNER_TEMP/fenics macos zig prototype $TARGET_ARCH/evidence"
+          test -d "$evidence"
+          cp -R "$evidence" "macos-zig-evidence-$TARGET_ARCH"
+
+      - name: Upload prototype evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fenics-macos-zig-prototype-${{ matrix.architecture }}
+          path: |
+            fenics-macos-${{ matrix.architecture }}-explicit.txt
+            fenics-macos-${{ matrix.architecture }}-explicit.sha256
+            fenics-macos-${{ matrix.architecture }}-package-lock.json
+            fenics-macos-${{ matrix.architecture }}-package-lock.sha256
+            zig-${{ matrix.architecture }}-sha256.txt
+            macos-zig-evidence-${{ matrix.architecture }}/
+          if-no-files-found: error
+          retention-days: 30

@@ -64,7 +64,9 @@ jobs:
       - name: Install micromamba
         uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3
         with:
-          micromamba-version: '2.10.0'
+          # setup-micromamba requires the release tag form; this tag installs
+          # micromamba/libmamba 2.10.0, matching prototype run 41294435601.
+          micromamba-version: '2.10.0-0'
 
       - name: Replay immutable package lock without solving
         shell: bash

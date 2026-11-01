@@ -188,11 +188,26 @@ JIT plus serial PETSc Poisson solve through a `zig cc` wrapper targeting
 macOS 14.0.
 
 This workflow deliberately does not publish an overlay yet. Its retained
-explicit package transaction and Zig checksum are inputs to the subsequent
-relocatable-overlay packaging phase. The producer must not promote macOS
-artifacts until the same exact package transactions have been copied into the
-bridge's phase-03 NumPy runtime without replacing the bridge-owned NumPy 2.5.2
-payload and the final Mach-O closure has passed relocation/signing checks.
+package locks and Zig checksums are inputs to the subsequent relocatable-overlay
+qualification phase.
+
+The `embedded-runtime-macos-overlay` workflow replays those checked-in locks as
+solver-free `@EXPLICIT` transactions using the exact URL ordering retained by
+the qualified prototype and micromamba 2.10.0. Each exact URL is SHA-256
+anchored by the checked-in lock, and the installed package records are then
+compared field-for-field with that lock. It packages the FEniCS/PETSc/MPI closure in a
+private `fenics-runtime/` namespace, bundles the exact Zig toolchain, and
+excludes producer CPython and NumPy. It performs complete Mach-O closure and
+ad-hoc-signature audits, records package ownership and license inventory, then
+builds the overlay twice and requires byte-identical ZIP/summary/checksum
+outputs. The resulting artifact hashes are retained as qualification evidence
+rather than treated as public release assets.
+
+The final consumer-runtime qualification is intentionally separate. This
+repository is public while the bridge consumer repository is private, so this
+workflow does not use a widened cross-repository credential. Consumer CI must
+reproduce the frozen producer ZIP by revision/hash and run its own exact-runtime
+overwrite, inherited-byte, activation, import, fresh-JIT and solve gates.
 
 ## Updating
 

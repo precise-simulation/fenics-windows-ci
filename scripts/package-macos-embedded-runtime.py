@@ -21,6 +21,16 @@ from urllib.parse import urlparse
 
 
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
+MACHO_MAGICS = {
+    b"\xfe\xed\xfa\xce",  # MH_MAGIC
+    b"\xce\xfa\xed\xfe",  # MH_CIGAM
+    b"\xfe\xed\xfa\xcf",  # MH_MAGIC_64
+    b"\xcf\xfa\xed\xfe",  # MH_CIGAM_64
+    b"\xca\xfe\xba\xbe",  # FAT_MAGIC
+    b"\xbe\xba\xfe\xca",  # FAT_CIGAM
+    b"\xca\xfe\xba\xbf",  # FAT_MAGIC_64
+    b"\xbf\xba\xfe\xca",  # FAT_CIGAM_64
+}
 ALLOWED_SOURCE_TOP_LEVEL = {"etc", "include", "lib", "share", "ssl"}
 PYTHON_NUMPY_PREFIXES = (
     "lib/python3.12/site-packages/numpy/",
@@ -488,8 +498,11 @@ def verify_symlink_closure(stage_root: Path) -> None:
 def is_macho(path: Path) -> bool:
     if path.is_symlink() or not path.is_file():
         return False
-    result = run("file", "-b", str(path), check=False)
-    return result.returncode == 0 and "Mach-O" in result.stdout
+    try:
+        with path.open("rb") as stream:
+            return stream.read(4) in MACHO_MAGICS
+    except OSError:
+        return False
 
 
 def macho_dependencies(path: Path) -> list[str]:

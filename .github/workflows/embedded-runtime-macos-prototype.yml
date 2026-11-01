@@ -2,6 +2,12 @@ name: embedded-runtime-macos-prototype
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/embedded-runtime-macos-prototype.yml"
+      - "scripts/test-macos-zig-jit.sh"
+      - "scripts/test-poisson.py"
+      - "README.md"
 
 permissions:
   contents: read

@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlparse
 
 
@@ -362,10 +362,21 @@ def collect_package_licenses(
             for relative, path_owners in owners.items()
             if name in path_owners and authoritative_license_path(relative)
         )
-        if not copied and not staged_license_paths:
+        license_expression = metadata.get("license") or record.get("license")
+        if not copied and not staged_license_paths and not license_expression:
             raise SystemExit(
-                f"retained package has no auditable license material in cache or staged payload: {name}"
+                f"retained package has neither license files nor license metadata: {name}"
             )
+        if copied:
+            evidence_kind = "package-license-files"
+        elif staged_license_paths:
+            evidence_kind = "staged-license-files"
+        else:
+            # Conda recipes commonly split one upstream project into several
+            # binary outputs while attaching the license text to only one
+            # output.  Preserve the exact per-output license metadata instead
+            # of pretending the split output shipped a duplicate text file.
+            evidence_kind = "metadata-only-split-output"
         inventory.append(
             {
                 "name": name,
@@ -376,6 +387,7 @@ def collect_package_licenses(
                 "about": metadata,
                 "license_files": copied,
                 "staged_license_paths": staged_license_paths,
+                "evidence_kind": evidence_kind,
             }
         )
     return {"format_version": 1, "packages": inventory}

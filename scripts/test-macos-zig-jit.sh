@@ -60,7 +60,7 @@ while [[ \$# -gt 0 ]]; do
     esac
 done
 if [[ \$python_extension_link -eq 1 ]]; then
-    exec "$zig_exe" cc -target "$zig_target" -mmacosx-version-min=14.0 -shared --allow-shlib-undefined "\${args[@]}"
+    exec "$zig_exe" cc -target "$zig_target" -mmacosx-version-min=14.0 -shared -Wl,-undefined,dynamic_lookup "\${args[@]}"
 fi
 exec "$zig_exe" cc -target "$zig_target" -mmacosx-version-min=14.0 "\${args[@]}"
 EOF

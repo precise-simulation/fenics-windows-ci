@@ -70,6 +70,45 @@ jobs:
           CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" create -y -p "$prefix" --override-channels --strict-channel-priority -c conda-forge "python=3.12" "numpy=2.5.2" "fenics-dolfinx=0.11.0" "mpich" "cffi" "setuptools"
           echo "FENICS_SOURCE_PREFIX=$prefix" >> "$GITHUB_ENV"
           CONDA_SUBDIR="$TARGET_SUBDIR" "$MAMBA_EXE" list -p "$prefix" --explicit > "fenics-macos-${TARGET_ARCH}-explicit.txt"
+          shasum -a 256 "fenics-macos-${TARGET_ARCH}-explicit.txt" > "fenics-macos-${TARGET_ARCH}-explicit.sha256"
+          python3 - "$prefix" "$TARGET_ARCH" "fenics-macos-${TARGET_ARCH}-package-lock.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          prefix = pathlib.Path(sys.argv[1]).resolve()
+          architecture = sys.argv[2]
+          output = pathlib.Path(sys.argv[3])
+          records = []
+          for path in sorted((prefix / "conda-meta").glob("*.json")):
+              record = json.loads(path.read_text(encoding="utf-8"))
+              records.append(
+                  {
+                      "name": record["name"],
+                      "version": record["version"],
+                      "build": record["build"],
+                      "build_number": record["build_number"],
+                      "subdir": record.get("subdir"),
+                      "channel": record.get("channel"),
+                      "url": record.get("url"),
+                      "sha256": record.get("sha256"),
+                      "md5": record.get("md5"),
+                  }
+              )
+          if not records or any(not item["url"] for item in records):
+              raise SystemExit("conda package lock is incomplete")
+          if any(not (item["sha256"] or item["md5"]) for item in records):
+              raise SystemExit("conda package lock has an unhashed package")
+          payload = {
+              "format_version": 1,
+              "architecture": architecture,
+              "record_count": len(records),
+              "packages": records,
+          }
+          output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          print(f"package_lock_records={len(records)}")
+          PY
+          shasum -a 256 "fenics-macos-${TARGET_ARCH}-package-lock.json" > "fenics-macos-${TARGET_ARCH}-package-lock.sha256"
 
       - name: Fetch pinned Zig toolchain
         shell: bash
@@ -103,6 +142,9 @@ jobs:
           name: fenics-macos-zig-prototype-${{ matrix.architecture }}
           path: |
             fenics-macos-${{ matrix.architecture }}-explicit.txt
+            fenics-macos-${{ matrix.architecture }}-explicit.sha256
+            fenics-macos-${{ matrix.architecture }}-package-lock.json
+            fenics-macos-${{ matrix.architecture }}-package-lock.sha256
             zig-${{ matrix.architecture }}-sha256.txt
             macos-zig-evidence-${{ matrix.architecture }}/
           if-no-files-found: error

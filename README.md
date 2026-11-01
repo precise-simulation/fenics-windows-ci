@@ -178,10 +178,11 @@ installation remains the primary direct-Python distribution path.
 
 ### macOS embedded-runtime producer prototype
 
-The manual `embedded-runtime-macos-prototype` workflow is the first
+The `embedded-runtime-macos-prototype` workflow is the first
 qualification stage for macOS arm64 and Rosetta x86_64 bridge overlays. It
-creates a pinned FEniCS 0.11/PETSc 3.25.5 source environment for each
-architecture, downloads the exact official Zig 0.15.2 toolchain for that
+creates a FEniCS 0.11 / NumPy 2.5.2 source environment for each architecture
+and retains the solver's exact package transaction for subsequent pinning. It
+downloads the exact official Zig 0.15.2 toolchain for that
 architecture, poisons ambient compiler/SDK discovery, and requires a fresh FFCx
 JIT plus serial PETSc Poisson solve through a `zig cc` wrapper targeting
 macOS 14.0.

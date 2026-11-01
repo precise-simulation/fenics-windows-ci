@@ -62,6 +62,8 @@ if actual != expected:
     raise SystemExit(f"target Python architecture mismatch: {actual} != {expected}")
 print(f"python_architecture={actual}")
 print(f"python_version={platform.python_version()}")
+if sys.version_info[:2] != (3, 12):
+    raise SystemExit(f"prototype requires CPython 3.12, got {platform.python_version()}")
 PY
 
 export PATH="$work/poison:$prefix/bin:/usr/bin:/bin"
@@ -108,10 +110,6 @@ if basix.__version__ != "0.11.0":
     raise SystemExit(f"unexpected Basix version: {basix.__version__}")
 if ufl.__version__ != "2026.1.0":
     raise SystemExit(f"unexpected UFL version: {ufl.__version__}")
-if petsc4py.__version__ != "3.25.5":
-    raise SystemExit(f"unexpected petsc4py version: {petsc4py.__version__}")
-if mpi4py.__version__ != "4.1.2":
-    raise SystemExit(f"unexpected mpi4py version: {mpi4py.__version__}")
 record = {
     "python": platform.python_version(),
     "machine": platform.machine(),

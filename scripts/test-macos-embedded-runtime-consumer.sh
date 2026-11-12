@@ -233,6 +233,7 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import errno
 import hashlib
 import io
 import json
@@ -242,6 +243,7 @@ from pathlib import Path
 import platform
 import re
 import runpy
+import subprocess
 import sys
 
 expected_arch = sys.argv[1]
@@ -251,6 +253,38 @@ evidence = Path(sys.argv[4])
 
 if platform.machine() != expected_arch:
     raise SystemExit(f"consumer execution architecture mismatch: {platform.machine()} != {expected_arch}")
+
+
+def running_under_rosetta() -> bool:
+    if platform.machine() != "x86_64":
+        return False
+    value = ctypes.c_int(0)
+    size = ctypes.c_size_t(ctypes.sizeof(value))
+    libc = ctypes.CDLL(None, use_errno=True)
+    sysctlbyname = libc.sysctlbyname
+    sysctlbyname.argtypes = [
+        ctypes.c_char_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_size_t),
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+    ]
+    sysctlbyname.restype = ctypes.c_int
+    result = sysctlbyname(
+        b"sysctl.proc_translated",
+        ctypes.byref(value),
+        ctypes.byref(size),
+        None,
+        0,
+    )
+    if result != 0:
+        error = ctypes.get_errno()
+        if error == errno.ENOENT:
+            return False
+        raise RuntimeError(
+            f"cannot determine Rosetta translation state: sysctl.proc_translated failed with errno {error}"
+        )
+    return value.value == 1
 
 import fenics_embed_runtime
 
@@ -319,28 +353,42 @@ if Path(petsc_config.get("PETSC_DIR", "")).resolve() != private_prefix or petsc_
 cc = Path(os.environ.get("CC", "")).resolve()
 zig_source = Path(os.environ.get("FENICS_ZIG_SOURCE", "")).resolve()
 zig = Path(os.environ.get("FENICS_ZIG_EXE", "")).resolve()
+zig_host_arch = os.environ.get("FENICS_ZIG_HOST_ARCH", "")
 bundled_zig = (root / "fenics-runtime" / "zig" / "zig").resolve()
+native_arm64_zig = (root / "fenics-runtime" / "zig-native-arm64" / "zig").resolve()
+rosetta = expected_arch == "x86_64" and running_under_rosetta()
+if expected_arch == "x86_64" and not rosetta:
+    raise SystemExit("hosted x86_64 consumer qualification is not running under Rosetta")
+expected_zig_source = native_arm64_zig if rosetta else bundled_zig
+expected_zig_host_arch = "arm64" if rosetta else expected_arch
 if not cc.is_file():
     raise SystemExit(f"generated Zig compiler shim is missing: {cc}")
 # The generated shim deliberately lives in a whitespace-safe temporary
 # directory, not inside the relocated runtime path.
 if cc == root or root in cc.parents:
     raise SystemExit(f"generated Zig compiler shim unexpectedly lives inside runtime: {cc}")
-if zig_source != bundled_zig:
-    raise SystemExit(f"activation lost bundled Zig provenance: {zig_source} != {bundled_zig}")
+if zig_source != expected_zig_source:
+    raise SystemExit(f"activation selected unexpected Zig source: {zig_source} != {expected_zig_source}")
+if zig_host_arch != expected_zig_host_arch:
+    raise SystemExit(f"unexpected Zig host architecture: {zig_host_arch} != {expected_zig_host_arch}")
 if not zig.is_file():
     raise SystemExit(f"executed Zig compiler is missing: {zig}")
-if expected_arch == "x86_64" and any(character.isspace() for character in str(bundled_zig.parent)):
-    if zig == bundled_zig or root in zig.parents:
+zig_archs = subprocess.check_output(
+    ["/usr/bin/lipo", "-archs", str(zig)], text=True
+).strip().split()
+if zig_archs != [zig_host_arch]:
+    raise SystemExit(f"executed Zig architecture mismatch: {zig_archs} != {[zig_host_arch]}")
+if expected_arch == "x86_64" and any(character.isspace() for character in str(zig_source.parent)):
+    if zig == zig_source or root in zig.parents:
         raise SystemExit(f"Rosetta Zig was not staged outside whitespace runtime path: {zig}")
     if any(character.isspace() for character in str(zig)):
         raise SystemExit(f"Rosetta Zig execution path still contains whitespace: {zig}")
-    source_sha256 = hashlib.sha256(bundled_zig.read_bytes()).hexdigest()
+    source_sha256 = hashlib.sha256(zig_source.read_bytes()).hexdigest()
     executed_sha256 = hashlib.sha256(zig.read_bytes()).hexdigest()
     if executed_sha256 != source_sha256:
         raise SystemExit("Rosetta Zig execution copy differs from bundled Zig")
-elif zig != bundled_zig:
-    raise SystemExit(f"activation unexpectedly staged Zig: {zig} != {bundled_zig}")
+elif zig != zig_source:
+    raise SystemExit(f"activation unexpectedly staged Zig: {zig} != {zig_source}")
 
 # Force PETSc/MPI initialization and a fresh FFCx JIT/solve.
 PETSc.Sys.getVersion()
@@ -392,6 +440,9 @@ record = {
     "cc": str(cc),
     "zig_source": str(zig_source),
     "zig_executable": str(zig),
+    "zig_host_architecture": zig_host_arch,
+    "zig_executable_architectures": zig_archs,
+    "rosetta_translated": rosetta,
     "l2_error": l2_error,
     "provider_images": provider_images,
 }

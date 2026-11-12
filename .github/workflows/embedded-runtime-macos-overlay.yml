@@ -32,15 +32,19 @@ jobs:
         include:
           - architecture: arm64
             conda_subdir: osx-arm64
-            zig_version: 0.15.1
-            zig_asset: zig-aarch64-macos-0.15.1.tar.xz
-            zig_sha256: c4bd624d901c1268f2deb9d8eb2d86a2f8b97bafa3f118025344242da2c54d7b
+            zig_version: 0.15.2
+            zig_asset: zig-aarch64-macos-0.15.2.tar.xz
+            zig_sha256: 3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
+            zig_native_host_asset: ''
+            zig_native_host_sha256: ''
             overlay_asset: fenics-embed-runtime-v0.1.0-macos-arm64-cp312.zip
           - architecture: x86_64
             conda_subdir: osx-64
-            zig_version: 0.15.1
-            zig_asset: zig-x86_64-macos-0.15.1.tar.xz
-            zig_sha256: 9919392e0287cccc106dfbcbb46c7c1c3fa05d919567bb58d7eb16bca4116184
+            zig_version: 0.15.2
+            zig_asset: zig-x86_64-macos-0.15.2.tar.xz
+            zig_sha256: 375b6909fc1495d16fc2c7db9538f707456bfc3373b14ee83fdd3e22b3d43f7f
+            zig_native_host_asset: zig-aarch64-macos-0.15.2.tar.xz
+            zig_native_host_sha256: 3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
             overlay_asset: fenics-embed-runtime-v0.1.0-macos-x64-cp312.zip
     env:
       TARGET_ARCH: ${{ matrix.architecture }}
@@ -48,6 +52,8 @@ jobs:
       ZIG_VERSION: ${{ matrix.zig_version }}
       ZIG_ASSET: ${{ matrix.zig_asset }}
       ZIG_SHA256: ${{ matrix.zig_sha256 }}
+      ZIG_NATIVE_HOST_ASSET: ${{ matrix.zig_native_host_asset }}
+      ZIG_NATIVE_HOST_SHA256: ${{ matrix.zig_native_host_sha256 }}
       OVERLAY_ASSET: ${{ matrix.overlay_asset }}
 
     steps:
@@ -144,6 +150,24 @@ jobs:
           test -f "$root/LICENSE"
           printf '%s  %s\n' "$actual" "$ZIG_ASSET" > "$FENICS_OVERLAY_EVIDENCE/zig-sha256.txt"
           echo "FENICS_ZIG_ROOT=$root" >> "$GITHUB_ENV"
+          if [[ "$TARGET_ARCH" == x86_64 ]]; then
+            host_archive="$RUNNER_TEMP/$ZIG_NATIVE_HOST_ASSET"
+            curl --fail --location --retry 3 --retry-all-errors \
+              --output "$host_archive" \
+              "https://ziglang.org/download/$ZIG_VERSION/$ZIG_NATIVE_HOST_ASSET"
+            host_actual="$(shasum -a 256 "$host_archive" | awk '{print $1}')"
+            test "$host_actual" = "$ZIG_NATIVE_HOST_SHA256"
+            host_root="$RUNNER_TEMP/fenics-zig-native-host-arm64"
+            rm -rf "$host_root"
+            mkdir -p "$host_root"
+            tar -xJf "$host_archive" -C "$host_root" --strip-components=1
+            test -x "$host_root/zig"
+            test -f "$host_root/LICENSE"
+            /usr/bin/file "$host_root/zig" | grep -q arm64
+            printf '%s  %s\n' "$host_actual" "$ZIG_NATIVE_HOST_ASSET" \
+              >> "$FENICS_OVERLAY_EVIDENCE/zig-sha256.txt"
+            echo "FENICS_ZIG_NATIVE_HOST_ROOT=$host_root" >> "$GITHUB_ENV"
+          fi
 
       - name: Package relocatable macOS overlay
         shell: bash
@@ -151,6 +175,14 @@ jobs:
           set -euo pipefail
           producer_revision="$(git rev-parse HEAD)"
           mkdir -p dist
+          native_host_args=()
+          if [[ "$TARGET_ARCH" == x86_64 ]]; then
+            native_host_args=(
+              --zig-native-host-root "$FENICS_ZIG_NATIVE_HOST_ROOT"
+              --zig-native-host-archive "$ZIG_NATIVE_HOST_ASSET"
+              --zig-native-host-sha256 "$ZIG_NATIVE_HOST_SHA256"
+            )
+          fi
           python3 scripts/package-macos-embedded-runtime.py \
             --prefix "$FENICS_LOCKED_PREFIX" \
             --lock "$FENICS_LOCK_FILE" \
@@ -159,6 +191,7 @@ jobs:
             --zig-version "$ZIG_VERSION" \
             --zig-archive "$ZIG_ASSET" \
             --zig-sha256 "$ZIG_SHA256" \
+            "${native_host_args[@]}" \
             --arch "$TARGET_ARCH" \
             --output dist \
             --version 0.1.0 \
@@ -174,6 +207,14 @@ jobs:
           set -euo pipefail
           producer_revision="$(git rev-parse HEAD)"
           mkdir -p dist-repeat
+          native_host_args=()
+          if [[ "$TARGET_ARCH" == x86_64 ]]; then
+            native_host_args=(
+              --zig-native-host-root "$FENICS_ZIG_NATIVE_HOST_ROOT"
+              --zig-native-host-archive "$ZIG_NATIVE_HOST_ASSET"
+              --zig-native-host-sha256 "$ZIG_NATIVE_HOST_SHA256"
+            )
+          fi
           python3 scripts/package-macos-embedded-runtime.py \
             --prefix "$FENICS_LOCKED_PREFIX" \
             --lock "$FENICS_LOCK_FILE" \
@@ -182,6 +223,7 @@ jobs:
             --zig-version "$ZIG_VERSION" \
             --zig-archive "$ZIG_ASSET" \
             --zig-sha256 "$ZIG_SHA256" \
+            "${native_host_args[@]}" \
             --arch "$TARGET_ARCH" \
             --output dist-repeat \
             --version 0.1.0 \
@@ -206,6 +248,10 @@ jobs:
           python3 -m py_compile \
             "$audit_root/Python.framework/Versions/3.12/lib/python3.12/site-packages/fenics_embed_runtime.py"
           test -x "$audit_root/fenics-runtime/zig/zig"
+          if [[ "$TARGET_ARCH" == x86_64 ]]; then
+            test -x "$audit_root/fenics-runtime/zig-native-arm64/zig"
+            /usr/bin/file "$audit_root/fenics-runtime/zig-native-arm64/zig" | grep -q arm64
+          fi
           if find "$audit_root" -type f -o -type l | sed "s#^$audit_root/##" \
               | grep -E '^fenics-runtime/conda/lib/python3\.12/site-packages/(numpy/|numpy\.libs/|numpy-[^/]+\.dist-info/)'; then
             echo "producer-owned NumPy path found in overlay" >&2
@@ -234,6 +280,10 @@ jobs:
           test ! -e "$FENICS_LOCKED_PREFIX"
           test ! -e "$FENICS_PACKAGE_CACHE"
           test ! -e "$FENICS_ZIG_ROOT"
+          if [[ "$TARGET_ARCH" == x86_64 ]]; then
+            rm -rf "$FENICS_ZIG_NATIVE_HOST_ROOT"
+            test ! -e "$FENICS_ZIG_NATIVE_HOST_ROOT"
+          fi
 
       - name: Qualify overlay in clean public consumer runtime
         shell: bash

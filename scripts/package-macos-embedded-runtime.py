@@ -655,8 +655,14 @@ def relocate_and_audit_macho(
     census = []
     max_minos: str | None = None
     for binary in macho_files:
+        relative = binary.relative_to(stage_root).as_posix()
+        compiler_host_tool = (
+            architecture == "x86_64"
+            and relative.startswith("fenics-runtime/zig-native-arm64/")
+        )
+        expected_architecture = "arm64" if compiler_host_tool else architecture
         archs = run("lipo", "-archs", str(binary)).stdout.strip().split()
-        if archs != [architecture]:
+        if archs != [expected_architecture]:
             raise SystemExit(f"unexpected Mach-O architectures for {binary}: {archs!r}")
         minos = macho_minos(binary)
         if minos is None:
@@ -689,8 +695,9 @@ def relocate_and_audit_macho(
         detail = run("codesign", "-dv", "--verbose=4", str(binary), check=False).stdout
         census.append(
             {
-                "path": binary.relative_to(stage_root).as_posix(),
-                "architecture": architecture,
+                "path": relative,
+                "architecture": expected_architecture,
+                "role": "compiler-host-tool" if compiler_host_tool else "runtime",
                 "minos": minos,
                 "dependencies": dependencies,
                 "rpaths": rpaths,
@@ -702,6 +709,7 @@ def relocate_and_audit_macho(
     return {
         "format_version": 1,
         "architecture": architecture,
+        "compiler_host_architectures": ["arm64"] if architecture == "x86_64" else [],
         "macho_count": len(census),
         "measured_max_minos": max_minos,
         "system_library_allowlist": list(SYSTEM_PREFIXES),
@@ -808,6 +816,9 @@ parser.add_argument("--zig-root", required=True)
 parser.add_argument("--zig-version", required=True)
 parser.add_argument("--zig-archive", required=True)
 parser.add_argument("--zig-sha256", required=True)
+parser.add_argument("--zig-native-host-root")
+parser.add_argument("--zig-native-host-archive")
+parser.add_argument("--zig-native-host-sha256")
 parser.add_argument("--arch", required=True, choices=("arm64", "x86_64"))
 parser.add_argument("--output", required=True)
 parser.add_argument("--version", default="0.1.0")
@@ -823,6 +834,9 @@ prefix = Path(args.prefix).resolve()
 lock_path = Path(args.lock).resolve()
 package_cache = Path(args.package_cache).resolve()
 zig_root = Path(args.zig_root).resolve()
+zig_native_host_root = (
+    Path(args.zig_native_host_root).resolve() if args.zig_native_host_root else None
+)
 output = Path(args.output).resolve()
 bootstrap_source = Path(__file__).resolve().with_name("fenics-embed-bootstrap-macos.py")
 
@@ -831,6 +845,26 @@ for required in (prefix / "conda-meta", lock_path, package_cache, zig_root / "zi
         raise SystemExit(f"required producer input is missing: {required}")
 if not re.fullmatch(r"[0-9a-f]{64}", args.zig_sha256.lower()):
     raise SystemExit("invalid Zig SHA-256")
+native_host_values = (
+    args.zig_native_host_root,
+    args.zig_native_host_archive,
+    args.zig_native_host_sha256,
+)
+if args.arch == "x86_64":
+    if not all(native_host_values) or zig_native_host_root is None:
+        raise SystemExit("x86_64 overlay requires the native arm64 Zig host toolchain")
+    if not (zig_native_host_root / "zig").is_file():
+        raise SystemExit(
+            f"required native Zig host executable is missing: {zig_native_host_root / 'zig'}"
+        )
+    if not (zig_native_host_root / "LICENSE").is_file():
+        raise SystemExit(
+            f"required native Zig host license is missing: {zig_native_host_root / 'LICENSE'}"
+        )
+    if not re.fullmatch(r"[0-9a-f]{64}", str(args.zig_native_host_sha256).lower()):
+        raise SystemExit("invalid native Zig host SHA-256")
+elif any(native_host_values):
+    raise SystemExit("native Zig host arguments are only valid for the x86_64 overlay")
 
 lock = load_lock(lock_path, args.arch)
 records = installed_records(prefix)
@@ -935,6 +969,16 @@ try:
 
     zig_destination = stage_root / "fenics-runtime" / "zig"
     copy_tree(zig_root, zig_destination, stage_root, owners, f"zig-{args.zig_version}")
+    zig_native_host_destination: Path | None = None
+    if zig_native_host_root is not None:
+        zig_native_host_destination = stage_root / "fenics-runtime" / "zig-native-arm64"
+        copy_tree(
+            zig_native_host_root,
+            zig_native_host_destination,
+            stage_root,
+            owners,
+            f"zig-{args.zig_version}-native-arm64-host",
+        )
 
     provenance = stage_root / "fenics-runtime" / "provenance"
     provenance.mkdir(parents=True, exist_ok=True)
@@ -950,6 +994,16 @@ try:
         "archive": args.zig_archive,
         "sha256": args.zig_sha256.lower(),
         "license_path": "fenics-runtime/zig/LICENSE",
+        "native_host": (
+            {
+                "architecture": "arm64",
+                "archive": args.zig_native_host_archive,
+                "sha256": str(args.zig_native_host_sha256).lower(),
+                "license_path": "fenics-runtime/zig-native-arm64/LICENSE",
+            }
+            if zig_native_host_destination is not None
+            else None
+        ),
     }
     licenses_path = provenance / "third-party-licenses.json"
     licenses_path.write_text(json.dumps(license_inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1036,11 +1090,25 @@ try:
             "archive": args.zig_archive,
             "sha256": args.zig_sha256.lower(),
             "target": "aarch64-macos.14.0" if args.arch == "arm64" else "x86_64-macos.14.0",
+            "native_host": (
+                {
+                    "architecture": "arm64",
+                    "archive": args.zig_native_host_archive,
+                    "sha256": str(args.zig_native_host_sha256).lower(),
+                }
+                if zig_native_host_destination is not None
+                else None
+            ),
         },
         "layout": {
             "private_prefix": "fenics-runtime/conda",
             "private_site_packages": "fenics-runtime/conda/lib/python3.12/site-packages",
             "zig_root": "fenics-runtime/zig",
+            "zig_native_host_root": (
+                "fenics-runtime/zig-native-arm64"
+                if zig_native_host_destination is not None
+                else None
+            ),
             "bootstrap": "Python.framework/Versions/3.12/lib/python3.12/site-packages/fenics_embed_runtime.py",
         },
         "native": {

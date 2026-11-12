@@ -30,14 +30,19 @@ repository.
   and
   `af133bac1d322cc266e9781e36b920ffbe9afb8af7e462b015946d5f78b58c3f`;
 - micromamba `2.10.0`, matching the successful prototype run;
-- Zig 0.15.1 archives for the final overlays:
+- Zig 0.15.2 archives for the final overlays:
   - arm64 SHA-256
-    `c4bd624d901c1268f2deb9d8eb2d86a2f8b97bafa3f118025344242da2c54d7b`;
+    `3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b`;
   - x86_64 SHA-256
-    `9919392e0287cccc106dfbcbb46c7c1c3fa05d919567bb58d7eb16bca4116184`.
-  Phase 02 qualified the same JIT design with Zig 0.15.2, but the final
-  producer qualification uses 0.15.1 because the 0.15.2 x86_64 clang frontend
-  segfaults under Rosetta in the independent CPython consumer fixture.
+    `375b6909fc1495d16fc2c7db9538f707456bfc3373b14ee83fdd3e22b3d43f7f`.
+  The x86_64 overlay contains both exact upstream distributions: x86_64 for
+  an architecture-matched fallback and arm64 as the compiler host when the
+  consumer itself is translated by Rosetta. Phase 02 qualified the target/JIT
+  design with Zig 0.15.2. A final-overlay experiment with 0.15.1 showed the
+  translated x86_64 Zig/Clang failure persists (illegal instruction rather than
+  the 0.15.2 SIGSEGV), so the producer keeps the already-qualified 0.15.2
+  toolchain and removes Rosetta from the compiler process instead of changing
+  the generated-code target.
 
 The qualified explicit URL order is combined with the package-lock SHA-256
 values to produce an `@EXPLICIT` replay transaction.  The URL set must match the
@@ -54,10 +59,12 @@ archives after successful linking.
 
 ## Ownership and layout
 
-The final overlay is additive.  Its private conda-derived closure lives below
-`fenics-runtime/conda/`, the exact Zig distribution lives below
-`fenics-runtime/zig/`, and the only path intentionally added to the consumer's
-Python framework is:
+The final overlay is additive. Its private conda-derived closure lives below
+`fenics-runtime/conda/` and the target-architecture Zig distribution lives
+below `fenics-runtime/zig/`. The x86_64 artifact additionally carries the exact
+arm64 Zig distribution below `fenics-runtime/zig-native-arm64/` solely as a
+compiler-host tool for Rosetta consumers. The only path intentionally added to
+the consumer's Python framework is:
 
 `Python.framework/Versions/3.12/lib/python3.12/site-packages/fenics_embed_runtime.py`
 
@@ -86,15 +93,19 @@ The latter is required because the qualified FFCx/distutils compiler command
 cannot safely carry a compiler executable path containing spaces. The relocated
 runtime itself is tested under a path containing spaces; the generated compiler
 shim and transient JIT cache use whitespace-safe temporary paths outside
-artifact ownership. Under Rosetta x86_64, the Zig x86_64 clang frontend also
-requires its own InstalledDir to be whitespace-safe, so activation copies the
-overlay-bundled Zig tree to the same private temporary execution area and
-verifies the executed Zig binary is byte-identical to the bundled source. The
-compiler shim also exposes the relocated runtime through a whitespace-safe
-temporary symlink and rewrites only runtime-owned include paths through that
-alias before invoking Zig; the real runtime remains at the space-containing
-consumer path and all provider/runtime-preservation checks use that real path.
-This does not introduce an ambient compiler dependency or change overlay ownership.
+artifact ownership. Under Rosetta x86_64, activation detects
+`sysctl.proc_translated`, selects the bundled arm64 Zig host, stages that exact
+tree in the same whitespace-safe private temporary area, and launches it
+explicitly with `/usr/bin/arch -arm64`. The compiler target remains
+`x86_64-macos.14.0`, so the resulting JIT module is still x86_64 and loads into
+the translated consumer process. The bundled x86_64 Zig tree remains available
+as an architecture-matched fallback, but native Intel execution is outside this
+hosted producer acceptance gate. The compiler shim also exposes the relocated
+runtime through a whitespace-safe temporary symlink and rewrites only
+runtime-owned include paths through that alias before invoking Zig; the real
+runtime remains at the space-containing consumer path and all
+provider/runtime-preservation checks use that real path. This does not
+introduce an ambient compiler dependency or change runtime library ownership.
 
 After both deterministic builds compare byte-for-byte, the workflow removes the
 producer conda prefix/package cache and extracted Zig source tree.  No consumer
@@ -153,14 +164,19 @@ requirements, but it is not a prerequisite for this producer artifact.
 - accepted private dependencies are rewritten to runtime-relative
   `@loader_path` references;
 - all shipped Mach-O objects are ad-hoc signed after relocation and verified;
+- runtime/loadable Mach-O objects must match the overlay target architecture;
+  the x86_64 artifact's separately declared
+  `fenics-runtime/zig-native-arm64/` compiler-host subtree is audited as arm64
+  and is never part of the runtime/loadable dependency closure;
 - the bundled compiler shim retains the phase-02-qualified Zig targets
   `aarch64-macos.14.0` / `x86_64-macos.14.0` and Darwin dynamic-lookup form
   `-shared -Wl,-undefined,dynamic_lookup` for consumer JIT qualification.
 
 Conda static `.a` archives are not shipped as runtime closure, avoiding an
-unaudited class of Mach-O archive members.  The bundled Zig distribution is
-retained as its exact upstream tree and the executed Zig binary is separately
-identified by its whole-archive input hash and phase-02 hosted JIT evidence.
+unaudited class of Mach-O archive members. The bundled Zig distributions are
+retained as exact upstream trees and each is bound to its official archive
+SHA-256. Consumer evidence records the selected Zig source, executed binary,
+host architecture, target architecture, and Rosetta translation state.
 
 ## Qualification sequence
 
@@ -193,8 +209,10 @@ identified by its whole-archive input hash and phase-02 hosted JIT evidence.
       license evidence and all package-supplied license texts/notices are
       retained, with split-output coverage mechanically bound to identical
       rendered recipe metadata rather than inferred from package names.
-- [ ] Complete shipped Mach-O closure passes architecture, minimum-OS,
-      dependency, rpath, producer-path and ad-hoc-signature checks.
+- [ ] Complete shipped Mach-O closure passes declared-role architecture,
+      minimum-OS, dependency, rpath, producer-path and ad-hoc-signature checks;
+      the x86_64 runtime closure remains x86_64 while its isolated native
+      compiler-host subtree is arm64.
 - [ ] Two independent packaging passes in the same clean hosted transaction
       produce byte-identical ZIP/summary/checksum outputs.
 - [ ] After producer source environments are removed, both architectures pass

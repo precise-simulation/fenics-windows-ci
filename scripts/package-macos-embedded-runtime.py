@@ -906,7 +906,7 @@ try:
         else:
             not_staged_packages.append(name)
 
-    # The bridge-owned NumPy distribution and producer CPython must never be
+    # The consumer-owned NumPy distribution and producer CPython must never be
     # represented anywhere in the emitted overlay.
     staged_numpy = [
         path.relative_to(stage_root).as_posix()
@@ -1013,7 +1013,7 @@ try:
         "producer_python": "3.12.16",
         "numpy": {
             "version": "2.5.2",
-            "ownership": "bridge-phase03",
+            "ownership": "consumer-runtime",
             "producer_payload_excluded": True,
         },
         "producer": {

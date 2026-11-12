@@ -174,9 +174,11 @@ requirements, but it is not a prerequisite for this producer artifact.
 
 Conda static `.a` archives are not shipped as runtime closure, avoiding an
 unaudited class of Mach-O archive members. The bundled Zig distributions are
-retained as exact upstream trees and each is bound to its official archive
-SHA-256. Consumer evidence records the selected Zig source, executed binary,
-host architecture, target architecture, and Rosetta translation state.
+copied from exact upstream archives bound to their official SHA-256 values;
+their Mach-O executables are then ad-hoc signed with the rest of the shipped
+closure, and the manifest binds those post-sign payload bytes. Consumer
+evidence records the selected Zig source, executed binary, host architecture,
+target architecture, and Rosetta translation state.
 
 ## Qualification sequence
 

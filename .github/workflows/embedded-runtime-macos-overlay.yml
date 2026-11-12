@@ -178,23 +178,24 @@ jobs:
           set -euo pipefail
           producer_revision="$(git rev-parse HEAD)"
           mkdir -p dist
-          native_host_args=()
+          packager_args=(
+            --prefix "$FENICS_LOCKED_PREFIX"
+            --lock "$FENICS_LOCK_FILE"
+            --package-cache "$FENICS_PACKAGE_CACHE"
+            --zig-root "$FENICS_ZIG_ROOT"
+            --zig-version "$ZIG_VERSION"
+            --zig-archive "$ZIG_ASSET"
+            --zig-sha256 "$ZIG_SHA256"
+          )
           if [[ "$TARGET_ARCH" == x86_64 ]]; then
-            native_host_args=(
+            packager_args+=(
               --zig-native-host-root "$FENICS_ZIG_NATIVE_HOST_ROOT"
               --zig-native-host-archive "$ZIG_NATIVE_HOST_ASSET"
               --zig-native-host-sha256 "$ZIG_NATIVE_HOST_SHA256"
             )
           fi
           python3 scripts/package-macos-embedded-runtime.py \
-            --prefix "$FENICS_LOCKED_PREFIX" \
-            --lock "$FENICS_LOCK_FILE" \
-            --package-cache "$FENICS_PACKAGE_CACHE" \
-            --zig-root "$FENICS_ZIG_ROOT" \
-            --zig-version "$ZIG_VERSION" \
-            --zig-archive "$ZIG_ASSET" \
-            --zig-sha256 "$ZIG_SHA256" \
-            "${native_host_args[@]}" \
+            "${packager_args[@]}" \
             --arch "$TARGET_ARCH" \
             --output dist \
             --version 0.1.0 \
@@ -210,23 +211,24 @@ jobs:
           set -euo pipefail
           producer_revision="$(git rev-parse HEAD)"
           mkdir -p dist-repeat
-          native_host_args=()
+          packager_args=(
+            --prefix "$FENICS_LOCKED_PREFIX"
+            --lock "$FENICS_LOCK_FILE"
+            --package-cache "$FENICS_PACKAGE_CACHE"
+            --zig-root "$FENICS_ZIG_ROOT"
+            --zig-version "$ZIG_VERSION"
+            --zig-archive "$ZIG_ASSET"
+            --zig-sha256 "$ZIG_SHA256"
+          )
           if [[ "$TARGET_ARCH" == x86_64 ]]; then
-            native_host_args=(
+            packager_args+=(
               --zig-native-host-root "$FENICS_ZIG_NATIVE_HOST_ROOT"
               --zig-native-host-archive "$ZIG_NATIVE_HOST_ASSET"
               --zig-native-host-sha256 "$ZIG_NATIVE_HOST_SHA256"
             )
           fi
           python3 scripts/package-macos-embedded-runtime.py \
-            --prefix "$FENICS_LOCKED_PREFIX" \
-            --lock "$FENICS_LOCK_FILE" \
-            --package-cache "$FENICS_PACKAGE_CACHE" \
-            --zig-root "$FENICS_ZIG_ROOT" \
-            --zig-version "$ZIG_VERSION" \
-            --zig-archive "$ZIG_ASSET" \
-            --zig-sha256 "$ZIG_SHA256" \
-            "${native_host_args[@]}" \
+            "${packager_args[@]}" \
             --arch "$TARGET_ARCH" \
             --output dist-repeat \
             --version 0.1.0 \

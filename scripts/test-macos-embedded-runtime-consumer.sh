@@ -233,6 +233,7 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import hashlib
 import io
 import json
 import math
@@ -316,15 +317,30 @@ if Path(petsc_config.get("PETSC_DIR", "")).resolve() != private_prefix or petsc_
     raise SystemExit(f"petsc4py configuration did not relocate: {petsc_config}")
 
 cc = Path(os.environ.get("CC", "")).resolve()
+zig_source = Path(os.environ.get("FENICS_ZIG_SOURCE", "")).resolve()
 zig = Path(os.environ.get("FENICS_ZIG_EXE", "")).resolve()
+bundled_zig = (root / "fenics-runtime" / "zig" / "zig").resolve()
 if not cc.is_file():
     raise SystemExit(f"generated Zig compiler shim is missing: {cc}")
 # The generated shim deliberately lives in a whitespace-safe temporary
 # directory, not inside the relocated runtime path.
 if cc == root or root in cc.parents:
     raise SystemExit(f"generated Zig compiler shim unexpectedly lives inside runtime: {cc}")
-if zig != (root / "fenics-runtime" / "zig" / "zig").resolve():
-    raise SystemExit(f"activation escaped bundled Zig: {zig}")
+if zig_source != bundled_zig:
+    raise SystemExit(f"activation lost bundled Zig provenance: {zig_source} != {bundled_zig}")
+if not zig.is_file():
+    raise SystemExit(f"executed Zig compiler is missing: {zig}")
+if expected_arch == "x86_64" and any(character.isspace() for character in str(bundled_zig.parent)):
+    if zig == bundled_zig or root in zig.parents:
+        raise SystemExit(f"Rosetta Zig was not staged outside whitespace runtime path: {zig}")
+    if any(character.isspace() for character in str(zig)):
+        raise SystemExit(f"Rosetta Zig execution path still contains whitespace: {zig}")
+    source_sha256 = hashlib.sha256(bundled_zig.read_bytes()).hexdigest()
+    executed_sha256 = hashlib.sha256(zig.read_bytes()).hexdigest()
+    if executed_sha256 != source_sha256:
+        raise SystemExit("Rosetta Zig execution copy differs from bundled Zig")
+elif zig != bundled_zig:
+    raise SystemExit(f"activation unexpectedly staged Zig: {zig} != {bundled_zig}")
 
 # Force PETSc/MPI initialization and a fresh FFCx JIT/solve.
 PETSc.Sys.getVersion()
@@ -374,7 +390,8 @@ record = {
     "module_paths": module_paths,
     "petsc_config": petsc_config,
     "cc": str(cc),
-    "zig": str(zig),
+    "zig_source": str(zig_source),
+    "zig_executable": str(zig),
     "l2_error": l2_error,
     "provider_images": provider_images,
 }

@@ -80,7 +80,7 @@ def _write_jit_wrapper(runtime_root: Path) -> tuple[Path, Path, Path]:
     runtime_alias = root / "runtime-root"
     runtime_alias.symlink_to(runtime_root, target_is_directory=True)
 
-    # Zig 0.15.2's x86_64 clang frontend can crash under Rosetta when its own
+    # The x86_64 Zig clang frontend can fail under Rosetta when its own
     # InstalledDir contains whitespace. Keep the relocated runtime itself under
     # its real path, but execute an exact temporary copy of the bundled Zig tree
     # from a whitespace-safe location. No ambient compiler/toolchain is used.

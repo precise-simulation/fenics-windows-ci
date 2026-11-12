@@ -805,6 +805,7 @@ parser.add_argument("--prefix", required=True)
 parser.add_argument("--lock", required=True)
 parser.add_argument("--package-cache", required=True)
 parser.add_argument("--zig-root", required=True)
+parser.add_argument("--zig-version", required=True)
 parser.add_argument("--zig-archive", required=True)
 parser.add_argument("--zig-sha256", required=True)
 parser.add_argument("--arch", required=True, choices=("arm64", "x86_64"))
@@ -815,6 +816,8 @@ args = parser.parse_args()
 
 if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
     raise SystemExit(f"overlay version must be X.Y.Z: {args.version!r}")
+if not re.fullmatch(r"\d+\.\d+\.\d+", args.zig_version):
+    raise SystemExit(f"Zig version must be X.Y.Z: {args.zig_version!r}")
 
 prefix = Path(args.prefix).resolve()
 lock_path = Path(args.lock).resolve()
@@ -931,7 +934,7 @@ try:
     owners[bootstrap_destination.relative_to(stage_root).as_posix()] = ["fenics-windows-ci"]
 
     zig_destination = stage_root / "fenics-runtime" / "zig"
-    copy_tree(zig_root, zig_destination, stage_root, owners, "zig-0.15.2")
+    copy_tree(zig_root, zig_destination, stage_root, owners, f"zig-{args.zig_version}")
 
     provenance = stage_root / "fenics-runtime" / "provenance"
     provenance.mkdir(parents=True, exist_ok=True)
@@ -943,7 +946,7 @@ try:
         package_cache, records, retained_packages, stage_root, owners
     )
     license_inventory["zig"] = {
-        "version": "0.15.2",
+        "version": args.zig_version,
         "archive": args.zig_archive,
         "sha256": args.zig_sha256.lower(),
         "license_path": "fenics-runtime/zig/LICENSE",
@@ -1029,7 +1032,7 @@ try:
             "excluded_owned_paths": excluded_owned_paths,
         },
         "zig": {
-            "version": "0.15.2",
+            "version": args.zig_version,
             "archive": args.zig_archive,
             "sha256": args.zig_sha256.lower(),
             "target": "aarch64-macos.14.0" if args.arch == "arm64" else "x86_64-macos.14.0",

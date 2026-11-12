@@ -30,7 +30,14 @@ repository.
   and
   `af133bac1d322cc266e9781e36b920ffbe9afb8af7e462b015946d5f78b58c3f`;
 - micromamba `2.10.0`, matching the successful prototype run;
-- Zig 0.15.2 archives and SHA-256 values already qualified by phase 02.
+- Zig 0.15.1 archives for the final overlays:
+  - arm64 SHA-256
+    `c4bd624d901c1268f2deb9d8eb2d86a2f8b97bafa3f118025344242da2c54d7b`;
+  - x86_64 SHA-256
+    `9919392e0287cccc106dfbcbb46c7c1c3fa05d919567bb58d7eb16bca4116184`.
+  Phase 02 qualified the same JIT design with Zig 0.15.2, but the final
+  producer qualification uses 0.15.1 because the 0.15.2 x86_64 clang frontend
+  segfaults under Rosetta in the independent CPython consumer fixture.
 
 The qualified explicit URL order is combined with the package-lock SHA-256
 values to produce an `@EXPLICIT` replay transaction.  The URL set must match the
@@ -79,7 +86,7 @@ The latter is required because the qualified FFCx/distutils compiler command
 cannot safely carry a compiler executable path containing spaces. The relocated
 runtime itself is tested under a path containing spaces; the generated compiler
 shim and transient JIT cache use whitespace-safe temporary paths outside
-artifact ownership. Under Rosetta x86_64, Zig 0.15.2's clang frontend also
+artifact ownership. Under Rosetta x86_64, the Zig x86_64 clang frontend also
 requires its own InstalledDir to be whitespace-safe, so activation copies the
 overlay-bundled Zig tree to the same private temporary execution area and
 verifies the executed Zig binary is byte-identical to the bundled source. The

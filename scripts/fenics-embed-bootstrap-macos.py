@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import platform
 import shlex
+import shutil
 import stat
 import sys
 import tempfile
@@ -14,6 +15,8 @@ import tempfile
 
 _ACTIVATED_ROOT: Path | None = None
 _JIT_WRAPPER: Path | None = None
+_JIT_ZIG_SOURCE: Path | None = None
+_JIT_ZIG_EXE: Path | None = None
 
 
 def _runtime_root() -> Path:
@@ -44,14 +47,20 @@ def _wrapper_root(runtime_root: Path) -> Path:
         if any(character.isspace() for character in str(base)):
             continue
         token = hashlib.sha256(str(runtime_root).encode("utf-8")).hexdigest()[:16]
-        return base / f"fenics-embed-zig-{token}-{platform.machine()}"
+        return base / f"fenics-embed-zig-{token}-{platform.machine()}-{os.getpid()}"
     raise RuntimeError("no whitespace-safe temporary directory is available for the FEniCS Zig compiler shim")
 
 
-def _write_jit_wrapper(runtime_root: Path) -> Path:
-    global _JIT_WRAPPER
-    if _JIT_WRAPPER is not None and _JIT_WRAPPER.exists():
-        return _JIT_WRAPPER
+def _write_jit_wrapper(runtime_root: Path) -> tuple[Path, Path, Path]:
+    global _JIT_WRAPPER, _JIT_ZIG_SOURCE, _JIT_ZIG_EXE
+    if (
+        _JIT_WRAPPER is not None
+        and _JIT_WRAPPER.exists()
+        and _JIT_ZIG_SOURCE is not None
+        and _JIT_ZIG_EXE is not None
+        and _JIT_ZIG_EXE.exists()
+    ):
+        return _JIT_WRAPPER, _JIT_ZIG_SOURCE, _JIT_ZIG_EXE
 
     machine = platform.machine()
     target = {
@@ -61,12 +70,30 @@ def _write_jit_wrapper(runtime_root: Path) -> Path:
     if target is None:
         raise RuntimeError(f"unsupported macOS FEniCS runtime architecture: {machine}")
 
-    zig = runtime_root / "fenics-runtime" / "zig" / "zig"
-    if not zig.is_file():
-        raise RuntimeError(f"bundled Zig executable is missing: {zig}")
+    zig_source_root = runtime_root / "fenics-runtime" / "zig"
+    zig_source = zig_source_root / "zig"
+    if not zig_source.is_file():
+        raise RuntimeError(f"bundled Zig executable is missing: {zig_source}")
 
     root = _wrapper_root(runtime_root)
     root.mkdir(parents=True, exist_ok=True)
+
+    # Zig 0.15.2's x86_64 clang frontend can crash under Rosetta when its own
+    # InstalledDir contains whitespace. Keep the relocated runtime itself under
+    # its real path, but execute an exact temporary copy of the bundled Zig tree
+    # from a whitespace-safe location. No ambient compiler/toolchain is used.
+    zig = zig_source
+    if machine == "x86_64" and any(character.isspace() for character in str(zig_source_root)):
+        staged_zig_root = root / "zig-runtime"
+        shutil.copytree(zig_source_root, staged_zig_root, symlinks=True)
+        zig = staged_zig_root / "zig"
+        if not zig.is_file():
+            raise RuntimeError(f"staged Zig executable is missing: {zig}")
+        source_sha256 = hashlib.sha256(zig_source.read_bytes()).digest()
+        staged_sha256 = hashlib.sha256(zig.read_bytes()).digest()
+        if staged_sha256 != source_sha256:
+            raise RuntimeError("staged Zig executable differs from bundled Zig")
+
     wrapper = root / "fenics-zig-cc"
     python_include = runtime_root / "Python.framework" / "Versions" / "3.12" / "include" / "python3.12"
     private_include = runtime_root / "fenics-runtime" / "conda" / "include"
@@ -156,7 +183,9 @@ exec "$zig" cc -target "$target" -mmacosx-version-min=14.0 "${{args[@]}}"
     wrapper.write_text(script, encoding="utf-8")
     wrapper.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
     _JIT_WRAPPER = wrapper
-    return wrapper
+    _JIT_ZIG_SOURCE = zig_source
+    _JIT_ZIG_EXE = zig
+    return wrapper, zig_source, zig
 
 
 def activate() -> Path:
@@ -193,7 +222,7 @@ def activate() -> Path:
     if private_site_text not in sys.path:
         sys.path.insert(0, private_site_text)
 
-    wrapper = _write_jit_wrapper(root)
+    wrapper, zig_source, zig_exe = _write_jit_wrapper(root)
     _prepend_path("PATH", wrapper.parent)
 
     os.environ["PETSC_DIR"] = str(private_prefix)
@@ -203,7 +232,8 @@ def activate() -> Path:
     os.environ["CPP"] = f"{wrapper} -E"
     os.environ["LDSHARED"] = f"{wrapper} -bundle -undefined dynamic_lookup"
     os.environ["MACOSX_DEPLOYMENT_TARGET"] = "14.0"
-    os.environ["FENICS_ZIG_EXE"] = str(root / "fenics-runtime" / "zig" / "zig")
+    os.environ["FENICS_ZIG_SOURCE"] = str(zig_source)
+    os.environ["FENICS_ZIG_EXE"] = str(zig_exe)
     os.environ["FENICS_ZIG_TARGET"] = (
         "aarch64-macos.14.0" if platform.machine() == "arm64" else "x86_64-macos.14.0"
     )

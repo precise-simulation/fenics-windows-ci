@@ -32,6 +32,7 @@ jobs:
         include:
           - architecture: arm64
             conda_subdir: osx-arm64
+            consumer_host_mode: native
             zig_version: 0.15.2
             zig_asset: zig-aarch64-macos-0.15.2.tar.xz
             zig_sha256: 3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
@@ -40,6 +41,7 @@ jobs:
             overlay_asset: fenics-embed-runtime-v0.1.0-macos-arm64-cp312.zip
           - architecture: x86_64
             conda_subdir: osx-64
+            consumer_host_mode: rosetta
             zig_version: 0.15.2
             zig_asset: zig-x86_64-macos-0.15.2.tar.xz
             zig_sha256: 375b6909fc1495d16fc2c7db9538f707456bfc3373b14ee83fdd3e22b3d43f7f
@@ -49,6 +51,7 @@ jobs:
     env:
       TARGET_ARCH: ${{ matrix.architecture }}
       TARGET_SUBDIR: ${{ matrix.conda_subdir }}
+      CONSUMER_HOST_MODE: ${{ matrix.consumer_host_mode }}
       ZIG_VERSION: ${{ matrix.zig_version }}
       ZIG_ASSET: ${{ matrix.zig_asset }}
       ZIG_SHA256: ${{ matrix.zig_sha256 }}
@@ -292,7 +295,8 @@ jobs:
           bash scripts/test-macos-embedded-runtime-consumer.sh \
             "dist/$OVERLAY_ASSET" \
             "$TARGET_ARCH" \
-            "$FENICS_OVERLAY_EVIDENCE/consumer"
+            "$FENICS_OVERLAY_EVIDENCE/consumer" \
+            "$CONSUMER_HOST_MODE"
 
       - name: Collect immutable handoff evidence
         shell: bash

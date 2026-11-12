@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 3 ]]; then
-    echo "usage: $0 <overlay-zip> <arm64|x86_64> <evidence-dir>" >&2
+if [[ $# -lt 3 || $# -gt 4 ]]; then
+    echo "usage: $0 <overlay-zip> <arm64|x86_64> <evidence-dir> [auto|native|rosetta]" >&2
     exit 2
 fi
 
 overlay_zip="$1"
 target_arch="$2"
 evidence_dir="$3"
+consumer_host_mode="${4:-auto}"
+
+case "$consumer_host_mode" in
+    auto|native|rosetta)
+        ;;
+    *)
+        echo "unsupported consumer host mode: $consumer_host_mode" >&2
+        exit 2
+        ;;
+esac
 
 case "$target_arch" in
     arm64)
@@ -228,7 +238,7 @@ unset CONDA_PREFIX CONDA_DEFAULT_ENV MAMBA_ROOT_PREFIX SDKROOT DEVELOPER_DIR \
 
 "${arch_cmd[@]}" "$python_exe" -I - \
     "$target_arch" "$runtime_root" "$repo_root/scripts/test-poisson.py" \
-    "$evidence_dir/consumer-runtime.json" <<'PY' 2>&1 | tee "$evidence_dir/consumer-runtime.log"
+    "$evidence_dir/consumer-runtime.json" "$consumer_host_mode" <<'PY' 2>&1 | tee "$evidence_dir/consumer-runtime.log"
 from __future__ import annotations
 
 import contextlib
@@ -250,6 +260,7 @@ expected_arch = sys.argv[1]
 root = Path(sys.argv[2]).resolve()
 poisson = Path(sys.argv[3]).resolve()
 evidence = Path(sys.argv[4])
+expected_host_mode = sys.argv[5]
 
 if platform.machine() != expected_arch:
     raise SystemExit(f"consumer execution architecture mismatch: {platform.machine()} != {expected_arch}")
@@ -357,8 +368,10 @@ zig_host_arch = os.environ.get("FENICS_ZIG_HOST_ARCH", "")
 bundled_zig = (root / "fenics-runtime" / "zig" / "zig").resolve()
 native_arm64_zig = (root / "fenics-runtime" / "zig-native-arm64" / "zig").resolve()
 rosetta = expected_arch == "x86_64" and running_under_rosetta()
-if expected_arch == "x86_64" and not rosetta:
-    raise SystemExit("hosted x86_64 consumer qualification is not running under Rosetta")
+if expected_host_mode == "rosetta" and not rosetta:
+    raise SystemExit("consumer qualification expected Rosetta translation but is running natively")
+if expected_host_mode == "native" and rosetta:
+    raise SystemExit("consumer qualification expected native execution but is running under Rosetta")
 expected_zig_source = native_arm64_zig if rosetta else bundled_zig
 expected_zig_host_arch = "arm64" if rosetta else expected_arch
 if not cc.is_file():
@@ -443,6 +456,7 @@ record = {
     "zig_host_architecture": zig_host_arch,
     "zig_executable_architectures": zig_archs,
     "rosetta_translated": rosetta,
+    "expected_host_mode": expected_host_mode,
     "l2_error": l2_error,
     "provider_images": provider_images,
 }

@@ -118,12 +118,14 @@ actual_numpy_sha256="$(shasum -a 256 "$numpy_wheel" | awk '{print $1}')"
 }
 printf '%s  %s\n' "$actual_numpy_sha256" "$numpy_asset" > "$evidence_dir/consumer-numpy-sha256.txt"
 
-"${arch_cmd[@]}" "$python_exe" -I -m pip install \
-    --disable-pip-version-check \
-    --no-deps \
-    --no-index \
-    "$numpy_wheel" \
-    > "$evidence_dir/consumer-numpy-install.log" 2>&1
+consumer_site="$runtime_root/Python.framework/Versions/3.12/lib/python3.12/site-packages"
+mkdir -p "$consumer_site"
+# A wheel is a ZIP-format installation payload.  The clean framework fixture
+# intentionally does not depend on Python.org's separate pip installer package.
+# NumPy has no additional runtime dependency for this qualification fixture.
+unzip -q "$numpy_wheel" -d "$consumer_site"
+printf 'wheel=%s\nsite_packages=%s\n' "$numpy_asset" "$consumer_site" \
+    > "$evidence_dir/consumer-numpy-install.log"
 
 "${arch_cmd[@]}" "$python_exe" -I - "$runtime_root" <<'PY' | tee "$evidence_dir/consumer-numpy-runtime.txt"
 from pathlib import Path

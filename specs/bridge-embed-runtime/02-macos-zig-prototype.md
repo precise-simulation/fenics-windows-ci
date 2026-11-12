@@ -2,6 +2,12 @@
 
 **Status:** done
 
+The prototype workflow is retained for manual historical diagnostics only. Its
+successful #27 transaction is frozen by the checked-in package locks; a fresh
+conda solve can legitimately differ as conda-forge evolves. Current producer
+acceptance therefore replays those immutable transactions in the relocatable
+overlay workflow instead of requiring a fresh solve to reproduce them.
+
 ## Goal
 
 Qualify one SDK-independent fresh-FFCx JIT direction for the bridge's future
@@ -116,12 +122,12 @@ This prototype is not a bridge overlay release. It does not yet prove:
 
 - replay of the exact locked packages without dependency solving;
 - removal of producer-owned CPython and NumPy from the emitted overlay;
-- layering onto the bridge's exact phase-03 CPython 3.12.10 / NumPy 2.5.2
-  runtime while preserving the NumPy payload map;
+- layering onto an independent CPython 3.12.10 / NumPy 2.5.2 consumer runtime
+  while preserving the consumer-owned NumPy payload;
 - relocation of the full DOLFINx/PETSc/MPI/HDF5/native closure;
 - final Mach-O load-command/rpath rewriting and signing;
 - a complete third-party notice inventory; or
 - final overlay ZIP identity/hash.
 
-Those are the next embedded-runtime producer phase and remain bridge phase-04
-readiness gates.
+Those are the next embedded-runtime producer phase. Downstream bridge-specific
+integration is separate from producer acceptance.

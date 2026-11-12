@@ -178,8 +178,9 @@ installation remains the primary direct-Python distribution path.
 
 ### macOS embedded-runtime producer prototype
 
-The `embedded-runtime-macos-prototype` workflow is the first
-qualification stage for macOS arm64 and Rosetta x86_64 bridge overlays. It
+The historical `embedded-runtime-macos-prototype` workflow is retained as a
+manual diagnostic for the first qualification stage of macOS arm64 and Rosetta
+x86_64 overlays. It
 creates a FEniCS 0.11 / NumPy 2.5.2 source environment for each architecture
 and retains the solver's exact package transaction for subsequent pinning. It
 downloads the exact official Zig 0.15.2 toolchain for that
@@ -187,9 +188,11 @@ architecture, poisons ambient compiler/SDK discovery, and requires a fresh FFCx
 JIT plus serial PETSc Poisson solve through a `zig cc` wrapper targeting
 macOS 14.0.
 
-This workflow deliberately does not publish an overlay yet. Its retained
-package locks and Zig checksums are inputs to the subsequent relocatable-overlay
-qualification phase.
+The successful #27 transaction is frozen in the retained package locks and Zig
+checksums. Fresh conda solves can drift as the channel changes, so this
+historical workflow is not a pull-request acceptance gate. The
+`embedded-runtime-macos-overlay` workflow below replays the immutable
+transactions without solving and owns current producer acceptance.
 
 The `embedded-runtime-macos-overlay` workflow replays those checked-in locks as
 solver-free `@EXPLICIT` transactions using the exact URL ordering retained by

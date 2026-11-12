@@ -98,6 +98,12 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
+        -arch)
+            # A universal2 host CPython injects both architecture slices via
+            # sysconfig.  This shim already pins one exact Zig target, so
+            # inherited -arch flags must not override or conflict with it.
+            shift 2
+            ;;
         -isysroot)
             shift 2
             ;;

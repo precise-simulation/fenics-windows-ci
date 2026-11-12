@@ -10,8 +10,10 @@ on:
       - "scripts/fenics-embed-bootstrap-macos.py"
       - "scripts/test-macos-embedded-runtime-consumer.sh"
       - "scripts/test-poisson.py"
-      - "specs/bridge-embed-runtime/**"
-      - "README.md"
+      - "specs/bridge-embed-runtime/locks/macos-arm64-package-lock.json"
+      - "specs/bridge-embed-runtime/locks/macos-x86_64-package-lock.json"
+      - "specs/bridge-embed-runtime/locks/macos-arm64-explicit.txt"
+      - "specs/bridge-embed-runtime/locks/macos-x86_64-explicit.txt"
 
 permissions:
   contents: read

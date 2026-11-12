@@ -67,12 +67,13 @@ printf '%s  %s\n' "$actual_python_sha256" "$python_asset" > "$evidence_dir/consu
 pkgutil --check-signature "$python_pkg" > "$evidence_dir/consumer-python-signature.txt"
 
 pkgutil --expand-full "$python_pkg" "$expanded_pkg"
-framework="$(find "$expanded_pkg" -type d -path '*/Library/Frameworks/Python.framework' -print -quit)"
-if [[ -z "$framework" ]]; then
+framework="$(find "$expanded_pkg" -type d -path '*/Python_Framework.pkg/Payload' -print -quit)"
+if [[ -z "$framework" || ! -d "$framework/Versions/3.12" ]]; then
     framework="$(find "$expanded_pkg" -type d -name Python.framework -print -quit)"
 fi
-[[ -n "$framework" && -d "$framework" ]] || {
-    echo "could not locate Python.framework in expanded CPython package" >&2
+[[ -n "$framework" && -d "$framework/Versions/3.12" ]] || {
+    echo "could not locate Python.framework payload in expanded CPython package" >&2
+    find "$expanded_pkg" -maxdepth 4 -type d -print >&2 || true
     exit 1
 }
 ditto "$framework" "$runtime_root/Python.framework"
@@ -82,7 +83,13 @@ python_exe="$runtime_root/Python.framework/Versions/3.12/bin/python3.12"
 /usr/bin/lipo -archs "$python_exe" | tee "$evidence_dir/consumer-python-architectures.txt"
 /usr/bin/lipo -archs "$python_exe" | tr ' ' '\n' | grep -Fxq "$target_arch"
 
-arch_cmd=(/usr/bin/arch "$arch_flag")
+python_home="$runtime_root/Python.framework/Versions/3.12"
+# The python.org executable carries framework install-name semantics.  Set the
+# relocated framework search path after /usr/bin/arch starts so SIP cannot
+# strip it from the target interpreter launch.
+arch_cmd=(/usr/bin/arch "$arch_flag" /usr/bin/env
+    "PYTHONHOME=$python_home"
+    "DYLD_FRAMEWORK_PATH=$runtime_root")
 "${arch_cmd[@]}" "$python_exe" -I - "$target_arch" "$runtime_root" <<'PY' | tee "$evidence_dir/consumer-python-runtime.txt"
 from pathlib import Path
 import platform

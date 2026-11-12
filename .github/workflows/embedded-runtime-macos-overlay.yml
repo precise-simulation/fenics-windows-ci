@@ -9,6 +9,7 @@ on:
       - "scripts/package-macos-embedded-runtime.py"
       - "scripts/fenics-embed-bootstrap-macos.py"
       - "scripts/test-macos-embedded-runtime-consumer.sh"
+      - "scripts/test-poisson.py"
       - "specs/bridge-embed-runtime/**"
       - "README.md"
 

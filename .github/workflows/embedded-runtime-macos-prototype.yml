@@ -7,9 +7,8 @@ on:
       - ".github/workflows/embedded-runtime-macos-prototype.yml"
       - "scripts/test-macos-zig-jit.sh"
       - "scripts/test-poisson.py"
-      - "specs/bridge-embed-runtime/02-macos-zig-prototype.md"
-      - "specs/bridge-embed-runtime/locks/macos-arm64-package-lock.json"
-      - "specs/bridge-embed-runtime/locks/macos-x86_64-package-lock.json"
+      - "specs/bridge-embed-runtime/**"
+      - "README.md"
 
 permissions:
   contents: read

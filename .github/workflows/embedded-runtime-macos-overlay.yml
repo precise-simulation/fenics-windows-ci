@@ -2,6 +2,20 @@ name: embedded-runtime-macos-overlay
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/embedded-runtime-macos-overlay.yml"
+      - "scripts/macos-package-lock.py"
+      - "scripts/package-macos-embedded-runtime.py"
+      - "scripts/fenics-embed-bootstrap-macos.py"
+      - "scripts/test-macos-embedded-runtime-consumer.sh"
+      - "scripts/test-poisson.py"
+      - "specs/bridge-embed-runtime/locks/macos-arm64-package-lock.json"
+      - "specs/bridge-embed-runtime/locks/macos-x86_64-package-lock.json"
+      - "specs/bridge-embed-runtime/locks/macos-arm64-explicit.txt"
+      - "specs/bridge-embed-runtime/locks/macos-x86_64-explicit.txt"
   pull_request:
     paths:
       - ".github/workflows/embedded-runtime-macos-overlay.yml"

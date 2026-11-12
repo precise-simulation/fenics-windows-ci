@@ -178,8 +178,9 @@ installation remains the primary direct-Python distribution path.
 
 ### macOS embedded-runtime producer prototype
 
-The `embedded-runtime-macos-prototype` workflow is the first
-qualification stage for macOS arm64 and Rosetta x86_64 bridge overlays. It
+The historical `embedded-runtime-macos-prototype` workflow is retained as a
+manual diagnostic for the first qualification stage of macOS arm64 and Rosetta
+x86_64 overlays. It
 creates a FEniCS 0.11 / NumPy 2.5.2 source environment for each architecture
 and retains the solver's exact package transaction for subsequent pinning. It
 downloads the exact official Zig 0.15.2 toolchain for that
@@ -187,12 +188,33 @@ architecture, poisons ambient compiler/SDK discovery, and requires a fresh FFCx
 JIT plus serial PETSc Poisson solve through a `zig cc` wrapper targeting
 macOS 14.0.
 
-This workflow deliberately does not publish an overlay yet. Its retained
-explicit package transaction and Zig checksum are inputs to the subsequent
-relocatable-overlay packaging phase. The producer must not promote macOS
-artifacts until the same exact package transactions have been copied into the
-bridge's phase-03 NumPy runtime without replacing the bridge-owned NumPy 2.5.2
-payload and the final Mach-O closure has passed relocation/signing checks.
+The successful #27 transaction is frozen in the retained package locks and Zig
+checksums. Fresh conda solves can drift as the channel changes, so this
+historical workflow is not a pull-request acceptance gate. The
+`embedded-runtime-macos-overlay` workflow below replays the immutable
+transactions without solving and owns current producer acceptance.
+
+The `embedded-runtime-macos-overlay` workflow replays those checked-in locks as
+solver-free `@EXPLICIT` transactions using the exact URL ordering retained by
+the qualified prototype and micromamba 2.10.0. Each exact URL is SHA-256
+anchored by the checked-in lock, and the installed package records are then
+compared field-for-field with that lock. It packages the FEniCS/PETSc/MPI closure in a
+private `fenics-runtime/` namespace, bundles the exact Zig toolchain, and
+excludes producer CPython and NumPy. It performs complete Mach-O closure and
+ad-hoc-signature audits, records package ownership and license inventory, then
+builds the overlay twice and requires byte-identical ZIP/summary/checksum
+outputs. The resulting artifact hashes are retained as qualification evidence
+rather than treated as public release assets.
+
+The same public workflow now performs a self-contained consumer qualification
+after deleting the producer conda prefix/package cache and extracted Zig source
+tree. It constructs a clean, hash-pinned official CPython 3.12.10
+`Python.framework` plus NumPy 2.5.2 runtime under a path containing spaces,
+rejects overlay overwrites, poisons ambient compiler/native discovery, activates
+the overlay twice, verifies provider ownership, runs the full import stack and a
+fresh Zig/FFCx + PETSc Poisson solve, audits generated Mach-O modules, and
+rechecks all inherited consumer bytes. No private repository or cross-repository
+credential participates in producer acceptance.
 
 ## Updating
 

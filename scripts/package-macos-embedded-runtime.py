@@ -598,6 +598,16 @@ def loader_reference(binary: Path, target: Path) -> str:
     return f"@loader_path/{relative}"
 
 
+def staged_macho_role(path: Path, stage_root: Path, architecture: str) -> str:
+    try:
+        relative = path.resolve(strict=False).relative_to(stage_root.resolve()).as_posix()
+    except ValueError as exc:
+        raise SystemExit(f"Mach-O path escapes staged overlay: {path}") from exc
+    if architecture == "x86_64" and relative.startswith("fenics-runtime/zig-native-arm64/"):
+        return "compiler-host-tool"
+    return "runtime"
+
+
 def relocate_and_audit_macho(
     stage_root: Path,
     private_prefix: Path,
@@ -608,6 +618,7 @@ def relocate_and_audit_macho(
     rewritten: set[Path] = set()
 
     for binary in macho_files:
+        binary_role = staged_macho_role(binary, stage_root, architecture)
         rpaths = macho_rpaths(binary)
         changes = []
         for dependency in macho_dependencies(binary):
@@ -620,6 +631,12 @@ def relocate_and_audit_macho(
                 target.resolve().relative_to(stage_root.resolve())
             except ValueError as exc:
                 raise SystemExit(f"Mach-O dependency escapes staged overlay: {binary} -> {dependency} -> {target}") from exc
+            target_role = staged_macho_role(target, stage_root, architecture)
+            if target_role != binary_role:
+                raise SystemExit(
+                    "cross-role Mach-O dependency is forbidden: "
+                    f"{binary} ({binary_role}) -> {target} ({target_role})"
+                )
             replacement = loader_reference(binary, target)
             if dependency != replacement:
                 changes.append((dependency, replacement))
@@ -656,10 +673,8 @@ def relocate_and_audit_macho(
     max_minos: str | None = None
     for binary in macho_files:
         relative = binary.relative_to(stage_root).as_posix()
-        compiler_host_tool = (
-            architecture == "x86_64"
-            and relative.startswith("fenics-runtime/zig-native-arm64/")
-        )
+        binary_role = staged_macho_role(binary, stage_root, architecture)
+        compiler_host_tool = binary_role == "compiler-host-tool"
         expected_architecture = "arm64" if compiler_host_tool else architecture
         archs = run("lipo", "-archs", str(binary)).stdout.strip().split()
         if archs != [expected_architecture]:
@@ -688,6 +703,12 @@ def relocate_and_audit_macho(
                 target.resolve().relative_to(stage_root.resolve())
             except ValueError as exc:
                 raise SystemExit(f"relocated Mach-O dependency escapes overlay: {binary} -> {dependency}") from exc
+            target_role = staged_macho_role(target, stage_root, architecture)
+            if target_role != binary_role:
+                raise SystemExit(
+                    "relocated cross-role Mach-O dependency is forbidden: "
+                    f"{binary} ({binary_role}) -> {target} ({target_role})"
+                )
 
         verification = run("codesign", "--verify", "--strict", str(binary), check=False)
         if verification.returncode != 0:
@@ -697,7 +718,7 @@ def relocate_and_audit_macho(
             {
                 "path": relative,
                 "architecture": expected_architecture,
-                "role": "compiler-host-tool" if compiler_host_tool else "runtime",
+                "role": binary_role,
                 "minos": minos,
                 "dependencies": dependencies,
                 "rpaths": rpaths,

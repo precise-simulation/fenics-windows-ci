@@ -49,13 +49,13 @@ archives after successful linking.
 
 The final overlay is additive.  Its private conda-derived closure lives below
 `fenics-runtime/conda/`, the exact Zig distribution lives below
-`fenics-runtime/zig/`, and the only path intentionally added to the bridge's
+`fenics-runtime/zig/`, and the only path intentionally added to the consumer's
 Python framework is:
 
 `Python.framework/Versions/3.12/lib/python3.12/site-packages/fenics_embed_runtime.py`
 
-Producer CPython, NumPy, Tcl/Tk, bridge MEX, and producer compiler/linker
-packages are not overlay-owned.  Package file ownership is derived from conda
+Producer CPython, NumPy, Tcl/Tk, host-application files, and producer
+compiler/linker packages are not overlay-owned.  Package file ownership is derived from conda
 `paths_data.paths` when present and falls back to the legacy `files` list only
 when required.  Unsafe paths, package-owned content whose installed hash differs
 from `sha256_in_prefix`, and cross-package path collisions fail closed.
@@ -76,9 +76,10 @@ The bootstrap's zero-argument `activate()` derives the runtime root from its own
 installed location, prepends the private FEniCS site-packages path, configures
 PETSc, and creates the Zig `cc` shim in a whitespace-safe temporary directory.
 The latter is required because the qualified FFCx/distutils compiler command
-cannot safely carry a compiler executable path containing spaces even though
-the relocated runtime and JIT cache themselves must be tested under paths that
-do contain spaces.
+cannot safely carry a compiler executable path containing spaces. The relocated
+runtime itself is tested under a path containing spaces; the generated compiler
+shim and transient JIT cache use whitespace-safe temporary paths outside
+artifact ownership.
 
 After both deterministic builds compare byte-for-byte, the workflow removes the
 producer conda prefix/package cache and extracted Zig source tree.  No consumer
@@ -91,7 +92,7 @@ the producer-local generic consumer runtime.
 ## Producer-local consumer qualification
 
 The overlay must prove that it works for a conforming consumer without relying
-on the private bridge repository.  After deterministic packaging, CI deletes
+on any downstream or private repository.  After deterministic packaging, CI deletes
 the producer conda prefix, micromamba package cache, and extracted producer Zig
 tree before constructing the consumer fixture.
 
@@ -170,7 +171,7 @@ identified by its whole-archive input hash and phase-02 hosted JIT evidence.
 
 - [ ] Both architecture locks replay through `@EXPLICIT` without dependency
       solving and produce an exact installed-record match.
-- [ ] Producer CPython, NumPy, Tcl/Tk, compiler/linker packages and bridge-owned
+- [ ] Producer CPython, NumPy, Tcl/Tk, compiler/linker packages and consumer-owned
       runtime files are absent from the emitted overlay.
 - [ ] Every retained overlay file has unambiguous package/tool ownership and an
       integrity hash; every retained third-party package/tool has explicit

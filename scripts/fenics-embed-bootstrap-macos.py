@@ -77,6 +77,8 @@ def _write_jit_wrapper(runtime_root: Path) -> tuple[Path, Path, Path]:
 
     root = _wrapper_root(runtime_root)
     root.mkdir(parents=True, exist_ok=True)
+    runtime_alias = root / "runtime-root"
+    runtime_alias.symlink_to(runtime_root, target_is_directory=True)
 
     # Zig 0.15.2's x86_64 clang frontend can crash under Rosetta when its own
     # InstalledDir contains whitespace. Keep the relocated runtime itself under
@@ -95,8 +97,8 @@ def _write_jit_wrapper(runtime_root: Path) -> tuple[Path, Path, Path]:
             raise RuntimeError("staged Zig executable differs from bundled Zig")
 
     wrapper = root / "fenics-zig-cc"
-    python_include = runtime_root / "Python.framework" / "Versions" / "3.12" / "include" / "python3.12"
-    private_include = runtime_root / "fenics-runtime" / "conda" / "include"
+    python_include = runtime_alias / "Python.framework" / "Versions" / "3.12" / "include" / "python3.12"
+    private_include = runtime_alias / "fenics-runtime" / "conda" / "include"
     if not python_include.is_dir():
         raise RuntimeError(f"staged CPython headers are missing: {python_include}")
     if not private_include.is_dir():
@@ -106,6 +108,7 @@ set -euo pipefail
 zig={shlex.quote(str(zig))}
 target={shlex.quote(target)}
 runtime_root={shlex.quote(str(runtime_root))}
+runtime_alias={shlex.quote(str(runtime_alias))}
 python_include={shlex.quote(str(python_include))}
 private_include={shlex.quote(str(private_include))}
 args=("-I$python_include" "-I$private_include")
@@ -140,27 +143,32 @@ while [[ $# -gt 0 ]]; do
         -I)
             if [[ "${{2:-}}" == */include/python3.12 && "${{2:-}}" != "$runtime_root"/* ]]; then
                 shift 2
+            elif [[ "${{2:-}}" == "$runtime_root"/* ]]; then
+                args+=("$1" "$runtime_alias/${{2#"$runtime_root"/}}")
+                shift 2
             else
                 args+=("$1" "${{2:-}}")
                 shift 2
             fi
             ;;
+        -I"$runtime_root"/*)
+            args+=("-I$runtime_alias/${{1#-I"$runtime_root"/}}")
+            shift
+            ;;
         -I*/include/python3.12)
-            if [[ "$1" == -I"$runtime_root"/* ]]; then
-                args+=("$1")
-            fi
             shift
             ;;
         -isystem)
             if [[ "${{2:-}}" == "$runtime_root"/* ]]; then
-                args+=("$1" "${{2:-}}")
+                args+=("$1" "$runtime_alias/${{2#"$runtime_root"/}}")
             fi
             shift 2
             ;;
+        -isystem"$runtime_root"/*)
+            args+=("-isystem$runtime_alias/${{1#-isystem"$runtime_root"/}}")
+            shift
+            ;;
         -isystem*)
-            if [[ "$1" == -isystem"$runtime_root"/* ]]; then
-                args+=("$1")
-            fi
             shift
             ;;
         -mmacosx-version-min=*)

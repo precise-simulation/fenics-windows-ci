@@ -8,6 +8,7 @@ on:
       - "scripts/macos-package-lock.py"
       - "scripts/package-macos-embedded-runtime.py"
       - "scripts/fenics-embed-bootstrap-macos.py"
+      - "scripts/test-macos-embedded-runtime-consumer.sh"
       - "specs/bridge-embed-runtime/**"
       - "README.md"
 
@@ -226,6 +227,15 @@ jobs:
           test ! -e "$FENICS_LOCKED_PREFIX"
           test ! -e "$FENICS_PACKAGE_CACHE"
           test ! -e "$FENICS_ZIG_ROOT"
+
+      - name: Qualify overlay in clean public consumer runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-macos-embedded-runtime-consumer.sh \
+            "dist/$OVERLAY_ASSET" \
+            "$TARGET_ARCH" \
+            "$FENICS_OVERLAY_EVIDENCE/consumer"
 
       - name: Collect immutable handoff evidence
         shell: bash

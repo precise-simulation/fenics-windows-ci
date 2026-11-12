@@ -203,11 +203,15 @@ builds the overlay twice and requires byte-identical ZIP/summary/checksum
 outputs. The resulting artifact hashes are retained as qualification evidence
 rather than treated as public release assets.
 
-The final consumer-runtime qualification is intentionally separate. This
-repository is public while the bridge consumer repository is private, so this
-workflow does not use a widened cross-repository credential. Consumer CI must
-reproduce the frozen producer ZIP by revision/hash and run its own exact-runtime
-overwrite, inherited-byte, activation, import, fresh-JIT and solve gates.
+The same public workflow now performs a self-contained consumer qualification
+after deleting the producer conda prefix/package cache and extracted Zig source
+tree. It constructs a clean, hash-pinned official CPython 3.12.10
+`Python.framework` plus NumPy 2.5.2 runtime under a path containing spaces,
+rejects overlay overwrites, poisons ambient compiler/native discovery, activates
+the overlay twice, verifies provider ownership, runs the full import stack and a
+fresh Zig/FFCx + PETSc Poisson solve, audits generated Mach-O modules, and
+rechecks all inherited consumer bytes. No private repository or cross-repository
+credential participates in producer acceptance.
 
 ## Updating
 

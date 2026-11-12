@@ -8,10 +8,11 @@ Turn the qualified macOS Zig/JIT producer inputs from phase 02 into exact,
 relocatable arm64 and x86_64 FEniCS overlays with explicit ownership, native
 closure, licenses, and deterministic artifact identities.
 
-This phase owns **public producer qualification only**.  It does not claim a
-specific private consumer runtime, GNU Octave or MATLAB bridge integration, and
-does not publish a permanent release asset.  Consumer qualification belongs in
-the consumer repository, where its own CI token can access its private history.
+This phase owns the complete **public producer contract**, including a
+producer-local consumer qualification against a clean generic CPython 3.12 +
+NumPy 2.5.2 host.  It does not claim GNU Octave, MATLAB, MEX, or any particular
+downstream bridge integration, and it does not require access to another
+repository.
 
 ## Immutable inputs
 
@@ -85,25 +86,45 @@ checkout or cross-repository credential is used from this public repository.
 The generated compiler shim remains part of the overlay and explicitly supplies
 consumer-runtime Python plus private FEniCS/PETSc include roots while discarding
 ambient `-isysroot` / non-runtime `-isystem` inputs; its execution is verified by
-the consumer repository.
+the producer-local generic consumer runtime.
 
-## Consumer-qualification boundary
+## Producer-local consumer qualification
 
-The intended bridge consumer repository is private while this producer is
-public.  A repository-scoped `GITHUB_TOKEN` from this workflow cannot and must
-not be widened with a private-repository credential merely to make producer CI
-cross that boundary.  Therefore:
+The overlay must prove that it works for a conforming consumer without relying
+on the private bridge repository.  After deterministic packaging, CI deletes
+the producer conda prefix, micromamba package cache, and extracted producer Zig
+tree before constructing the consumer fixture.
 
-- this workflow proves exact SHA-256-anchored lock replay, installed-record
-  identity, file ownership,
-  licenses, relocation, Mach-O closure/signing, ZIP integrity and deterministic
-  whole-file identity;
-- it does **not** reconstruct or execute the private consumer runtime;
-- consumer CI must reproduce the ZIP from the immutable producer revision and
-  lock/Zig inputs, assert the same whole-file SHA-256, then perform its own
-  overwrite, inherited-byte, activation, import, fresh-JIT and solve gates; and
-- producer Actions artifacts remain finite-retention diagnostic transport, not
-  durable release inputs.
+The neutral consumer fixture is independently downloaded and hash-pinned:
+
+- official CPython 3.12.10 universal2 macOS installer
+  `python-3.12.10-macos11.pkg`, SHA-256
+  `8373e58da4ea146b3eb1c1f9834f19a319440b6b679b06050b1f9ee3237aa8e4`;
+- NumPy 2.5.2 CPython 3.12 macOS 14 wheel, selected by architecture:
+  - arm64 SHA-256
+    `6e8172ddfcf5cf74b811d372b570b83c60bd2de87a6fbfbebdadb4a9bd9c6cbb`;
+  - x86_64 SHA-256
+    `65f188481f1669e26f62b701e8205d19e460fa4a9b52a1414ba382330e4a3414`.
+
+CI extracts the official `Python.framework` into a runtime path containing
+spaces, executes the selected architecture slice (native arm64 or Rosetta
+x86_64), installs only the pinned NumPy wheel, and snapshots every inherited
+file/symlink before layering the overlay.  Overlay staging fails on any
+consumer-owned file or symlink collision.
+
+The staged runtime then runs with user Python state, Homebrew paths, compiler
+commands, SDK discovery, and dynamic-library search paths poisoned.  It requires
+idempotent activation, exact stack versions, consumer-owned NumPy, overlay-owned
+FEniCS/PETSc/MPI providers, a fresh Zig/FFCx JIT, and the serial PETSc Poisson
+solve with finite L2 error below 0.01.  Generated JIT Mach-O modules must match
+the target architecture, target macOS 14.0, and contain no Homebrew,
+`/usr/local`, Cellar, or user-home load paths.  Finally, every inherited
+consumer file/symlink is rechecked byte-for-byte/mode-for-mode to prove the
+overlay remained additive.
+
+This is a producer acceptance test for the public CPython 3.12 overlay contract.
+Downstream MATLAB/Octave/bridge qualification may add stricter integration
+requirements, but it is not a prerequisite for this producer artifact.
 
 ## Relocation and native policy
 
@@ -136,9 +157,14 @@ identified by its whole-archive input hash and phase-02 hosted JIT evidence.
 4. rebuild the same overlay a second time from the same installed lock and
    compare the ZIP, summary and checksum files byte-for-byte;
 5. verify ZIP integrity, bootstrap syntax, bundled Zig presence and absence of
-   producer-owned NumPy paths; and
-6. upload the ZIP plus immutable manifest/native/license/hash evidence as
-   finite-retention qualification diagnostics.
+   producer-owned NumPy paths;
+6. delete the producer source environments, construct the independent pinned
+   CPython/NumPy consumer fixture, layer the overlay without overwrites, poison
+   ambient discovery, activate twice, import the full stack, run a fresh
+   Zig/FFCx JIT + PETSc Poisson solve, audit JIT Mach-O output, and recheck all
+   inherited consumer bytes; and
+7. upload the ZIP plus immutable manifest/native/license/hash and consumer
+   execution evidence as finite-retention qualification diagnostics.
 
 ## Acceptance criteria
 
@@ -155,13 +181,18 @@ identified by its whole-archive input hash and phase-02 hosted JIT evidence.
       dependency, rpath, producer-path and ad-hoc-signature checks.
 - [ ] Two independent packaging passes in the same clean hosted transaction
       produce byte-identical ZIP/summary/checksum outputs.
+- [ ] After producer source environments are removed, both architectures pass
+      the independent CPython 3.12.10 + NumPy 2.5.2 consumer fixture with
+      zero inherited-file overwrites, idempotent activation, exact provider
+      ownership, fresh Zig/FFCx JIT, PETSc solve with L2 error < 0.01, JIT
+      Mach-O audit, and inherited-runtime preservation.
 - [ ] Final arm64 and x86_64 ZIP names, whole-file SHA-256 values, manifest
       digests, native census, license inventory and hosted run evidence are
-      recorded here after successful qualification.
+      recorded after successful qualification.
 
-Private-consumer activation/import/JIT/solve and inherited-runtime preservation
-are deliberately **not** acceptance criteria of this public producer phase;
-they gate the downstream consumer qualification against the frozen ZIP hashes.
+Bridge-specific MATLAB/Octave/MEX integration is deliberately outside this
+producer phase; it can be qualified downstream without changing the public
+overlay acceptance contract.
 
 ## Planned artifact identities
 

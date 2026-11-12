@@ -49,9 +49,9 @@ baseline_json="$work/inherited-runtime-baseline.json"
 poison_bin="$work/poison bin"
 poison_lib="$work/poison lib"
 clean_home="$work/clean home"
-jit_cache="$work/jit cache with spaces"
+jit_cache="$base_temp/fenics-consumer-jit-$target_arch"
 
-rm -rf "$work" "$download_dir" "$expanded_pkg"
+rm -rf "$work" "$download_dir" "$expanded_pkg" "$jit_cache"
 mkdir -p "$work" "$download_dir" "$runtime_root" "$poison_bin" "$poison_lib" "$clean_home" "$jit_cache"
 
 python_pkg="$download_dir/$python_asset"
@@ -393,7 +393,7 @@ while IFS= read -r module; do
     /usr/bin/file "$module" | tee -a "$evidence_dir/jit-mach-o.txt"
     /usr/bin/file "$module" | grep -q "$target_arch"
     /usr/bin/otool -L "$module" | tee -a "$evidence_dir/jit-otool-L.txt"
-    if /usr/bin/otool -L "$module" | grep -E '/opt/homebrew|/usr/local|Cellar|/Users/'; then
+    if /usr/bin/otool -L "$module" | tail -n +2 | grep -E '/opt/homebrew|/usr/local|Cellar|/Users/'; then
         echo "fresh JIT module links to a forbidden ambient path: $module" >&2
         exit 1
     fi

@@ -1,6 +1,6 @@
 # macOS relocatable embedded-runtime overlay qualification
 
-**Status:** in-progress
+**Status:** done
 
 ## Goal
 
@@ -202,27 +202,27 @@ target architecture, and Rosetta translation state.
 
 ## Acceptance criteria
 
-- [ ] Both architecture locks replay through `@EXPLICIT` without dependency
+- [x] Both architecture locks replay through `@EXPLICIT` without dependency
       solving and produce an exact installed-record match.
-- [ ] Producer CPython, NumPy, Tcl/Tk, compiler/linker packages and consumer-owned
+- [x] Producer CPython, NumPy, Tcl/Tk, compiler/linker packages and consumer-owned
       runtime files are absent from the emitted overlay.
-- [ ] Every retained overlay file has unambiguous package/tool ownership and an
+- [x] Every retained overlay file has unambiguous package/tool ownership and an
       integrity hash; every retained third-party package/tool has explicit
       license evidence and all package-supplied license texts/notices are
       retained, with split-output coverage mechanically bound to identical
       rendered recipe metadata rather than inferred from package names.
-- [ ] Complete shipped Mach-O closure passes declared-role architecture,
+- [x] Complete shipped Mach-O closure passes declared-role architecture,
       minimum-OS, dependency, rpath, producer-path and ad-hoc-signature checks;
       the x86_64 runtime closure remains x86_64 while its isolated native
       compiler-host subtree is arm64.
-- [ ] Two independent packaging passes in the same clean hosted transaction
+- [x] Two independent packaging passes in the same clean hosted transaction
       produce byte-identical ZIP/summary/checksum outputs.
-- [ ] After producer source environments are removed, both architectures pass
+- [x] After producer source environments are removed, both architectures pass
       the independent CPython 3.12.10 + NumPy 2.5.2 consumer fixture with
       zero inherited-file overwrites, idempotent activation, exact provider
       ownership, fresh Zig/FFCx JIT, PETSc solve with L2 error < 0.01, JIT
       Mach-O audit, and inherited-runtime preservation.
-- [ ] Final arm64 and x86_64 ZIP names, whole-file SHA-256 values, manifest
+- [x] Final arm64 and x86_64 ZIP names, whole-file SHA-256 values, manifest
       digests, native census, license inventory and hosted run evidence are
       recorded after successful qualification.
 
@@ -230,13 +230,34 @@ Bridge-specific MATLAB/Octave/MEX integration is deliberately outside this
 producer phase; it can be qualified downstream without changing the public
 overlay acceptance contract.
 
-## Planned artifact identities
+## Qualified hosted result
 
-- `fenics-embed-runtime-v0.1.0-macos-arm64-cp312.zip`
-- `fenics-embed-runtime-v0.1.0-macos-x64-cp312.zip`
+The canonical post-merge qualification ran from `main` revision
+`7697af31337925e6033502c25d8d44b2d8b2bf85` in workflow run
+`43219093728` and passed both matrix jobs:
 
-The filenames are fixed for qualification; their whole-file SHA-256 values are
-not known until the hosted producer run passes and remain intentionally unset.
+| Target | Job | Overlay ZIP | Overlay SHA-256 | Poisson L2 error |
+| --- | ---: | --- | --- | ---: |
+| arm64 | `131185747839` | `fenics-embed-runtime-v0.1.0-macos-arm64-cp312.zip` | `f4314e94a39ae0ab14bab3afac1b929b0b9520a076cf290931ef6ed986428683` | `0.009053553714813364` |
+| Rosetta x86_64 | `131185748201` | `fenics-embed-runtime-v0.1.0-macos-x64-cp312.zip` | `f16baa767766dc20fb51e9624d787f6ee2e7af2d3a8a5ccb5b551aa6b6f9b7ad` | `0.009053553714815176` |
+
+The x86_64 consumer evidence records `rosetta_translated=true` while the
+selected and executed Zig compiler host is arm64 from
+`fenics-runtime/zig-native-arm64/`; generated and runtime/loadable artifacts
+remain x86_64 and target macOS 14.0.
+
+The finite-retention Actions evidence artifacts for that run are:
+
+| Target | Artifact ID | Actions artifact digest |
+| --- | ---: | --- |
+| arm64 | `13945232041` | `sha256:daf58ab545b12b47c1d5ecf04b7c8dab16af934b3ce03a6dffae9c30c6e88201` |
+| x86_64 | `13946436222` | `sha256:7a63e409d0a95995074212ae66e5fc33d40021c2d9d74435e5414456621e23ae` |
+
+The repository's Actions retention policy reduced the requested 30-day
+artifact retention to 3 days. These artifact IDs are diagnostic transport only;
+the durable producer identity is the `main` revision, checked-in immutable
+locks/toolchain hashes, workflow run/job identities, and whole-overlay hashes
+recorded above.
 
 The in-archive manifest enumerates every payload member except the manifest
 itself, avoiding impossible self-hashing.  The adjacent producer summary binds

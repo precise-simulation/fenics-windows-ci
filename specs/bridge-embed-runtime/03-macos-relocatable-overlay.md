@@ -79,7 +79,11 @@ The latter is required because the qualified FFCx/distutils compiler command
 cannot safely carry a compiler executable path containing spaces. The relocated
 runtime itself is tested under a path containing spaces; the generated compiler
 shim and transient JIT cache use whitespace-safe temporary paths outside
-artifact ownership.
+artifact ownership. Under Rosetta x86_64, Zig 0.15.2's clang frontend also
+requires its own InstalledDir to be whitespace-safe, so activation copies the
+overlay-bundled Zig tree to the same private temporary execution area and
+verifies the executed Zig binary is byte-identical to the bundled source. This
+does not introduce an ambient compiler dependency or change overlay ownership.
 
 After both deterministic builds compare byte-for-byte, the workflow removes the
 producer conda prefix/package cache and extracted Zig source tree.  No consumer
